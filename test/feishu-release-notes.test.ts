@@ -95,12 +95,12 @@ Description here.
     }
   })
 
-  it('keeps the cloud release workflow disabled and free of internal delivery hooks', () => {
+  it('keeps the Windows package workflow independent from Feishu release notes', () => {
     const workflow = readFileSync(workflowPath, 'utf8')
-    expect(workflow).toContain('on: []')
+    expect(workflow).toContain('workflow_dispatch:')
     expect(workflow).toContain('contents: read')
+    expect(workflow).toContain('actions/upload-artifact@v4')
     expect(workflow).not.toContain('feishu_release_notes.py')
     expect(workflow).not.toContain('FEISHU_RELEASE_WEBHOOK')
-    expect(workflow).not.toContain('upload-artifact')
   })
 })

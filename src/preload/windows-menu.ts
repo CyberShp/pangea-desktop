@@ -184,6 +184,8 @@ function menuEntries(locale: 'en' | 'zh'): MenuEntry[] {
   const zh = locale === 'zh'
   return [
     { kind: 'label', label: 'HARNESS' },
+    { kind: 'command', command: 'import-update-package', label: zh ? '导入升级包…' : 'Import Update Package…' },
+    { kind: 'separator' },
     { kind: 'command', command: 'connect-phone', label: zh ? '连接手机…' : 'Connect Phone…', shortcut: 'Ctrl+Shift+M' },
     { kind: 'command', command: 'restart-harness', label: zh ? '重启 Harness' : 'Restart Harness', shortcut: 'Ctrl+Shift+R' },
     { kind: 'command', command: 'safe-mode', label: zh ? '以安全模式重启…' : 'Restart as Safe Mode…' },

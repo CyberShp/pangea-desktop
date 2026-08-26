@@ -14,16 +14,16 @@ describe('PANGEA Desktop release contract', () => {
     expect(packageLock.packages['']?.version).toBe(packageJson.version)
   })
 
-  it('produces one Windows x64 NSIS installer with the product identity', async () => {
+  it('produces one Windows x64 portable ZIP with the product identity', async () => {
     const packageJson = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8'))
     expect(packageJson.name).toBe('pangea-desktop')
     expect(packageJson.build.appId).toBe('io.pangea.desktop')
     expect(packageJson.build.productName).toBe('PANGEA Desktop')
-    expect(packageJson.build.artifactName).toBe('pangea-desktop-${os}-${arch}.${ext}')
-    expect(packageJson.build.nsis.artifactName).toBe(
-      'pangea-desktop-windows-${arch}-setup.${ext}'
+    expect(packageJson.build.artifactName).toBe(
+      'pangea-desktop-${version}-windows-${arch}-portable.${ext}'
     )
-    expect(packageJson.build.win.target).toEqual([{ target: 'nsis', arch: ['x64'] }])
+    expect(packageJson.build.win.icon).toBe('build/icon.ico')
+    expect(packageJson.build.nsis).toBeUndefined()
     expect(packageJson.build.mac).toBeUndefined()
     expect(packageJson.build.publish).toBeNull()
   })
@@ -43,7 +43,9 @@ describe('PANGEA Desktop release contract', () => {
       },
       { from: '.pangea-build/runtime/pangea-agent', to: 'pangea-runtime' },
       { from: '.pangea-build/runtime/python', to: 'pangea-python' },
-      { from: '.pangea-build/manifest.json', to: 'pangea-manifest.json' }
+      { from: '.pangea-build/manifest.json', to: 'pangea-manifest.json' },
+      { from: '.pangea-build/update', to: 'update' },
+      { from: 'build/apply-portable-update.ps1', to: 'update/apply-portable-update.ps1' }
     ]) {
       expect(resources).toContainEqual(expected)
     }
@@ -61,12 +63,18 @@ describe('PANGEA Desktop release contract', () => {
     ])
     const lock = JSON.parse(components)
     expect(lock.desktopBase.commit).toMatch(/^[0-9a-f]{40}$/)
+    expect(lock.desktopBase.branch).toBe('main')
     expect(lock.dshPangea.commit).toMatch(/^[0-9a-f]{40}$/)
+    expect(lock.dshPangea.branch).toBe('codex/dsh-pangea-workbench')
     expect(lock.pangeaAgent.commit).toMatch(/^[0-9a-f]{40}$/)
+    expect(lock.pangeaAgent.branch).toBe('codex/pangea-workflow-rebuild')
     expect(lock.python.sha256).toMatch(/^[0-9a-f]{64}$/)
     expect(profile).toContain("PANGEA_CORE_BUNDLE = 'dsh-pangea-product'")
     expect(safeMode).toContain("'dsh-pangea-product'")
-    expect(workflow).toContain('on: []')
+    expect(workflow).toContain('workflow_dispatch:')
+    expect(workflow).toContain('runs-on: windows-2022')
+    expect(workflow).toContain('-ResolveComponentBranches')
+    expect(workflow).toContain('PANGEA_ARTIFACT_SSH_KEY_B64')
   })
 
   it('builds through the single Windows assembly entrypoint', async () => {
@@ -76,8 +84,11 @@ describe('PANGEA Desktop release contract', () => {
     ])
     expect(packageJson.scripts['package:pangea:win']).toContain('build-pangea-desktop.ps1')
     expect(script).toContain("Invoke-Checked 'npm' @('ci', '--legacy-peer-deps')")
-    expect(script).toContain("Invoke-Checked 'npm' @('run', 'package:win')")
+    expect(script).toContain("Invoke-Checked 'npm' @('run', 'package:dir')")
     expect(script).toContain('Get-VerifiedDownload')
     expect(script).toContain('pangea_agent.cli.main')
+    expect(script).toContain('prepare-portable-update.mjs')
+    expect(script).toContain('create-signed-portable-package.mjs')
+    expect(script).toContain('UpdatePrivateKeyPath is required')
   })
 })

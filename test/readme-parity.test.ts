@@ -11,7 +11,8 @@ const requiredFacts = [
   'PANGEA Desktop',
   'pangea.components.json',
   'build-pangea-desktop.ps1',
-  'NSIS',
+  'pangea-desktop-<version>-windows-x64-portable.zip',
+  'Ed25519',
   'pangea-python',
   'pangea-runtime',
   'docs/windows-validation.md'

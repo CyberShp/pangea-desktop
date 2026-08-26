@@ -2,6 +2,8 @@
 param(
   [string]$DshPangeaSource,
   [string]$PangeaAgentSource,
+  [string]$UpdatePrivateKeyPath,
+  [switch]$ResolveComponentBranches,
   [switch]$SkipTests,
   [switch]$SkipPackage
 )
@@ -15,6 +17,7 @@ $SourceRoot = Join-Path $StageRoot 'sources'
 $PluginRoot = Join-Path $StageRoot 'plugins'
 $RuntimeRoot = Join-Path $StageRoot 'runtime'
 $CacheRoot = Join-Path $StageRoot 'cache'
+$UpdateRoot = Join-Path $StageRoot 'update'
 $Components = Get-Content (Join-Path $ProjectRoot 'pangea.components.json') -Raw | ConvertFrom-Json
 
 function Invoke-Checked {
@@ -64,6 +67,24 @@ function Get-ExactSource {
   return $Destination
 }
 
+function Resolve-BranchCommit {
+  param(
+    [string]$Name,
+    [string]$Repository,
+    [string]$Branch
+  )
+  if (-not $Branch) { throw "$Name does not declare a source branch." }
+  $Output = @(& git ls-remote --exit-code --heads $Repository "refs/heads/$Branch")
+  if ($LASTEXITCODE -ne 0 -or $Output.Count -ne 1) {
+    throw "$Name branch could not be resolved: $Repository#$Branch"
+  }
+  $Commit = ($Output[0] -split '\s+')[0].ToLowerInvariant()
+  if ($Commit -notmatch '^[0-9a-f]{40}$') {
+    throw "$Name branch returned an invalid commit: $Commit"
+  }
+  return $Commit
+}
+
 function Get-VerifiedDownload {
   param([string]$Url, [string]$Sha256, [string]$Destination)
   if (Test-Path $Destination) {
@@ -88,8 +109,24 @@ foreach ($Command in @('git', 'node', 'npm')) {
     throw "$Command is required to build PANGEA Desktop."
   }
 }
+if (-not $SkipPackage -and -not $UpdatePrivateKeyPath) {
+  throw 'UpdatePrivateKeyPath is required to create a verifiable portable ZIP.'
+}
 
-New-Item $StageRoot, $SourceRoot, $PluginRoot, $RuntimeRoot, $CacheRoot -ItemType Directory -Force | Out-Null
+if ($ResolveComponentBranches) {
+  Write-Host 'Resolving configured component branches...'
+  $DesktopBaseCommit = Resolve-BranchCommit 'dsh-desktop' $Components.desktopBase.repository $Components.desktopBase.branch
+  & git -C $ProjectRoot merge-base --is-ancestor $DesktopBaseCommit HEAD
+  if ($LASTEXITCODE -ne 0) {
+    throw "PANGEA Desktop does not contain dsh-desktop $($Components.desktopBase.branch) at $DesktopBaseCommit. Sync the product branch before releasing."
+  }
+  $Components.desktopBase.commit = $DesktopBaseCommit
+  $Components.dshPangea.commit = Resolve-BranchCommit 'dsh-pangea' $Components.dshPangea.repository $Components.dshPangea.branch
+  $Components.pangeaAgent.commit = Resolve-BranchCommit 'pangea-agent' $Components.pangeaAgent.repository $Components.pangeaAgent.branch
+}
+
+New-Item $StageRoot, $SourceRoot, $PluginRoot, $RuntimeRoot, $CacheRoot, $UpdateRoot -ItemType Directory -Force | Out-Null
+$Components | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $StageRoot 'components.resolved.json') -Encoding UTF8
 
 Write-Host 'Installing locked Desktop dependencies...'
 Invoke-Checked 'npm' @('ci', '--legacy-peer-deps')
@@ -164,13 +201,25 @@ $Manifest = [ordered]@{
   built_at = (Get-Date).ToUniversalTime().ToString('o')
   product = [ordered]@{ name = 'PANGEA Desktop'; version = (Get-Content (Join-Path $ProjectRoot 'package.json') -Raw | ConvertFrom-Json).version }
   components = [ordered]@{
-    desktop = [ordered]@{ commit = $DesktopCommit; upstream_base = $Components.desktopBase.commit }
-    dsh_pangea = [ordered]@{ commit = $Components.dshPangea.commit }
-    pangea_agent = [ordered]@{ commit = $Components.pangeaAgent.commit }
+    desktop = [ordered]@{
+      commit = $DesktopCommit
+      upstream_branch = $Components.desktopBase.branch
+      upstream_base = $Components.desktopBase.commit
+    }
+    dsh_pangea = [ordered]@{ branch = $Components.dshPangea.branch; commit = $Components.dshPangea.commit }
+    pangea_agent = [ordered]@{ branch = $Components.pangeaAgent.branch; commit = $Components.pangeaAgent.commit }
     python = [ordered]@{ version = $Components.python.version; sha256 = $Components.python.sha256 }
   }
 }
 $Manifest | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $StageRoot 'manifest.json') -Encoding UTF8
+
+Reset-StageDirectory $UpdateRoot
+$UpdateArguments = @(
+  (Join-Path $ProjectRoot 'scripts/prepare-portable-update.mjs'),
+  '--output-dir', $UpdateRoot
+)
+if ($UpdatePrivateKeyPath) { $UpdateArguments += @('--private-key', $UpdatePrivateKeyPath) }
+Invoke-Checked 'node' $UpdateArguments
 
 if (-not $SkipTests) {
   Write-Host 'Running focused product checks...'
@@ -188,7 +237,21 @@ if (-not $SkipTests) {
 }
 
 if (-not $SkipPackage) {
-  Write-Host 'Packaging the Windows installer...'
-  Invoke-Checked 'npm' @('run', 'package:win')
-  Write-Host "Installer ready under $(Join-Path $ProjectRoot 'dist')"
+  Write-Host 'Packaging the Windows portable ZIP...'
+  Invoke-Checked 'npm' @('run', 'package:dir')
+  $PackageVersion = (Get-Content (Join-Path $ProjectRoot 'package.json') -Raw | ConvertFrom-Json).version
+  $PackageName = "pangea-desktop-$PackageVersion-windows-x64-portable.zip"
+  $PackagePath = Join-Path $ProjectRoot "dist/$PackageName"
+  Invoke-Checked 'node' @(
+    (Join-Path $ProjectRoot 'scripts/create-signed-portable-package.mjs'),
+    '--app-dir', (Join-Path $ProjectRoot 'dist/win-unpacked'),
+    '--private-key', $UpdatePrivateKeyPath,
+    '--output', $PackagePath
+  )
+  if (-not (Test-Path $PackagePath -PathType Leaf)) {
+    throw "Portable package was not created: $PackagePath"
+  }
+  $PackageHash = (Get-FileHash $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+  Set-Content "$PackagePath.sha256" "$PackageHash  $PackageName" -Encoding ASCII
+  Write-Host "Portable ZIP ready at $PackagePath"
 }

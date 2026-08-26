@@ -2,10 +2,9 @@ import type { UpdateStatus } from '../../shared/contracts'
 
 export type UpdateStateEvent =
   | { type: 'check'; manual: boolean }
-  | { type: 'available'; version: string }
   | { type: 'progress'; percent: number }
   | { type: 'downloaded'; version: string }
-  | { type: 'not-available' }
+  | { type: 'install-error'; message: string }
   | { type: 'error'; message: string }
   | { type: 'unsupported'; message: string }
   | { type: 'reset' }
@@ -23,14 +22,12 @@ export function reduceUpdateStatus(
   switch (event.type) {
     case 'check':
       return { ...base, phase: 'checking', manual: event.manual }
-    case 'available':
-      return { ...base, phase: 'available', availableVersion: event.version }
     case 'progress':
       return { ...current, phase: 'downloading', percent: clampPercent(event.percent) }
     case 'downloaded':
       return { ...base, phase: 'downloaded', availableVersion: event.version }
-    case 'not-available':
-      return { ...base, phase: 'up-to-date' }
+    case 'install-error':
+      return { ...current, phase: 'downloaded', message: event.message }
     case 'error':
       return { ...base, phase: 'error', message: event.message }
     case 'unsupported':

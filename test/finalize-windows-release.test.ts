@@ -1,37 +1,105 @@
-import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createWriteStream } from 'node:fs'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { ZipArchive } from 'archiver'
+import { stagePortablePackage } from '../src/main/update/portable-package-validator'
 
-describe('signed Windows release finalizer', () => {
-  it('rebuilds the blockmap and updater metadata after signing', async () => {
-    const releaseDir = await mkdtemp(path.join(tmpdir(), 'dsh-windows-release-'))
-    try {
-      const installerName = 'dsh-desktop-windows-x64-setup.exe'
-      const installer = path.join(releaseDir, installerName)
-      const content = Buffer.from('signed Windows installer fixture')
-      await writeFile(installer, content)
-      await writeFile(`${installer}.blockmap`, 'stale blockmap')
-      await writeFile(path.join(releaseDir, 'latest.yml'), 'stale metadata')
+const temporaryRoots: string[] = []
 
-      const result = spawnSync(
-        process.execPath,
-        [path.join(process.cwd(), 'scripts', 'finalize-windows-release.mjs'), releaseDir, '1.2.3'],
-        { encoding: 'utf8' }
-      )
-      expect(result.status, result.stderr).toBe(0)
+afterEach(async () => {
+  await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+})
 
-      const digest = createHash('sha512').update(content).digest('base64')
-      const metadata = await readFile(path.join(releaseDir, 'latest.yml'), 'utf8')
-      expect(metadata).toContain('version: 1.2.3')
-      expect(metadata).toContain(`url: "${installerName}"`)
-      expect(metadata).toContain(`sha512: ${digest}`)
-      expect(metadata).toContain(`size: ${content.length}`)
-      expect((await stat(`${installer}.blockmap`)).size).toBeGreaterThan(0)
-    } finally {
-      await rm(releaseDir, { recursive: true, force: true })
-    }
+describe('signed portable Windows package', () => {
+  it('uses one ZIP for extraction and in-app package import', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'pangea-portable-package-'))
+    temporaryRoots.push(root)
+    const appDirectory = path.join(root, 'win-unpacked')
+    const updateDirectory = path.join(appDirectory, 'resources', 'update')
+    const privateKeyPath = path.join(root, 'update-private.pem')
+    const outputPath = path.join(root, 'pangea-desktop-0.1.0-windows-x64-portable.zip')
+    await mkdir(updateDirectory, { recursive: true })
+    await Promise.all([
+      writeFile(path.join(appDirectory, 'PANGEA Desktop.exe'), 'desktop executable'),
+      writeFile(path.join(appDirectory, 'resources', 'pangea-manifest.json'), JSON.stringify({
+        product: { name: 'PANGEA Desktop', version: '0.1.0' },
+        components: { python: { version: '3.12.10' } }
+      })),
+      writeFile(path.join(updateDirectory, 'apply-portable-update.ps1'), 'Write-Host update')
+    ])
+
+    const generated = spawnSync(process.execPath, [
+      path.join(process.cwd(), 'scripts', 'generate-update-key.mjs'),
+      '--output', privateKeyPath
+    ], { encoding: 'utf8' })
+    expect(generated.status, generated.stderr).toBe(0)
+
+    const prepared = spawnSync(process.execPath, [
+      path.join(process.cwd(), 'scripts', 'prepare-portable-update.mjs'),
+      '--output-dir', updateDirectory,
+      '--private-key', privateKeyPath
+    ], { encoding: 'utf8' })
+    expect(prepared.status, prepared.stderr).toBe(0)
+
+    const packaged = spawnSync(process.execPath, [
+      path.join(process.cwd(), 'scripts', 'create-signed-portable-package.mjs'),
+      '--app-dir', appDirectory,
+      '--private-key', privateKeyPath,
+      '--output', outputPath
+    ], { encoding: 'utf8' })
+    expect(packaged.status, packaged.stderr).toBe(0)
+
+    let lastProgress = 0
+    const staged = await stagePortablePackage({
+      sourcePath: outputPath,
+      destinationPath: path.join(root, 'import', 'pangea-desktop.zip'),
+      publicKeyPem: await readFile(path.join(updateDirectory, 'pangea-update-public-key.pem'), 'utf8'),
+      currentVersion: '0.0.9',
+      onProgress: (percent) => { lastProgress = percent }
+    })
+    expect(staged.manifest.version).toBe('0.1.0')
+    expect(staged.manifest.components?.python).toEqual({ version: '3.12.10' })
+    expect(staged.manifest.files.map((file) => file.path)).toContain('PANGEA Desktop.exe')
+    expect(staged.manifest.files.some((file) => file.path.includes('update-private'))).toBe(false)
+    expect(staged.packageSha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(lastProgress).toBe(100)
+
+    await writeFile(path.join(appDirectory, 'PANGEA Desktop.exe'), 'modified executable')
+    const modifiedPackage = path.join(root, 'modified.zip')
+    await zipDirectory(appDirectory, modifiedPackage)
+    await expect(stagePortablePackage({
+      sourcePath: modifiedPackage,
+      destinationPath: path.join(root, 'modified-import', 'pangea-desktop.zip'),
+      publicKeyPem: await readFile(path.join(updateDirectory, 'pangea-update-public-key.pem'), 'utf8'),
+      currentVersion: '0.0.9'
+    })).rejects.toThrow(/不匹配|校验失败/)
+  })
+
+  it('binds the external helper to the locally verified ZIP', async () => {
+    const [manager, helper] = await Promise.all([
+      readFile(path.join(process.cwd(), 'src', 'main', 'update', 'update-manager.ts'), 'utf8'),
+      readFile(path.join(process.cwd(), 'build', 'apply-portable-update.ps1'), 'utf8')
+    ])
+    expect(manager).toContain('expected_size: imported.packageSize')
+    expect(manager).toContain('expected_sha256: imported.packageSha256')
+    expect(helper).toContain('Get-FileHash $PackagePath -Algorithm SHA256')
+    expect(helper).toContain('Move-Item $BackupRoot $InstallRoot')
+    expect(helper).toContain('Start-Process -FilePath $RestoredExecutable')
   })
 })
+
+async function zipDirectory(source: string, destination: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const output = createWriteStream(destination, { flags: 'wx' })
+    const archive = new ZipArchive({ zlib: { level: 9 } })
+    output.once('close', resolve)
+    output.once('error', reject)
+    archive.once('error', reject)
+    archive.pipe(output)
+    archive.directory(source, false)
+    void archive.finalize()
+  })
+}

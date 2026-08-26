@@ -12,18 +12,18 @@ const downloading: UpdateStatus = {
   currentVersion: '1.0.0',
   availableVersion: '1.1.0',
   percent: 42.2,
-  manual: false
+  manual: true
 }
 
 const downloaded: UpdateStatus = {
   phase: 'downloaded',
   currentVersion: '1.0.0',
   availableVersion: '1.1.0',
-  manual: false
+  manual: true
 }
 
 describe('desktop update card visibility', () => {
-  it('shows automatic downloads but keeps automatic background checks quiet', () => {
+  it('shows user-initiated package verification', () => {
     expect(shouldShowUpdate(downloading)).toBe(true)
     expect(
       shouldShowUpdate({ phase: 'checking', currentVersion: '1.0.0', manual: false })
@@ -33,7 +33,7 @@ describe('desktop update card visibility', () => {
     ).toBe(true)
   })
 
-  it('keeps a dismissed version hidden while its download phase changes', () => {
+  it('keeps a dismissed imported version hidden while its phase changes', () => {
     expect(isUpdateDismissed(downloading, '1.1.0')).toBe(true)
     expect(isUpdateDismissed({ ...downloading, availableVersion: '1.2.0' }, '1.1.0')).toBe(
       false
@@ -47,8 +47,8 @@ describe('desktop update card visibility', () => {
   })
 
   it('formats localized progress copy', () => {
-    expect(updateMessage(downloading, 'zh')).toBe('正在下载更新 42%')
-    expect(updateMessage(downloading, 'en')).toBe('Downloading update 42%')
+    expect(updateMessage(downloading, 'zh')).toBe('正在校验升级包 42%')
+    expect(updateMessage(downloading, 'en')).toBe('Verifying update package 42%')
   })
 })
 
@@ -64,21 +64,21 @@ describe('secure update card wiring', () => {
     expect(main).toContain("preload: join(import.meta.dirname, '../preload/index.cjs')")
     expect(main).toContain('nodeIntegration: false')
     expect(preload).toContain("ipcRenderer.on('updates:status-changed'")
+    expect(preload).toContain("ipcRenderer.invoke('updates:import')")
     expect(preload).toContain("ipcRenderer.invoke('updates:install')")
     expect(preload).toContain("'right:20px'")
     expect(preload).toContain("'bottom:20px'")
   })
 })
 
-describe('accepting an update is what starts the download', () => {
-  it('asks rather than announcing a download already under way', () => {
-    const available: UpdateStatus = {
-      phase: 'available',
+describe('portable package selection', () => {
+  it('announces that the selected package is being read', () => {
+    const checking: UpdateStatus = {
+      phase: 'checking',
       currentVersion: '0.4.3',
-      availableVersion: '0.4.4',
-      manual: false
+      manual: true
     }
-    expect(updateMessage(available, 'zh')).toBe('发现新版本 0.4.4，是否更新？')
-    expect(updateMessage(available, 'en')).toBe('PANGEA Desktop 0.4.4 is available. Update now?')
+    expect(updateMessage(checking, 'zh')).toBe('正在读取升级包…')
+    expect(updateMessage(checking, 'en')).toBe('Reading update package…')
   })
 })

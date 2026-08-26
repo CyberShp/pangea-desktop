@@ -63,6 +63,28 @@ describe('LAN mobile bridge address policy', () => {
   })
 })
 
+describe('Harness activity guard', () => {
+  it('detects running sessions before a portable update restart', async () => {
+    const server = createServer(async (request, response) => {
+      let body = ''
+      for await (const chunk of request) body += chunk.toString()
+      const envelope = JSON.parse(body)
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({
+        rpcId: envelope.rpcId,
+        result: { ok: true, value: { items: [{ running: false }, { running: true }] } }
+      }))
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address() as AddressInfo
+    const bridge = new LanMobileBridge({
+      harnessUrl: () => `http://127.0.0.1:${address.port}`
+    })
+    expect(await bridge.hasRunningSessions()).toBe(true)
+  })
+})
+
 describe('LAN mobile bridge pairing surface', () => {
   it('serves the desktop pairing page only on loopback', async () => {
     const bridge = new LanMobileBridge({

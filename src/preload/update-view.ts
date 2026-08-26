@@ -3,8 +3,8 @@ import type { UpdateStatus } from '../shared/contracts'
 export type UpdateLocale = 'en' | 'zh'
 
 export function shouldShowUpdate(status: UpdateStatus): boolean {
-  if (['available', 'downloading', 'downloaded'].includes(status.phase)) return true
-  return status.manual && ['checking', 'up-to-date', 'error', 'unsupported'].includes(status.phase)
+  if (['downloading', 'downloaded'].includes(status.phase)) return true
+  return status.manual && ['checking', 'error', 'unsupported'].includes(status.phase)
 }
 
 export function isUpdateDismissed(
@@ -35,42 +35,30 @@ export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): Upda
   switch (status.phase) {
     case 'checking':
       return {
-        title: zh ? '正在检查更新' : 'Checking for updates',
-        description: zh ? `当前 v${status.currentVersion}` : `Currently on v${status.currentVersion}`
-      }
-    case 'available':
-      return {
-        title: zh ? '有可用更新' : 'Update available',
-        description: zh
-          ? `${version} 已发布，同意后开始下载。`
-          : `${version} is ready to download.`
+        title: zh ? '正在读取升级包' : 'Reading update package',
+        description: zh ? `当前版本 v${status.currentVersion}` : `Current version v${status.currentVersion}`
       }
     case 'downloading':
       return {
-        title: zh ? '正在下载更新' : 'Downloading update',
+        title: zh ? '正在校验升级包' : 'Verifying update package',
         description: zh ? `${version} · ${Math.round(status.percent ?? 0)}%` : `${version} · ${Math.round(status.percent ?? 0)}%`
       }
     case 'downloaded':
       return {
         title: zh ? '更新已就绪' : 'Update ready',
         description: zh
-          ? `${version} 将在重启后生效。`
-          : `${version} will be applied on next launch.`
-      }
-    case 'up-to-date':
-      return {
-        title: zh ? '已是最新版本' : 'Up to date',
-        description: zh ? `当前 v${status.currentVersion}` : `Currently on v${status.currentVersion}`
+          ? `${version} 已验证；完成当前分析后可重启升级。`
+          : `${version} is verified. Restart after current analysis finishes.`
       }
     case 'unsupported':
       return {
-        title: zh ? '此版本不支持自动更新' : 'Automatic updates unavailable',
-        description: zh ? '请从官网下载新版本。' : 'Download new versions from the website.'
+        title: zh ? '无法导入升级包' : 'Package import unavailable',
+        description: status.message ?? ''
       }
     case 'error':
       return {
-        title: zh ? '更新失败' : 'Update failed',
-        description: zh ? '无法检查或下载更新。' : 'Unable to check for or download updates.'
+        title: zh ? '升级包校验失败' : 'Update package verification failed',
+        description: zh ? '请选择由 PANGEA Desktop 构建生成的完整 ZIP。' : 'Choose a complete ZIP produced by the PANGEA Desktop build.'
       }
     case 'idle':
       return { title: '', description: '' }
@@ -83,23 +71,17 @@ export function updateMessage(status: UpdateStatus, locale: UpdateLocale): strin
 
   switch (status.phase) {
     case 'checking':
-      return zh ? '正在检查更新…' : 'Checking for updates…'
-    case 'available':
-      return zh
-        ? `发现新版本${version}，是否更新？`
-        : `PANGEA Desktop${version} is available. Update now?`
+      return zh ? '正在读取升级包…' : 'Reading update package…'
     case 'downloading': {
       const percent = Math.round(status.percent ?? 0)
-      return zh ? `正在下载更新 ${percent}%` : `Downloading update ${percent}%`
+      return zh ? `正在校验升级包 ${percent}%` : `Verifying update package ${percent}%`
     }
     case 'downloaded':
-      return zh ? `PANGEA Desktop${version} 已下载完成` : `PANGEA Desktop${version} is ready to install`
-    case 'up-to-date':
-      return zh ? 'PANGEA Desktop 已是最新版本' : 'PANGEA Desktop is up to date'
+      return zh ? `PANGEA Desktop${version} 已验证完成` : `PANGEA Desktop${version} is verified and ready`
     case 'unsupported':
-      return zh ? '当前版本不支持自动更新' : 'Automatic updates are unavailable in this build'
+      return zh ? '当前版本无法导入升级包' : 'Package import is unavailable in this build'
     case 'error':
-      return zh ? '无法检查或下载更新' : 'Unable to check for or download updates'
+      return zh ? '升级包校验失败' : 'Update package verification failed'
     case 'idle':
       return ''
   }

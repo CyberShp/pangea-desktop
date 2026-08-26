@@ -14,9 +14,5 @@ module.exports = {
     dshDesktopChannel: 'development'
   },
   artifactName: 'pangea-desktop-dev-${os}-${arch}.${ext}',
-  nsis: {
-    ...packageJson.build.nsis,
-    artifactName: 'pangea-desktop-dev-windows-${arch}-setup.${ext}'
-  },
   publish: null
 }

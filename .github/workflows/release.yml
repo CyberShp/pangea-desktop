@@ -1,17 +1,112 @@
-name: Product release placeholder
+name: Build Windows package
 
-# Final Windows artifacts contain internal component commits. The cloud-hosted
-# repository must not build or publish them. A future internal/self-hosted
-# runner may replace this placeholder after its artifact destination and code
-# signing contract are configured.
-on: []
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version (SemVer)
+        required: true
+        default: 0.1.0
 
 permissions:
   contents: read
 
+concurrency:
+  group: pangea-windows-release
+  cancel-in-progress: false
+
 jobs:
-  disabled:
-    if: ${{ false }}
+  build:
     runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      PANGEA_UPDATE_KEY_PASSPHRASE: ${{ secrets.PANGEA_UPDATE_KEY_PASSPHRASE }}
     steps:
-      - run: Write-Host 'PANGEA Desktop release is owned by the internal Windows pipeline.'
+      - name: Check out PANGEA Desktop
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.9.0
+          cache: npm
+
+      - name: Prepare release secrets and version
+        shell: pwsh
+        env:
+          UPDATE_PRIVATE_KEY_B64: ${{ secrets.PANGEA_UPDATE_PRIVATE_KEY_B64 }}
+        run: |
+          if ($env:RELEASE_VERSION -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Invalid package version: $env:RELEASE_VERSION"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:UPDATE_PRIVATE_KEY_B64)) {
+            throw 'PANGEA_UPDATE_PRIVATE_KEY_B64 is not configured.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:PANGEA_UPDATE_KEY_PASSPHRASE)) {
+            throw 'PANGEA_UPDATE_KEY_PASSPHRASE is not configured.'
+          }
+          New-Item .pangea-keys -ItemType Directory -Force | Out-Null
+          [IO.File]::WriteAllBytes(
+            (Join-Path $PWD '.pangea-keys/update-private.pem'),
+            [Convert]::FromBase64String($env:UPDATE_PRIVATE_KEY_B64)
+          )
+          npm version $env:RELEASE_VERSION --no-git-tag-version --allow-same-version
+
+      - name: Assemble and validate portable package
+        shell: pwsh
+        run: |
+          ./scripts/build-pangea-desktop.ps1 `
+            -ResolveComponentBranches `
+            -UpdatePrivateKeyPath ./.pangea-keys/update-private.pem
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pangea-desktop-${{ inputs.version }}-windows-x64-portable
+          path: |
+            dist/pangea-desktop-${{ inputs.version }}-windows-x64-portable.zip
+            dist/pangea-desktop-${{ inputs.version }}-windows-x64-portable.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload package to artifact server
+        shell: pwsh
+        env:
+          ARTIFACT_HOST: ${{ secrets.PANGEA_ARTIFACT_HOST }}
+          ARTIFACT_SSH_KEY_B64: ${{ secrets.PANGEA_ARTIFACT_SSH_KEY_B64 }}
+          ARTIFACT_KNOWN_HOSTS: ${{ secrets.PANGEA_ARTIFACT_KNOWN_HOSTS }}
+        run: |
+          foreach ($Name in @('ARTIFACT_HOST', 'ARTIFACT_SSH_KEY_B64', 'ARTIFACT_KNOWN_HOSTS')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($Name))) {
+              throw "$Name is not configured."
+            }
+          }
+          if (-not (Get-Command sftp -ErrorAction SilentlyContinue)) {
+            throw 'The Windows runner does not provide the OpenSSH SFTP client.'
+          }
+          $SshRoot = Join-Path $env:RUNNER_TEMP 'pangea-artifact-ssh'
+          New-Item $SshRoot -ItemType Directory -Force | Out-Null
+          $KeyPath = Join-Path $SshRoot 'id_ed25519'
+          $KnownHostsPath = Join-Path $SshRoot 'known_hosts'
+          $BatchPath = Join-Path $SshRoot 'upload.sftp'
+          [IO.File]::WriteAllBytes($KeyPath, [Convert]::FromBase64String($env:ARTIFACT_SSH_KEY_B64))
+          [IO.File]::WriteAllText($KnownHostsPath, "$env:ARTIFACT_KNOWN_HOSTS`n")
+          $PackageName = "pangea-desktop-$env:RELEASE_VERSION-windows-x64-portable.zip"
+          $PackagePath = (Resolve-Path "dist/$PackageName").Path.Replace('\', '/')
+          $HashPath = (Resolve-Path "dist/$PackageName.sha256").Path.Replace('\', '/')
+          @(
+            "put `"$PackagePath`" `"/uploads/$PackageName`""
+            "put `"$HashPath`" `"/uploads/$PackageName.sha256`""
+          ) | Set-Content $BatchPath -Encoding ASCII
+          & sftp `
+            -b $BatchPath `
+            -i $KeyPath `
+            -o BatchMode=yes `
+            -o IdentitiesOnly=yes `
+            -o StrictHostKeyChecking=yes `
+            -o "UserKnownHostsFile=$KnownHostsPath" `
+            "pangea-artifact@$env:ARTIFACT_HOST"
+          if ($LASTEXITCODE -ne 0) { throw "SFTP upload failed with exit code $LASTEXITCODE." }

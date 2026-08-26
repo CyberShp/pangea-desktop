@@ -122,6 +122,14 @@ export class LanMobileBridge {
     this.now = options.now ?? Date.now
   }
 
+  async hasRunningSessions(): Promise<boolean> {
+    const response = await this.forwardRpc('session.list', {})
+    if (!response.ok) throw new Error(response.error ?? 'Unable to inspect active Harness sessions.')
+    const value = response.value as { items?: Array<{ running?: unknown }> } | undefined
+    if (!Array.isArray(value?.items)) throw new Error('Harness returned an invalid session list.')
+    return value.items.some((session) => session.running === true)
+  }
+
   async start(): Promise<LanMobileBridgeSnapshot> {
     if (this.server) {
       if (!this.pairingToken || !this.pairingExpiresAt || this.pairingExpiresAt < this.now()) {

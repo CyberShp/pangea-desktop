@@ -56,10 +56,15 @@ import {
   type WindowFocusIntent
 } from './window-raise'
 import {
+  importPortableUpdatePackage,
   registerUpdateHandlers,
   startUpdateManager,
   stopUpdateManager
 } from './update/update-manager'
+import {
+  markPortableUpdateHealthy,
+  portableUpdateHealthMarker
+} from './update/portable-update-health'
 import type { RuntimeSnapshot } from '../shared/contracts'
 import { resolveHarnessLocale } from './application-locale'
 import { installContextMenu } from './context-menu'
@@ -882,6 +887,9 @@ async function executeDesktopMenuCommand(command: DesktopMenuCommand): Promise<n
   const contents = window.webContents
 
   switch (command) {
+    case 'import-update-package':
+      await importPortableUpdatePackage()
+      break
     case 'connect-phone':
       await showMobilePairing()
       break
@@ -1341,6 +1349,15 @@ function installMenu(): void {
     {
       label: 'Harness',
       submenu: [
+        ...(process.platform === 'win32'
+          ? [
+              {
+                label: isChinese ? '导入升级包…' : 'Import Update Package…',
+                click: () => void importPortableUpdatePackage().catch(showUnexpectedError)
+              },
+              { type: 'separator' as const }
+            ]
+          : []),
         {
           label: isChinese ? '连接手机…' : 'Connect Phone…',
           accelerator: 'CmdOrCtrl+Shift+M',
@@ -1462,6 +1479,8 @@ async function bootstrap(): Promise<void> {
   registerUpdateHandlers()
   nativeTheme.themeSource = harnessThemePreference()
   createWindow()
+  const updateHealthMarker = portableUpdateHealthMarker(process.argv, app.getPath('userData'))
+  let updateHealthReported = false
   runtime = new HarnessRuntime({
     dshEntryPath: dshEntryPath(),
     nodeExecutablePath: bundledNodePath(),
@@ -1477,6 +1496,12 @@ async function bootstrap(): Promise<void> {
         : spawn(executablePath, args, options),
     onChanged: (snapshot) => {
       if (snapshot.phase === 'ready' && snapshot.url) {
+        if (!updateHealthReported) {
+          updateHealthReported = true
+          void markPortableUpdateHealthy(updateHealthMarker, app.getVersion()).catch((error) => {
+            console.warn('[portable-updater] failed to report startup health', error)
+          })
+        }
         void openHarness(snapshot.url).catch(showUnexpectedError)
       } else if (snapshot.phase === 'failed') {
         void showRuntimeFailure(snapshot)
@@ -1603,9 +1628,9 @@ async function bootstrap(): Promise<void> {
   if (!developmentBuild) {
     startUpdateManager({
       prepareToInstall: async () => {
-        await runtime.stop()
-        quitting = true
-        stopUpdateManager()
+        if (await mobileBridge.hasRunningSessions()) {
+          throw new Error('当前仍有分析会话运行，请等待任务结束后再重启升级。')
+        }
       }
     })
   }

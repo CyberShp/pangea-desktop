@@ -11,6 +11,7 @@ import { findBootFailureText } from './boot-failure'
 import { mountWindowsTitlebarLayout } from './windows-titlebar'
 
 const ROOT_ID = 'dsh-desktop-update-root'
+const UPDATE_BUTTON_ID = 'dsh-desktop-update-button'
 const MOBILE_BUTTON_ID = 'dsh-desktop-mobile-button'
 const SAFE_MODE_BANNER_ID = 'dsh-desktop-safe-mode-banner'
 const locale: UpdateLocale = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
@@ -21,7 +22,6 @@ let currentStatus: UpdateStatus | undefined
 let dismissedVersion: string | null = null
 let dismissedTransientPhase: UpdateStatus['phase'] | null = null
 let installing = false
-let accepting = false
 let receivedStatusEvent = false
 let phoneConnected = false
 let mobileStatusTimer: number | undefined
@@ -75,6 +75,7 @@ function checkBootFailureInDom(): void {
 }
 
 const domObserver = new MutationObserver(() => {
+  mountUpdateButton()
   mountMobileButton()
   checkBootFailureInDom()
 })
@@ -82,6 +83,28 @@ const domObserver = new MutationObserver(() => {
 contextBridge.exposeInMainWorld('dshDesktopDirectoryPicker', {
   pick: (): Promise<string | null> => ipcRenderer.invoke('directory-picker:open')
 })
+
+function mountUpdateButton(): void {
+  if (process.platform !== 'win32') return
+  const settingsArea = document.querySelector<HTMLElement>('[data-dsh-sidebar-settings]')
+  if (!settingsArea) return
+  let button = document.getElementById(UPDATE_BUTTON_ID) as HTMLButtonElement | null
+  if (!button) {
+    button = document.createElement('button')
+    button.id = UPDATE_BUTTON_ID
+    button.type = 'button'
+    button.innerHTML = packageIcon
+    const label = locale === 'zh' ? '导入升级包' : 'Import update package'
+    button.setAttribute('aria-label', label)
+    button.title = label
+    button.addEventListener('click', () => {
+      void ipcRenderer.invoke('updates:import').catch((error: unknown) => {
+        console.error('[updater] unable to import package', error)
+      })
+    })
+  }
+  if (button.parentElement !== settingsArea) settingsArea.appendChild(button)
+}
 
 function mountMobileButton(): void {
   let style = document.getElementById(`${MOBILE_BUTTON_ID}-style`)
@@ -216,6 +239,7 @@ function initializeUi(): void {
     mountWindowsTitlebarLayout({ document, ipcRenderer })
   }
   mount()
+  mountUpdateButton()
   mountMobileButton()
   checkBootFailureInDom()
   domObserver.observe(document.documentElement, {
@@ -290,13 +314,16 @@ function mount(): void {
 }
 
 function applyStatus(status: UpdateStatus): void {
+  if (status.phase === 'checking') {
+    dismissedVersion = null
+    dismissedTransientPhase = null
+  }
   currentStatus = status
   if (host) {
     host.dataset.updatePhase = status.phase
     host.dataset.updateManual = String(status.manual)
   }
-  if (status.phase === 'error') installing = false
-  if (status.phase !== 'available') accepting = false
+  if (status.phase === 'error' || status.phase === 'downloaded') installing = false
   render()
 }
 
@@ -333,8 +360,7 @@ function render(): void {
 
   // The failure's own words beat ours, when it has any.
   const description = element('p', 'description')
-  description.textContent =
-    status.phase === 'error' && status.message ? status.message : headline.description
+  description.textContent = status.message ?? headline.description
   if (description.textContent) body.appendChild(description)
 
   if (status.phase === 'downloading') {
@@ -349,29 +375,6 @@ function render(): void {
     body.appendChild(progress)
   }
 
-  if (status.phase === 'available') {
-    const actions = element('div', 'actions')
-    const accept = button(locale === 'zh' ? '同意更新' : 'Update now', 'primary')
-    accept.disabled = accepting
-    accept.addEventListener('click', () => {
-      accepting = true
-      render()
-      void ipcRenderer.invoke('updates:download').catch((error: unknown) => {
-        accepting = false
-        console.error('[updater] unable to download update', error)
-        render()
-      })
-    })
-    actions.append(accept, skipButton(status))
-    body.appendChild(actions)
-  }
-
-  if (status.phase === 'downloading') {
-    const actions = element('div', 'actions')
-    actions.appendChild(skipButton(status))
-    body.appendChild(actions)
-  }
-
   if (status.phase === 'downloaded') {
     const actions = element('div', 'actions')
     const install = button(
@@ -380,8 +383,8 @@ function render(): void {
           ? '正在重启…'
           : 'Restarting…'
         : locale === 'zh'
-          ? '重新启动并安装'
-          : 'Restart and install',
+          ? '重启并升级'
+          : 'Restart and update',
       'primary'
     )
     install.disabled = installing
@@ -394,7 +397,7 @@ function render(): void {
         render()
       })
     })
-    actions.append(install, skipButton(status))
+    actions.append(install)
     body.appendChild(actions)
   }
 
@@ -407,25 +410,6 @@ function render(): void {
 
   card.appendChild(row)
   content.replaceChildren(card)
-}
-
-/**
- * Stop being told about this version at all. The close button silences the
- * banner for this sitting only, so a release the user has decided against
- * comes back every launch; this one is remembered. A later release still asks,
- * and a manual check offers the skipped one again.
- */
-function skipButton(status: UpdateStatus): HTMLButtonElement {
-  const skip = button(locale === 'zh' ? '跳过此版本' : 'Skip this version', 'secondary')
-  skip.addEventListener('click', () => {
-    const version = status.availableVersion
-    if (!version) return
-    dismissCurrent()
-    void ipcRenderer.invoke('updates:skip', version).catch((error: unknown) => {
-      console.error('[updater] unable to skip update', error)
-    })
-  })
-  return skip
 }
 
 function dismissCurrent(): void {
@@ -585,18 +569,21 @@ const styles = `
 
 const updateIcon = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="M4.6 12a7.4 7.4 0 0 1 12.6-5.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M19.4 12a7.4 7.4 0 0 1-12.6 5.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M17.6 3.5v3.4h-3.4M6.4 20.5v-3.4h3.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 
+const packageIcon = `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" aria-hidden="true"><path d="m4.5 7 7.5-4 7.5 4v10L12 21l-7.5-4V7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="m4.8 7.2 7.2 4 7.2-4M12 11.2V21" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 3v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`
+
 const phoneIcon = `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" aria-hidden="true"><rect x="7" y="2.75" width="10" height="18.5" rx="2.25" stroke="currentColor" stroke-width="1.7"/><path d="M10.2 5.5h3.6M10.5 18.35h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`
 
 const mobileButtonStyles = `
   [data-dsh-sidebar-settings] { position:relative; box-sizing:border-box; }
-  [data-dsh-sidebar-root][data-dsh-sidebar-wide="true"] [data-dsh-sidebar-settings] { padding-right:38px; }
-  #${MOBILE_BUTTON_ID} { appearance:none; position:relative; width:32px; height:32px; color:var(--dsw-alias-label-secondary,#73777f); background:transparent; border:0; border-radius:9px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
+  [data-dsh-sidebar-root][data-dsh-sidebar-wide="true"] [data-dsh-sidebar-settings] { padding-right:72px; }
+  #${MOBILE_BUTTON_ID}, #${UPDATE_BUTTON_ID} { appearance:none; position:relative; width:32px; height:32px; color:var(--dsw-alias-label-secondary,#73777f); background:transparent; border:0; border-radius:9px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
   [data-dsh-sidebar-root][data-dsh-sidebar-wide="true"] #${MOBILE_BUTTON_ID} { position:absolute; right:0; top:50%; transform:translateY(-50%); }
+  [data-dsh-sidebar-root][data-dsh-sidebar-wide="true"] #${UPDATE_BUTTON_ID} { position:absolute; right:36px; top:50%; transform:translateY(-50%); }
   [data-dsh-sidebar-root][data-dsh-sidebar-wide="false"] [data-dsh-sidebar-settings] { flex-direction:column; align-items:center; }
-  [data-dsh-sidebar-root][data-dsh-sidebar-wide="false"] #${MOBILE_BUTTON_ID} { flex:none; margin-top:5px; }
-  #${MOBILE_BUTTON_ID}:hover { color:var(--dsw-alias-label-primary,#202124); background:var(--dsw-alias-interactive-bg-hover,rgba(32,33,36,.08)); }
-  #${MOBILE_BUTTON_ID}:focus-visible { outline:2px solid #4d6bfe; outline-offset:1px; }
-  #${MOBILE_BUTTON_ID}[hidden] { display:none; }
+  [data-dsh-sidebar-root][data-dsh-sidebar-wide="false"] #${MOBILE_BUTTON_ID}, [data-dsh-sidebar-root][data-dsh-sidebar-wide="false"] #${UPDATE_BUTTON_ID} { flex:none; margin-top:5px; }
+  #${MOBILE_BUTTON_ID}:hover, #${UPDATE_BUTTON_ID}:hover { color:var(--dsw-alias-label-primary,#202124); background:var(--dsw-alias-interactive-bg-hover,rgba(32,33,36,.08)); }
+  #${MOBILE_BUTTON_ID}:focus-visible, #${UPDATE_BUTTON_ID}:focus-visible { outline:2px solid #4d6bfe; outline-offset:1px; }
+  #${MOBILE_BUTTON_ID}[hidden], #${UPDATE_BUTTON_ID}[hidden] { display:none; }
   #${MOBILE_BUTTON_ID} > span { position:absolute; top:4px; right:4px; width:7px; height:7px; border:1.5px solid var(--dsw-specific-sidebar-fill,#fff); border-radius:50%; background:#4da66d; opacity:0; }
   #${MOBILE_BUTTON_ID}.is-connected > span { opacity:1; }
 `

@@ -5,18 +5,16 @@ import {
 } from '../src/main/update/update-state'
 
 describe('desktop update state', () => {
-  it('tracks an automatic download from discovery through completion', () => {
+  it('tracks local package verification through completion', () => {
     let status = initialUpdateStatus('1.0.0')
-    status = reduceUpdateStatus(status, { type: 'check', manual: false })
-    status = reduceUpdateStatus(status, { type: 'available', version: '1.1.0' })
+    status = reduceUpdateStatus(status, { type: 'check', manual: true })
     status = reduceUpdateStatus(status, { type: 'progress', percent: 52.37 })
 
     expect(status).toEqual({
       phase: 'downloading',
       currentVersion: '1.0.0',
-      availableVersion: '1.1.0',
       percent: 52.4,
-      manual: false
+      manual: true
     })
 
     status = reduceUpdateStatus(status, { type: 'downloaded', version: '1.1.0' })
@@ -24,16 +22,16 @@ describe('desktop update state', () => {
       phase: 'downloaded',
       currentVersion: '1.0.0',
       availableVersion: '1.1.0',
-      manual: false
+      manual: true
     })
   })
 
-  it('preserves whether a check was initiated from the application menu', () => {
+  it('preserves a user-initiated package error', () => {
     let status = initialUpdateStatus('1.0.0')
     status = reduceUpdateStatus(status, { type: 'check', manual: true })
-    status = reduceUpdateStatus(status, { type: 'not-available' })
+    status = reduceUpdateStatus(status, { type: 'error', message: 'invalid package' })
 
-    expect(status.phase).toBe('up-to-date')
+    expect(status.phase).toBe('error')
     expect(status.manual).toBe(true)
   })
 
@@ -48,5 +46,20 @@ describe('desktop update state', () => {
     expect(
       reduceUpdateStatus(status, { type: 'progress', percent: Number.NaN }).percent
     ).toBe(0)
+  })
+
+  it('keeps a verified package ready when restart is temporarily blocked', () => {
+    const ready = reduceUpdateStatus(initialUpdateStatus('1.0.0'), {
+      type: 'downloaded',
+      version: '1.1.0'
+    })
+    expect(reduceUpdateStatus(ready, {
+      type: 'install-error',
+      message: 'analysis is still running'
+    })).toMatchObject({
+      phase: 'downloaded',
+      availableVersion: '1.1.0',
+      message: 'analysis is still running'
+    })
   })
 })

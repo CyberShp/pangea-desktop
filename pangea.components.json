@@ -2,14 +2,17 @@
   "schemaVersion": 1,
   "desktopBase": {
     "repository": "https://github.com/dataelement/dsh-desktop.git",
+    "branch": "main",
     "commit": "e589bf688624871d953f8c58418f913c407dfc7e"
   },
   "dshPangea": {
-    "repository": "ssh://git@ssh.github.com:443/CyberShp/dsh-pangea.git",
-    "commit": "c0561615495ae561a666a179815114909b659a76"
+    "repository": "https://github.com/CyberShp/dsh-pangea.git",
+    "branch": "codex/dsh-pangea-workbench",
+    "commit": "2b96af36ade688ffcde988bc3726fe4e2ca2ece7"
   },
   "pangeaAgent": {
-    "repository": "ssh://git@ssh.github.com:443/CyberShp/pangea-agent.git",
+    "repository": "https://github.com/CyberShp/pangea-agent.git",
+    "branch": "codex/pangea-workflow-rebuild",
     "commit": "f5af3e0b1b0199dc6a19e2bca6022f6709237372"
   },
   "python": {

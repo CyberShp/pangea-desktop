@@ -16,10 +16,8 @@ export interface RuntimeSnapshot {
 export type UpdatePhase =
   | 'idle'
   | 'checking'
-  | 'available'
   | 'downloading'
   | 'downloaded'
-  | 'up-to-date'
   | 'error'
   | 'unsupported'
 

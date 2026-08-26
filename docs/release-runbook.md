@@ -1,24 +1,50 @@
-# Windows internal release runbook
+# Portable Windows release runbook
 
-## Current M0 path
+## One-time update key
 
-1. Build on a controlled Windows x64 PC with [`build-pangea-desktop.ps1`](../scripts/build-pangea-desktop.ps1).
-2. Validate the result with [`windows-validation.md`](./windows-validation.md).
-3. Copy the validated installer and `.pangea-build\manifest.json` into the internal artifact store.
-4. Record the installer SHA-256 beside the component manifest.
+Create the Ed25519 update key outside the repository. Set a passphrase when the key will be stored on a shared build machine.
 
-The cloud release workflow is disabled. It must not receive a final installer or internal component source.
+```powershell
+$env:PANGEA_UPDATE_KEY_PASSPHRASE = '<build-secret>'
+node .\scripts\generate-update-key.mjs --output D:\pangea-secrets\update-private.pem
+```
 
-## Later internal pipeline
+Keep `update-private.pem` and its passphrase in the build secret store. The build derives and embeds the public key, so no user-side trust setup is required.
 
-Because the internal network can make outbound connections while the cloud cannot connect inward, the final build belongs on an internal Windows runner. That runner may poll or be dispatched by the cloud control plane, but it must fetch component commits from internal mirrors and publish the installer only to the internal artifact store.
+## Release build
 
-Before enabling that pipeline, decide and configure:
+The `Build Windows package` workflow is started manually with a SemVer package version. It resolves these configured branches at the start of the run and records their exact commits in the package manifest:
 
-- internal Git URLs or mirror paths for both component repositories;
-- code-signing certificate and timestamp policy;
-- immutable artifact destination and retention policy;
-- update-feed URL reachable by installed PCs;
-- promotion rules from validation to release.
+- `dsh-desktop`: `main`
+- `dsh-pangea`: `codex/dsh-pangea-workbench`
+- `pangea-agent`: `codex/pangea-workflow-rebuild`
 
-Only after those values exist should `build.publish` and the Desktop update manager be enabled.
+The Desktop source must already contain the resolved `dsh-desktop` base commit. The workflow stops instead of attempting an automatic merge when the upstream base has moved. Every imported package must have a version greater than the currently running application, and every release must use the same package key.
+
+For a local Windows build, set the version in `package.json` and `package-lock.json`, then run:
+
+```powershell
+$env:PANGEA_UPDATE_KEY_PASSPHRASE = '<build-secret>'
+.\scripts\build-pangea-desktop.ps1 `
+  -ResolveComponentBranches `
+  -UpdatePrivateKeyPath 'D:\pangea-secrets\update-private.pem'
+```
+
+The release output is:
+
+```text
+pangea-desktop-<version>-windows-x64-portable.zip
+pangea-desktop-<version>-windows-x64-portable.zip.sha256
+```
+
+The ZIP contains the complete application plus its signed file manifest. It is used unchanged for both first installation and in-app upgrades.
+
+## Internal handoff
+
+1. Download the versioned ZIP and `.sha256` from `/srv/pangea-artifacts/uploads` on the cloud server.
+2. Copy that ZIP to the internal shared location.
+3. Internal users download the ZIP to their PC.
+4. In PANGEA Desktop, choose **Import update package** beside DSH settings and select the ZIP.
+5. After verification, choose **Restart and update**.
+
+Users handle one file only. Keep prior versioned ZIPs in the shared location when rollback or manual reinstallation may be needed.

@@ -10,6 +10,8 @@ const required = [
   '.pangea-build/runtime/pangea-agent/src/pangea_agent/cli/main.py',
   '.pangea-build/runtime/pangea-agent/.agents/pangea/dsh.md',
   '.pangea-build/runtime/python/python.exe',
+  '.pangea-build/update/pangea-update.json',
+  'build/apply-portable-update.ps1',
   'node_modules/dsh-pangea-product/cordis.patch.yml'
 ]
 
