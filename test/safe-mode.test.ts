@@ -38,7 +38,7 @@ describe('Safe Mode', () => {
       uninstallLabel: 'Remove selected plugins',
       agentLabel: 'Close',
       restartLabel: 'Exit Safe Mode and restart',
-      quitLabel: 'Quit DSH Desktop'
+      quitLabel: 'Quit PANGEA Desktop'
     })
   })
 

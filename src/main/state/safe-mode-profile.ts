@@ -4,11 +4,12 @@ import { join } from 'node:path'
 export const SAFE_MODE_PROFILE = 'desktop-safe-mode'
 export const SAFE_MODE_BUNDLES = [
   '@deepseek-ai/dsh-base',
-  '@deepseek-ai/dsh-web-app'
+  '@deepseek-ai/dsh-web-app',
+  'dsh-pangea-product'
 ] as const
 
 const SAFE_MODE_PATCH = `# Managed by DSH Desktop Safe Mode.
-# Third-party bundles and the normal web profile's patch layer are intentionally omitted.
+# User-installed bundles and the normal web profile's patch layer are intentionally omitted.
 []
 `
 

@@ -1,20 +1,20 @@
 {
-  "name": "dsh-desktop",
-  "version": "0.1.1",
-  "description": "A cross-platform desktop shell for DeepSeek Harness.",
+  "name": "pangea-desktop",
+  "version": "0.1.0",
+  "description": "Windows desktop distribution for PANGEA analysis.",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
-  "author": "DataElement",
+  "author": "CyberShp",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dataelement/dsh-desktop.git"
+    "url": "git+https://github.com/CyberShp/pangea-desktop.git"
   },
   "bugs": {
-    "url": "https://github.com/dataelement/dsh-desktop/issues"
+    "url": "https://github.com/CyberShp/pangea-desktop/issues"
   },
-  "homepage": "https://github.com/dataelement/dsh-desktop#readme",
+  "homepage": "https://github.com/CyberShp/pangea-desktop#readme",
   "keywords": [
     "deepseek",
     "harness",
@@ -31,15 +31,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package:dir": "npm run build && electron-builder --dir",
-    "package:dev:dir": "npm run build && electron-builder --dir --config electron-builder.dev.cjs",
-    "package:dev:mac:arm64": "node scripts/verify-target.mjs darwin arm64 && npm run build && electron-builder --mac --arm64 --publish never --config electron-builder.dev.cjs",
-    "package:dev:mac:x64": "node scripts/verify-target.mjs darwin x64 && npm run build && electron-builder --mac --x64 --publish never --config electron-builder.dev.cjs",
-    "package:dev:win": "node scripts/verify-target.mjs win32 x64 && npm run build && electron-builder --win --x64 --publish never --config electron-builder.dev.cjs",
-    "package:mac": "npm run build && electron-builder --mac --publish never",
-    "package:mac:arm64": "node scripts/verify-target.mjs darwin arm64 && npm run build && electron-builder --mac --arm64 --publish never",
-    "package:mac:x64": "node scripts/verify-target.mjs darwin x64 && npm run build && electron-builder --mac --x64 --publish never",
-    "package:win": "node scripts/verify-target.mjs win32 x64 && npm run build && electron-builder --win --x64 --publish never"
+    "package:dir": "node scripts/verify-pangea-staging.mjs && npm run build && electron-builder --dir --win --x64 --publish never",
+    "package:dev:dir": "node scripts/verify-pangea-staging.mjs && npm run build && electron-builder --dir --win --x64 --publish never --config electron-builder.dev.cjs",
+    "package:dev:win": "node scripts/verify-pangea-staging.mjs && node scripts/verify-target.mjs win32 x64 && npm run build && electron-builder --win --x64 --publish never --config electron-builder.dev.cjs",
+    "package:win": "node scripts/verify-pangea-staging.mjs && node scripts/verify-target.mjs win32 x64 && npm run build && electron-builder --win --x64 --publish never",
+    "package:pangea:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-pangea-desktop.ps1"
   },
   "dependencies": {
     "@deepseek-ai/cordis-plugin-group": "1.0.1",
@@ -65,12 +61,15 @@
     "@deepseek-ai/dsh-workflow": "0.1.1-rc.2",
     "dsh-desktop-hmr-fallback": "file:packages/dsh-desktop-hmr-fallback",
     "dsh-desktop-market-installer": "file:packages/dsh-desktop-market-installer",
+    "dsh-better-sidebar": "0.15.2",
+    "dsh-pangea-product": "file:packages/dsh-pangea-product",
     "electron-updater": "^6.8.9",
     "node": "24.9.0",
     "pnpm": "10.34.5",
     "qrcode": "^1.5.4",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
@@ -87,8 +86,8 @@
     "koffi": "3.1.5"
   },
   "build": {
-    "appId": "io.dsh.desktop",
-    "productName": "DSH Desktop",
+    "appId": "io.pangea.desktop",
+    "productName": "PANGEA Desktop",
     "asar": false,
     "npmRebuild": false,
     "compression": "maximum",
@@ -146,28 +145,34 @@
       {
         "from": "build/windows-menu.html",
         "to": "windows-menu.html"
-      }
-    ],
-    "publish": [
+      },
       {
-        "provider": "generic",
-        "url": "https://dshdesktop.com/updates/latest/"
+        "from": ".pangea-build/plugins/dsh-pangea",
+        "to": "app/node_modules/dsh-pangea"
+      },
+      {
+        "from": ".pangea-build/plugins/dsh-pangea-companion",
+        "to": "app/node_modules/dsh-pangea-companion"
+      },
+      {
+        "from": ".pangea-build/plugins/dsh-pangea-asset-catalog",
+        "to": "app/node_modules/dsh-pangea-asset-catalog"
+      },
+      {
+        "from": ".pangea-build/runtime/pangea-agent",
+        "to": "pangea-runtime"
+      },
+      {
+        "from": ".pangea-build/runtime/python",
+        "to": "pangea-python"
+      },
+      {
+        "from": ".pangea-build/manifest.json",
+        "to": "pangea-manifest.json"
       }
     ],
-    "artifactName": "dsh-desktop-${os}-${arch}.${ext}",
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "icon": "build/icon.icns",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "target": [
-        "dmg",
-        "zip"
-      ]
-    },
-    "dmg": {
-      "format": "UDBZ"
-    },
+    "publish": null,
+    "artifactName": "pangea-desktop-${os}-${arch}.${ext}",
     "win": {
       "icon": "build/icon.ico",
       "verifyUpdateCodeSignature": false,
@@ -181,7 +186,7 @@
       ]
     },
     "nsis": {
-      "artifactName": "dsh-desktop-windows-${arch}-setup.${ext}",
+      "artifactName": "pangea-desktop-windows-${arch}-setup.${ext}",
       "include": "build/installer.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,

@@ -36,7 +36,7 @@ export function aboutDetail(
 ): string {
   const harness = harnessVersion ?? (locale === 'zh' ? '未知' : 'Unknown')
   if (locale === 'zh') {
-    return `DSH Desktop 版本：${desktopVersion}\n内置 Harness 版本：${harness}\n\nHarness 随 DSH Desktop 更新。`
+    return `PANGEA Desktop 版本：${desktopVersion}\n内置 Harness 版本：${harness}\n\nPANGEA Runtime 与 Desktop 一起发布。`
   }
-  return `DSH Desktop version: ${desktopVersion}\nBundled Harness version: ${harness}\n\nHarness is updated with DSH Desktop.`
+  return `PANGEA Desktop version: ${desktopVersion}\nBundled Harness version: ${harness}\n\nPANGEA Runtime is released with Desktop.`
 }

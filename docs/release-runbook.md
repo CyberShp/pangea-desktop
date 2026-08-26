@@ -1,17 +1,24 @@
-# Desktop release runbook
+# Windows internal release runbook
 
-## Local Windows UKey signing runner
+## Current M0 path
 
-Windows packaging and signing run as separate jobs. The GitHub-hosted Windows runner builds an unsigned NSIS installer and uploads a short-lived workflow artifact. A local macOS ARM64 runner downloads it, signs the installer with Jsign and the SafeNet UKey, regenerates the blockmap and `latest.yml`, and uploads the signed release set. The GitHub Release job cannot start unless signing succeeds.
+1. Build on a controlled Windows x64 PC with [`build-pangea-desktop.ps1`](../scripts/build-pangea-desktop.ps1).
+2. Validate the result with [`windows-validation.md`](./windows-validation.md).
+3. Copy the validated installer and `.pangea-build\manifest.json` into the internal artifact store.
+4. Record the installer SHA-256 beside the component manifest.
 
-Prepare the local runner once:
+The cloud release workflow is disabled. It must not receive a final installer or internal component source.
 
-1. Register it with the `self-hosted`, `macOS`, and `ARM64` labels.
-2. Install SafeNet Authentication Client and confirm `/usr/local/lib/libeTPkcs11.dylib` is readable.
-3. Connect the UKey before pushing a release tag.
-4. In the GitHub repository, open **Settings → Secrets and variables → Actions** and create a repository secret named `DESKTOP_WINDOWS_SIGNING_PIN` containing the UKey PIN. For stronger release controls, use an environment secret and add the matching `environment` to the `sign-windows` job.
-5. Restrict release tag creation and workflow changes to trusted maintainers. A self-hosted runner can access any secret injected into its job.
+## Later internal pipeline
 
-The workflow pins Jsign 7.5 by SHA-256 and uses the SafeNet `ETOKEN` store, SHA-256 signing, and a DigiCert RFC 3161 timestamp. GitHub injects the PIN only into the signing step. The step copies it to a mode-`600` temporary file, removes it from the shell environment, and deletes the file when the step exits. The workflow never prints the PIN or passes it as a command-line argument.
+Because the internal network can make outbound connections while the cloud cannot connect inward, the final build belongs on an internal Windows runner. That runner may poll or be dispatched by the cloud control plane, but it must fetch component commits from internal mirrors and publish the installer only to the internal artifact store.
 
-After a tag release succeeds, verify that the Windows installer shows the expected publisher and a valid RFC 3161 timestamp in its Digital Signatures properties. Never reuse a published tag; fix the issue and release a new version.
+Before enabling that pipeline, decide and configure:
+
+- internal Git URLs or mirror paths for both component repositories;
+- code-signing certificate and timestamp policy;
+- immutable artifact destination and retention policy;
+- update-feed URL reachable by installed PCs;
+- promotion rules from validation to release.
+
+Only after those values exist should `build.publish` and the Desktop update manager be enabled.

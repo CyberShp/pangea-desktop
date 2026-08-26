@@ -36,7 +36,7 @@ for (const size of [16, 32, 128, 256, 512]) {
 execFileSync('iconutil', ['-c', 'icns', iconsetDirectory, '-o', icnsDestination])
 
 const icoSizes = [16, 24, 32, 48, 64, 128, 256]
-const icoDirectory = await mkdtemp(path.join(os.tmpdir(), 'dsh-desktop-icons-'))
+const icoDirectory = await mkdtemp(path.join(os.tmpdir(), 'pangea-desktop-icons-'))
 const icoImages = []
 for (const size of icoSizes) {
   const destination = path.join(icoDirectory, `icon-${size}.png`)

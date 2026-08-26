@@ -4,7 +4,11 @@ export const UPDATE_STARTUP_JITTER_MS = 15_000
 export const AUTO_INSTALL_ON_APP_QUIT = false
 
 export function supportsAutoUpdates(isPackaged: boolean, platform: NodeJS.Platform): boolean {
-  return isPackaged && (platform === 'darwin' || platform === 'win32')
+  void isPackaged
+  void platform
+  // The product update feed is intentionally closed until the internal
+  // artifact pull-and-publish path has a stable URL and signing contract.
+  return false
 }
 
 export function shouldCheckAfterResume(lastCheckedAt: number, now = Date.now()): boolean {

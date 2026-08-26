@@ -25,9 +25,9 @@ describe('desktop update policy', () => {
     expect(AUTO_INSTALL_ON_APP_QUIT).toBe(false)
   })
 
-  it('only enables updates for installed macOS and Windows builds', () => {
-    expect(supportsAutoUpdates(true, 'darwin')).toBe(true)
-    expect(supportsAutoUpdates(true, 'win32')).toBe(true)
+  it('keeps external updates disabled until the internal feed is configured', () => {
+    expect(supportsAutoUpdates(true, 'darwin')).toBe(false)
+    expect(supportsAutoUpdates(true, 'win32')).toBe(false)
     expect(supportsAutoUpdates(true, 'linux')).toBe(false)
     expect(supportsAutoUpdates(false, 'darwin')).toBe(false)
   })

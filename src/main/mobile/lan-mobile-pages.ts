@@ -34,7 +34,7 @@ export function renderMobilePage({ locale }: MobilePageOptions): string {
 </head>
 <body><main class="shell">
   <div id="toast" class="toast" role="status"></div>
-  <header><div class="brand"><img class="light-logo" src="/brand-logo/light" alt=""><img class="dark-logo" src="/brand-logo/dark" alt=""><span>DSH Desktop</span></div><div id="status" class="status connecting" role="status" aria-label="${zh ? '正在连接' : 'Connecting'}"></div></header>
+  <header><div class="brand"><img class="light-logo" src="/brand-logo/light" alt=""><img class="dark-logo" src="/brand-logo/dark" alt=""><span>PANGEA Desktop</span></div><div id="status" class="status connecting" role="status" aria-label="${zh ? '正在连接' : 'Connecting'}"></div></header>
   <section id="sessionsView" class="view active">
     <div class="session-hero"><div class="session-heading"><p>${zh ? '移动工作台' : 'Mobile workspace'}</p><h1>${zh ? '继续对话' : 'Continue working'}</h1></div><button id="newSession" class="new-session" disabled><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3.5V12.5M3.5 8H12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>${zh ? '新会话' : 'New session'}</button></div>
     <div class="workspace-panel"><label class="workspace-label" for="workspace">${zh ? '当前工作区' : 'Current workspace'}</label><div class="session-actions"><select id="workspace" aria-label="${zh ? '当前工作区' : 'Current workspace'}"></select><button id="refresh" class="icon-button" aria-label="${zh ? '刷新' : 'Refresh'}"><svg width="17" height="17" viewBox="0 0 20 20" fill="none"><path d="M16 7.5A6.5 6.5 0 1 0 16 13M16 7.5V3.5M16 7.5H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div><div id="workspaceHint" class="workspace-hint"></div></div>
@@ -60,7 +60,7 @@ const L=${JSON.stringify({
     toolFailed: zh ? '失败' : 'Failed',
     input: zh ? '输入' : 'Input',
     output: zh ? '输出' : 'Output'
-    ,noWorkspaces: zh ? '暂无工作区，请先在 DSH Desktop 中创建第一个工作区。' : 'No workspaces yet. Create your first workspace in DSH Desktop.'
+    ,noWorkspaces: zh ? '暂无工作区，请先在 PANGEA Desktop 中创建第一个工作区。' : 'No workspaces yet. Create your first workspace in PANGEA Desktop.'
     ,refreshed: zh ? '已刷新' : 'Updated'
     ,justNow: zh ? '刚刚' : 'Now'
     ,minute: zh ? ' 分钟前' : 'm ago'
@@ -180,13 +180,13 @@ export function renderMobileReconnectPage(
     guidance:
       connectionMode === 'tunnel'
         ? zh
-          ? '点击重新连接，然后在电脑上的 DSH Desktop 中允许此移动设备。'
-          : 'Reconnect, then approve this mobile device in DSH Desktop.'
+          ? '点击重新连接，然后在电脑上的 PANGEA Desktop 中允许此移动设备。'
+          : 'Reconnect, then approve this mobile device in PANGEA Desktop.'
         : zh
-          ? '请确保手机和电脑连接到同一 Wi-Fi。点击重新连接后，在电脑上的 DSH Desktop 中允许此手机。'
-          : 'Keep both devices on the same Wi-Fi, then reconnect and approve this phone in DSH Desktop.'
+          ? '请确保手机和电脑连接到同一 Wi-Fi。点击重新连接后，在电脑上的 PANGEA Desktop 中允许此手机。'
+          : 'Keep both devices on the same Wi-Fi, then reconnect and approve this phone in PANGEA Desktop.'
   }
-  return `<!doctype html><html lang="${zh ? 'zh-CN' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><meta name="theme-color" content="#ffffff" media="(prefers-color-scheme:light)"><meta name="theme-color" content="#141416" media="(prefers-color-scheme:dark)"><title>${text.title}</title><style>:root{color-scheme:light;--bg:#fff;--ink:#18191c;--muted:#81858c}@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#141416;--ink:#f5f5f6;--muted:#95979d}}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:100%;max-width:340px;text-align:center}.brand{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:22px;font-size:13px;font-weight:600}.brand img{width:35px;height:20px;object-fit:contain}.brand .dark-logo{display:none}@media(prefers-color-scheme:dark){.brand .light-logo{display:none}.brand .dark-logo{display:block}}h1{margin:0;font-size:28px;line-height:1.18;letter-spacing:-.03em}.guidance{margin:13px auto 0;max-width:310px;color:var(--muted);font-size:14px;line-height:1.65}.primary{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;height:50px;margin-top:26px;border-radius:15px;background:var(--ink);color:var(--bg);font-weight:650;text-decoration:none}</style></head><body><main class="card"><div class="brand"><img class="light-logo" src="/brand-logo/light" alt=""><img class="dark-logo" src="/brand-logo/dark" alt=""><span>DSH Desktop</span></div><h1>${text.heading}</h1><p class="guidance">${text.guidance}</p><a class="primary" href="/reconnect">${text.action}<svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/></svg></a></main></body></html>`
+  return `<!doctype html><html lang="${zh ? 'zh-CN' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><meta name="theme-color" content="#ffffff" media="(prefers-color-scheme:light)"><meta name="theme-color" content="#141416" media="(prefers-color-scheme:dark)"><title>${text.title}</title><style>:root{color-scheme:light;--bg:#fff;--ink:#18191c;--muted:#81858c}@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#141416;--ink:#f5f5f6;--muted:#95979d}}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:100%;max-width:340px;text-align:center}.brand{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:22px;font-size:13px;font-weight:600}.brand img{width:35px;height:20px;object-fit:contain}.brand .dark-logo{display:none}@media(prefers-color-scheme:dark){.brand .light-logo{display:none}.brand .dark-logo{display:block}}h1{margin:0;font-size:28px;line-height:1.18;letter-spacing:-.03em}.guidance{margin:13px auto 0;max-width:310px;color:var(--muted);font-size:14px;line-height:1.65}.primary{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;height:50px;margin-top:26px;border-radius:15px;background:var(--ink);color:var(--bg);font-weight:650;text-decoration:none}</style></head><body><main class="card"><div class="brand"><img class="light-logo" src="/brand-logo/light" alt=""><img class="dark-logo" src="/brand-logo/dark" alt=""><span>PANGEA Desktop</span></div><h1>${text.heading}</h1><p class="guidance">${text.guidance}</p><a class="primary" href="/reconnect">${text.action}<svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/></svg></a></main></body></html>`
 }
 
 export function renderDesktopPairingPage(options: {
@@ -216,7 +216,7 @@ export function renderDesktopPairingPage(options: {
     modeLan: zh ? 'WiFi连接模式' : 'WiFi Connection Mode',
     modeTunnel: zh ? '互联网连接模式' : 'Internet Connection Mode',
     manageHeading: zh ? '管理手机连接' : 'Manage phone connection',
-    manageHint: zh ? '这台手机当前已连接到 DSH Desktop。' : 'Your phone is currently connected to DSH Desktop.',
+    manageHint: zh ? '这台手机当前已连接到 PANGEA Desktop。' : 'Your phone is currently connected to PANGEA Desktop.',
     connected: zh ? '手机已连接' : 'Phone connected',
     closeHint: zh ? '连接会在后台保持，现在可以关闭此窗口。' : 'The connection stays active in the background. You can close this window now.',
     done: zh ? '完成' : 'Done',
@@ -250,7 +250,7 @@ export function renderDesktopPairingPage(options: {
   .url-row{display:flex;align-items:center;gap:8px;margin:10px auto 0;max-width:410px}.url{min-width:0;flex:1;font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--panel);border-radius:9px;padding:9px 11px;text-align:left}.copy{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 12px;cursor:pointer}.expires{font-size:12px;margin-top:8px}
   .request{display:none;max-width:410px;margin:16px auto 0;padding:16px;border:1px solid var(--request-border);border-radius:14px;background:var(--request-bg);text-align:left}.request.show{display:block}.request-title{display:flex;align-items:center;gap:8px;font-weight:600}.request-title:before{content:'';width:8px;height:8px;border-radius:50%;background:var(--request-accent)}.request-meta{font-size:12px;color:var(--muted);margin:5px 0 0 16px}#address:empty{display:none}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.actions button{min-width:62px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);padding:8px 14px;cursor:pointer}.actions .allow{background:var(--ink);color:var(--bg);border-color:var(--ink)}.has-request .qr,.has-request .url-row,.has-request .expires{display:none}.has-request .request{margin-top:0}
   .tunnel-err{display:none;color:#e34d59;font-size:12px;margin:5px 7px 0}.tunnel-err.show{display:block}
-  </style></head><body class="${options.connected ? 'phone-connected manage-connected' : ''}"><div class="wrap"><div class="brand"><img class="light-logo" src="/brand-logo/light" alt=""><img class="dark-logo" src="/brand-logo/dark" alt=""><span>DSH Desktop</span></div><h1>${options.connected ? text.manageHeading : text.heading}</h1>
+  </style></head><body class="${options.connected ? 'phone-connected manage-connected' : ''}"><div class="wrap"><div class="brand"><img class="light-logo" src="/brand-logo/light" alt=""><img class="dark-logo" src="/brand-logo/dark" alt=""><span>PANGEA Desktop</span></div><h1>${options.connected ? text.manageHeading : text.heading}</h1>
   <div class="mode-panel"><div class="mode-switch"><button id="btnLan" class="mode-btn${!options.tunnelActive ? ' active' : ''}" onclick="switchMode(false)"${options.connected ? ' disabled' : ''}>${text.modeLan}</button><button id="btnTunnel" class="mode-btn${options.tunnelActive ? ' active' : ''}" onclick="switchMode(true)"${options.connected ? ' disabled' : ''}>${text.modeTunnel}</button></div><p class="hint" id="modeHint">${options.tunnelActive ? text.tunnelHint : text.lanHint}</p><div id="tunnelError" class="tunnel-err${options.tunnelError ? ' show' : ''}">${options.tunnelError ? text.tunnelError + options.tunnelError : ''}</div></div>
   <div id="connection" class="connection${options.connected ? ' show' : ''}"><div class="connection-title">${text.connected}</div><p class="connection-hint">${text.closeHint}</p><div class="connection-actions"><button onclick="disconnectPhone()">${text.disconnect}</button><button class="done" onclick="window.close()">${text.done}</button></div></div>
   <div class="pairing-content"><div id="qrContainer" class="qr"><div id="qrCode">${options.qrSvg}</div><div id="qrLoading" class="qr-loading${options.tunnelLoading ? ' show' : ''}"><div class="loading-copy"><span id="tunnelLoadingText">${text.tunnelLoading}</span><span id="tunnelProgressValue" class="loading-value">0%</span></div><div class="tunnel-progress" aria-hidden="true"><span id="tunnelProgressBar"></span></div></div></div><div class="url-row"><div class="url" id="url">${escapeHtml(options.pairingUrl)}</div><button class="copy" onclick="copyUrl()">${text.copy}</button></div><p id="expires" class="expires"></p><div id="request" class="request"><div class="request-title">${text.waiting}</div><div id="requestMode" class="request-meta"></div><div id="address" class="request-meta"></div><div class="actions"><button onclick="decide(false)">${text.decline}</button><button class="allow" onclick="decide(true)">${text.allow}</button></div></div></div></div>
@@ -274,12 +274,12 @@ export function renderPairingWaitPage(pairingId: string, locale: 'en' | 'zh'): s
   const text = {
     title: zh ? '连接 DSH' : 'Pairing DSH',
     heading: zh ? '批准此手机' : 'Approve this phone',
-    hint: zh ? '请在 DSH Desktop 中确认连接请求。' : 'Confirm the connection request in DSH Desktop.',
+    hint: zh ? '请在 PANGEA Desktop 中确认连接请求。' : 'Confirm the connection request in PANGEA Desktop.',
     waiting: zh ? '正在等待批准…' : 'Waiting for approval…',
     connected: zh ? '连接成功，正在打开 DSH…' : 'Connected. Opening DSH…',
     declined: zh ? '连接申请已被拒绝。' : 'The connection request was declined.',
     expired: zh ? '本次连接申请已过期。' : 'This connection request expired.',
-    unavailable: zh ? '暂时无法连接桌面端，请先启动 DSH Desktop。' : 'Cannot reach the desktop. Start DSH Desktop and try again.',
+    unavailable: zh ? '暂时无法连接桌面端，请先启动 PANGEA Desktop。' : 'Cannot reach the desktop. Start PANGEA Desktop and try again.',
     retry: zh ? '再次发起申请' : 'Request approval again',
     retrying: zh ? '正在重新发起申请…' : 'Requesting approval again…'
   }

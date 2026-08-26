@@ -4,20 +4,17 @@ import { describe, expect, it } from 'vitest'
 
 const readmes = [
   'README.md',
-  'README.zh.md',
-  'README.ja.md',
-  'README.ru.md',
-  'README.es.md',
-  'README.pt.md'
+  'README.zh.md'
 ]
 
 const requiredFacts = [
-  '@deepseek-ai/dsh@0.1.1-rc.2',
-  '--safe-mode',
-  'Cloudflare Quick Tunnel',
+  'PANGEA Desktop',
+  'pangea.components.json',
+  'build-pangea-desktop.ps1',
   'NSIS',
-  'docs/development.md',
-  'docs/architecture.md'
+  'pangea-python',
+  'pangea-runtime',
+  'docs/windows-validation.md'
 ]
 
 describe('localized README parity', () => {
@@ -26,8 +23,8 @@ describe('localized README parity', () => {
       const content = readFileSync(path, 'utf8')
 
       for (const fact of requiredFacts) expect(content).toContain(fact)
-      expect(content).not.toContain('@deepseek-ai/dsh@0.1.1-rc.1')
-      expect(content).not.toMatch(/NSIS\s*(?:and|与|と|и|y|e)\s*Portable/i)
+      expect(content).not.toContain('dshdesktop.com')
+      expect(content).not.toContain('dataelement/dsh-desktop/releases')
     })
   }
 

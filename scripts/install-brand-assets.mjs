@@ -22,7 +22,7 @@ const manifestPath = path.join(destinationDirectory, 'manifest.webmanifest')
 function replaceRequired(contents, search, replacement, file) {
   if (contents.includes(replacement)) return contents
   if (!contents.includes(search)) {
-    throw new Error(`Could not update DSH Desktop branding in ${file}: expected content was not found`)
+    throw new Error(`Could not update PANGEA Desktop branding in ${file}: expected content was not found`)
   }
   return contents.replace(search, replacement)
 }
@@ -54,7 +54,7 @@ await writeFile(
   )
 )
 
-console.log(`Installed DSH Desktop brand assets: ${[
+console.log(`Installed PANGEA Desktop brand assets: ${[
   destination,
   lightDestination,
   darkDestination

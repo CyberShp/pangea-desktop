@@ -58,7 +58,12 @@ interface ProfileLockfile {
 
 export type ProfilePluginRemovalRunner = (pluginName: string) => Promise<boolean>
 
-const CORE_BUNDLES = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dshmarket'])
+const CORE_BUNDLES = new Set([
+  '@deepseek-ai/dsh-base',
+  '@deepseek-ai/dsh-web-app',
+  'dsh-pangea-product',
+  'dshmarket'
+])
 const PACKAGE_NAME_PATTERN = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i
 
 function yamlPackageNamePattern(packageName: string): RegExp {
@@ -496,7 +501,7 @@ export async function resetPluginProfile(
       }
     } else {
       // If no specific plugin given, reset to safe core bundles and clean all third-party dependencies
-      const safeBundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']
+      const safeBundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-pangea-product']
       if (manifest.dependencies?.dshmarket) safeBundles.push('dshmarket')
       manifest.dsh ??= {}
       manifest.dsh.profile ??= {}

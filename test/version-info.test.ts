@@ -36,10 +36,10 @@ describe('desktop version information', () => {
     expect(bundledHarnessVersion(root)).toBe('0.1.0-rc.8')
   })
 
-  it('explains that Harness updates arrive with Desktop', () => {
+  it('explains that the PANGEA runtime is released with Desktop', () => {
     expect(aboutDetail('0.1.1', '0.1.0-rc.8', 'zh')).toContain('内置 Harness 版本：0.1.0-rc.8')
     expect(aboutDetail('0.1.1', '0.1.0-rc.8', 'en')).toContain(
-      'Harness is updated with DSH Desktop.'
+      'PANGEA Runtime is released with Desktop.'
     )
   })
 })

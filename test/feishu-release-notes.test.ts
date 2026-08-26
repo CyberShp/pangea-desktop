@@ -95,11 +95,12 @@ Description here.
     }
   })
 
-  it('integrates Feishu release notification into GitHub Actions workflow', () => {
+  it('keeps the cloud release workflow disabled and free of internal delivery hooks', () => {
     const workflow = readFileSync(workflowPath, 'utf8')
-    expect(workflow).toContain('feishu_release_notes.py build-prompt')
-    expect(workflow).toContain('feishu_release_notes.py validate')
-    expect(workflow).toContain('feishu_release_notes.py send')
-    expect(workflow).toContain('FEISHU_RELEASE_WEBHOOK')
+    expect(workflow).toContain('on: []')
+    expect(workflow).toContain('contents: read')
+    expect(workflow).not.toContain('feishu_release_notes.py')
+    expect(workflow).not.toContain('FEISHU_RELEASE_WEBHOOK')
+    expect(workflow).not.toContain('upload-artifact')
   })
 })

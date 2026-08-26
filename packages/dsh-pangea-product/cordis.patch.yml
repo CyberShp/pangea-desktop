@@ -1,0 +1,16 @@
+- insert:
+    - id: better-sidebar
+      name: dsh-better-sidebar
+      disabled: !!js "[...ctx.loader.entries()].some((e) => e.options.name === 'dsh-better-sidebar' && e.options.id !== 'better-sidebar' && !e.disabled)"
+    - id: pangea-workbench
+      name: dsh-pangea
+    - id: pangea-companion
+      name: dsh-pangea-companion
+    - id: pangea-report-policy
+      name: dsh-pangea-companion/report-policy
+    - id: pangea-asset-catalog
+      name: dsh-pangea-asset-catalog
+
+- id: tool-subagent-report
+  name: '@deepseek-ai/dsh-tool-subagent-report'
+  disabled: true

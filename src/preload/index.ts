@@ -316,7 +316,7 @@ function render(): void {
   const status = currentStatus
   const card = element('aside', 'card')
   card.setAttribute('aria-live', 'polite')
-  card.setAttribute('aria-label', locale === 'zh' ? 'DSH Desktop 更新' : 'DSH Desktop update')
+  card.setAttribute('aria-label', locale === 'zh' ? 'PANGEA Desktop 更新' : 'PANGEA Desktop update')
 
   const row = element('div', 'row')
   const badge = element('span', status.phase === 'error' ? 'badge warning' : 'badge')

@@ -37,7 +37,7 @@ export function buildSafeModeViewModel(options: {
   if (options.locale === 'zh') {
     return {
       locale: 'zh',
-      brand: 'DSH Desktop',
+      brand: 'PANGEA Desktop',
       badge: '安全模式',
       heading: '',
       summary: '部分第三方插件可能导致系统异常。安全模式会暂时停用所有第三方插件，确保基础功能正常使用，但不会删除插件。如需恢复正常模式，可尝试卸载近期安装的插件后重启。',
@@ -52,7 +52,7 @@ export function buildSafeModeViewModel(options: {
       agentBusyLabel: '正在关闭…',
       restartLabel: '退出安全模式并重启',
       restartBusyLabel: '正在重启…',
-      quitLabel: '退出 DSH Desktop',
+      quitLabel: '退出 PANGEA Desktop',
       notice: options.notice,
       noticeTone: options.noticeTone
     }
@@ -60,7 +60,7 @@ export function buildSafeModeViewModel(options: {
 
   return {
     locale: 'en',
-    brand: 'DSH Desktop',
+    brand: 'PANGEA Desktop',
     badge: 'Safe Mode',
     heading: '',
     summary: 'Some third-party plugins may cause startup problems. Safe Mode temporarily disables all of them while the Agent remains available; the plugins are not deleted. Remove a recently installed plugin, then restart to try again.',
@@ -75,7 +75,7 @@ export function buildSafeModeViewModel(options: {
     agentBusyLabel: 'Closing…',
     restartLabel: 'Exit Safe Mode and restart',
     restartBusyLabel: 'Restarting…',
-    quitLabel: 'Quit DSH Desktop',
+    quitLabel: 'Quit PANGEA Desktop',
     notice: options.notice,
     noticeTone: options.noticeTone
   }

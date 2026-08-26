@@ -56,7 +56,7 @@ describe('Windows titlebar menu', () => {
     expect(await readFile('src/preload/windows-menu.ts', 'utf8')).toContain(
       "label: zh ? '以安全模式重启…' : 'Restart as Safe Mode…'"
     )
-    expect(desktopMenuCommands).toContain('check-for-updates')
+    expect(desktopMenuCommands).not.toContain('check-for-updates')
     expect(desktopMenuCommands).toContain('toggle-fullscreen')
     expect(isDesktopMenuCommand('copy')).toBe(true)
     expect(isDesktopMenuCommand('run-shell-command')).toBe(false)
@@ -113,11 +113,11 @@ describe('Windows titlebar menu', () => {
     })
   })
 
-  it('shows the bundled Harness version and offers an update check from About', async () => {
+  it('shows the bundled Harness version without exposing the disabled update feed', async () => {
     const main = await readFile('src/main/index.ts', 'utf8')
 
     expect(main).toContain('bundledHarnessVersion(app.getAppPath())')
-    expect(main).toContain('if (result.response === 0) await checkForUpdates(true)')
+    expect(main).not.toContain('checkForUpdates(true)')
     expect(main).toContain('void showAbout(mainWindow).catch(showUnexpectedError)')
   })
 

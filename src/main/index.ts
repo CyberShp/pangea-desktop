@@ -56,7 +56,6 @@ import {
   type WindowFocusIntent
 } from './window-raise'
 import {
-  checkForUpdates,
   registerUpdateHandlers,
   startUpdateManager,
   stopUpdateManager
@@ -74,6 +73,12 @@ import { buildPluginRecoveryViewModel } from './plugin-recovery-view'
 import { buildSafeModeViewModel, shouldStartInSafeMode } from './safe-mode'
 import { aboutDetail, bundledHarnessVersion } from './version-info'
 import { windowsMenuViewBounds } from './windows-menu-view'
+import { ensurePangeaWebProfile } from './state/pangea-profile'
+import {
+  ensurePangeaWorkspace,
+  pangeaEnvironment,
+  pangeaProductPaths
+} from './pangea-product'
 
 type PluginRecoveryAction = 'uninstall' | 'show-log' | 'quit' | 'restart' | 'refresh' | 'safe-mode'
 type SafeModeAction =
@@ -282,17 +287,30 @@ function attachWindowsMenuView(window: BrowserWindow): void {
 
 function configureAppIdentity(): void {
   if (developmentBuild) {
-    app.setName('DSH Desktop Dev')
-    app.setPath('userData', join(app.getPath('appData'), 'dsh-desktop-dev'))
+    app.setName('PANGEA Desktop Dev')
+    app.setPath('userData', join(app.getPath('appData'), 'pangea-desktop-dev'))
     return
   }
 
-  app.setName('DSH Desktop')
+  app.setName('PANGEA Desktop')
   // Keep the historical lowercase directory stable across product-name and
   // branding changes. Harness stores workspaces, sessions, credentials, and
   // custom presets below userData, so deriving this path from app.getName()
   // would make an ordinary upgrade look like a fresh installation.
-  app.setPath('userData', join(app.getPath('appData'), 'dsh-desktop'))
+  app.setPath('userData', join(app.getPath('appData'), 'pangea-desktop'))
+}
+
+async function configurePangeaProduct(): Promise<void> {
+  if (!app.isPackaged) return
+  const paths = pangeaProductPaths(process.resourcesPath)
+  if (!existsSync(paths.pythonExecutable)) {
+    throw new Error(`Embedded PANGEA Python runtime was not found: ${paths.pythonExecutable}`)
+  }
+  if (!existsSync(paths.manifestPath)) {
+    throw new Error(`PANGEA component manifest was not found: ${paths.manifestPath}`)
+  }
+  const dataRoot = await ensurePangeaWorkspace(launchDirectory, paths.runtimeRoot)
+  Object.assign(process.env, pangeaEnvironment(paths, launchDirectory, dataRoot, process.env))
 }
 
 async function syncNativeTheme(window: BrowserWindow): Promise<void> {
@@ -664,7 +682,7 @@ async function auditInstalledLaunchAgents(dshHome: string): Promise<void> {
       const owner = finding.owner === undefined ? '' : ` installed by ${finding.owner}`
       runtime.note(
         finding.action === 'escalated'
-          ? `[desktop] ${finding.label}${owner} keeps recreating a background service that starts DSH Desktop; consider removing that plugin`
+          ? `[desktop] ${finding.label}${owner} keeps recreating a background service that starts PANGEA Desktop; consider removing that plugin`
           : `[desktop] ${finding.action} the background service ${finding.label}${owner}`
       )
     }
@@ -686,6 +704,7 @@ function launchHarness(): Promise<void> {
     // previous one running: start() stops it, but that is after the repair.
     // Stopping here is what makes the window this launch path assumes.
     await runtime.stop()
+    await ensurePangeaWebProfile(dshHome)
     // Before anything else runs pnpm: a store the profile does not pin makes
     // every package operation fail, repairs included.
     const pinned = await ensureStoreDirPinned(dshHome).catch(() => undefined)
@@ -734,7 +753,7 @@ function registerHarnessHandlers(): void {
   ipcMain.removeHandler('harness:restart')
   ipcMain.handle('harness:restart', async (event) => {
     if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
-      throw new Error('Harness restart is only available from the DSH Desktop window.')
+      throw new Error('Harness restart is only available from the PANGEA Desktop window.')
     }
     if (runtime.snapshot().phase !== 'ready') {
       throw new Error('Harness is not ready to restart.')
@@ -748,7 +767,7 @@ function registerHarnessHandlers(): void {
   ipcMain.handle('desktop-menu:execute', async (event, command: unknown) => {
     assertTrustedDesktopMenuEvent(event)
     if (!isDesktopMenuCommand(command)) {
-      throw new Error('Unknown DSH Desktop menu command.')
+      throw new Error('Unknown PANGEA Desktop menu command.')
     }
     const zoomFactor = await executeDesktopMenuCommand(command)
     return zoomFactor === undefined ? { ok: true } : { ok: true, zoomFactor }
@@ -781,7 +800,7 @@ function registerHarnessHandlers(): void {
   ipcMain.handle('desktop-titlebar:set-theme', (event, isDark: unknown) => {
     assertTrustedMainWindowEvent(event)
     if (typeof isDark !== 'boolean') {
-      throw new Error('The DSH Desktop titlebar theme must be a boolean.')
+      throw new Error('The PANGEA Desktop titlebar theme must be a boolean.')
     }
     if (process.platform === 'win32' && mainWindow) {
       applyWindowChromeTheme(mainWindow, isDark)
@@ -802,7 +821,7 @@ function assertTrustedDesktopMenuEvent(event: IpcMainInvokeEvent): void {
     event.sender === windowsMenuView.webContents &&
     event.senderFrame === windowsMenuView.webContents.mainFrame
   if (!fromMainWindow && !fromWindowsMenu) {
-    throw new Error('This action is only available from the DSH Desktop window.')
+    throw new Error('This action is only available from the PANGEA Desktop window.')
   }
 }
 
@@ -824,7 +843,7 @@ function assertTrustedMainWindowEvent(event: IpcMainInvokeEvent): void {
     event.sender !== mainWindow.webContents ||
     event.senderFrame !== mainWindow.webContents.mainFrame
   ) {
-    throw new Error('This action is only available from the main DSH Desktop window.')
+    throw new Error('This action is only available from the main PANGEA Desktop window.')
   }
 }
 
@@ -841,22 +860,20 @@ function assertTrustedSafeModeManagerEvent(event: IpcMainInvokeEvent): void {
 
 async function showAbout(window: BrowserWindow): Promise<void> {
   const locale = harnessLocale()
-  const checkForUpdatesLabel = locale === 'zh' ? '检查更新' : 'Check for Updates'
-  const result = await dialog.showMessageBox(window, {
+  await dialog.showMessageBox(window, {
     type: 'info',
-    title: 'DSH Desktop',
-    message: locale === 'zh' ? '关于 DSH Desktop' : 'About DSH Desktop',
+    title: 'PANGEA Desktop',
+    message: locale === 'zh' ? '关于 PANGEA Desktop' : 'About PANGEA Desktop',
     detail: aboutDetail(
       app.getVersion(),
       bundledHarnessVersion(app.getAppPath()),
       locale
     ),
-    buttons: [checkForUpdatesLabel, locale === 'zh' ? '关闭' : 'Close'],
-    defaultId: 1,
-    cancelId: 1,
+    buttons: [locale === 'zh' ? '关闭' : 'Close'],
+    defaultId: 0,
+    cancelId: 0,
     noLink: true
   })
-  if (result.response === 0) await checkForUpdates(true)
 }
 
 async function executeDesktopMenuCommand(command: DesktopMenuCommand): Promise<number | undefined> {
@@ -876,9 +893,6 @@ async function executeDesktopMenuCommand(command: DesktopMenuCommand): Promise<n
       break
     case 'show-harness-log':
       shell.showItemInFolder(join(app.getPath('logs'), 'harness.log'))
-      break
-    case 'check-for-updates':
-      await checkForUpdates(true)
       break
     case 'undo':
       contents.undo()
@@ -964,7 +978,7 @@ async function waitForPluginRecoveryAction(options: {
 
 function showUnexpectedError(error: unknown): void {
   const message = error instanceof Error ? error.stack ?? error.message : String(error)
-  dialog.showErrorBox('DSH Desktop encountered an error', message)
+  dialog.showErrorBox('PANGEA Desktop encountered an error', message)
 }
 
 async function showPluginRecovery(options?: {
@@ -1301,9 +1315,6 @@ async function showSafeModeManager(): Promise<void> {
 
 function installMenu(): void {
   const isChinese = harnessLocale() === 'zh'
-  const checkForUpdatesLabel = isChinese
-    ? '检查更新…'
-    : 'Check for Updates…'
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === 'darwin'
       ? [
@@ -1311,19 +1322,13 @@ function installMenu(): void {
             label: app.name,
             submenu: [
               {
-                label: isChinese ? '关于 DSH Desktop' : 'About DSH Desktop',
+                label: isChinese ? '关于 PANGEA Desktop' : 'About PANGEA Desktop',
                 click: () => {
                   if (mainWindow && !mainWindow.isDestroyed()) {
                     void showAbout(mainWindow).catch(showUnexpectedError)
                   }
                 }
               },
-              {
-                label: checkForUpdatesLabel,
-                accelerator: 'CmdOrCtrl+U',
-                click: () => void checkForUpdates(true).catch(showUnexpectedError)
-              },
-              { type: 'separator' as const },
               { role: 'hide' as const },
               { role: 'hideOthers' as const },
               { role: 'unhide' as const },
@@ -1355,16 +1360,6 @@ function installMenu(): void {
           label: isChinese ? '查看 Harness 日志' : 'Show Harness Log',
           click: () => shell.showItemInFolder(join(app.getPath('logs'), 'harness.log'))
         },
-        ...(process.platform === 'darwin'
-          ? []
-          : [
-              { type: 'separator' as const },
-              {
-                label: checkForUpdatesLabel,
-                accelerator: 'CmdOrCtrl+U',
-                click: () => void checkForUpdates(true).catch(showUnexpectedError)
-              }
-            ]),
         ...(process.platform === 'darwin'
           ? []
           : [{ type: 'separator' as const }, { role: 'quit' as const }])
@@ -1408,7 +1403,7 @@ async function showMobilePairing(): Promise<void> {
     const options: MessageBoxOptions = {
       type: 'info',
       message: 'Harness is still starting.',
-      detail: 'Wait until DSH Desktop is ready, then connect your phone again.',
+      detail: 'Wait until PANGEA Desktop is ready, then connect your phone again.',
       buttons: ['OK']
     }
     await (mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options))
@@ -1463,6 +1458,7 @@ async function showMobilePairing(): Promise<void> {
 async function bootstrap(): Promise<void> {
   if (process.platform === 'darwin') app.dock?.setIcon(desktopIconPath())
   launchDirectory = await ensureLaunchRoot(app.getPath('userData'))
+  await configurePangeaProduct()
   registerUpdateHandlers()
   nativeTheme.themeSource = harnessThemePreference()
   createWindow()
