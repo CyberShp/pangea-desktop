@@ -93,6 +93,9 @@ jobs:
           $KnownHostsPath = Join-Path $SshRoot 'known_hosts'
           $BatchPath = Join-Path $SshRoot 'upload.sftp'
           [IO.File]::WriteAllBytes($KeyPath, [Convert]::FromBase64String($env:ARTIFACT_SSH_KEY_B64))
+          $CurrentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+          & icacls $KeyPath /inheritance:r /grant:r "${CurrentUser}:(R)" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not restrict the artifact SSH key permissions.' }
           [IO.File]::WriteAllText($KnownHostsPath, "$env:ARTIFACT_KNOWN_HOSTS`n")
           $PackageName = "pangea-desktop-$env:RELEASE_VERSION-windows-x64-portable.zip"
           $PackagePath = (Resolve-Path "dist/$PackageName").Path.Replace('\', '/')
