@@ -162,7 +162,7 @@
         "to": "app/node_modules/dsh-pangea-asset-catalog"
       },
       {
-        "from": ".pangea-build/runtime/pangea-agent",
+        "from": ".pangea-build/runtime/pangea-runtime",
         "to": "pangea-runtime"
       },
       {

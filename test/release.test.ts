@@ -41,7 +41,7 @@ describe('PANGEA Desktop release contract', () => {
         from: '.pangea-build/plugins/dsh-pangea-asset-catalog',
         to: 'app/node_modules/dsh-pangea-asset-catalog'
       },
-      { from: '.pangea-build/runtime/pangea-agent', to: 'pangea-runtime' },
+      { from: '.pangea-build/runtime/pangea-runtime', to: 'pangea-runtime' },
       { from: '.pangea-build/runtime/python', to: 'pangea-python' },
       { from: '.pangea-build/manifest.json', to: 'pangea-manifest.json' },
       { from: '.pangea-build/update', to: 'update' },
@@ -87,6 +87,7 @@ describe('PANGEA Desktop release contract', () => {
     expect(script).toContain("Invoke-Checked 'npm' @('run', 'package:dir')")
     expect(script).toContain('Get-VerifiedDownload')
     expect(script).toContain('pangea_agent.cli.main')
+    expect(script).toContain("'..\\pangea-runtime\\src'")
     expect(script).toContain('prepare-portable-update.mjs')
     expect(script).toContain('create-signed-portable-package.mjs')
     expect(script).toContain('UpdatePrivateKeyPath is required')

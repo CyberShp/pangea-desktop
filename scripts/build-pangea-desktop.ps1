@@ -150,7 +150,7 @@ foreach ($Plugin in @('dsh-pangea', 'dsh-pangea-companion', 'dsh-pangea-asset-ca
 
 Write-Host 'Building the embedded PANGEA Python runtime...'
 $PythonRoot = Join-Path $RuntimeRoot 'python'
-$AgentRuntime = Join-Path $RuntimeRoot 'pangea-agent'
+$AgentRuntime = Join-Path $RuntimeRoot 'pangea-runtime'
 Reset-StageDirectory $PythonRoot
 Reset-StageDirectory $AgentRuntime
 
@@ -165,6 +165,7 @@ if (-not $PathFile) { throw 'The embedded Python path configuration was not foun
 $PathLines = Get-Content $PathFile.FullName
 $PathLines = $PathLines | ForEach-Object { if ($_ -eq '#import site') { 'import site' } else { $_ } }
 if ($PathLines -notcontains 'Lib\site-packages') { $PathLines += 'Lib\site-packages' }
+if ($PathLines -notcontains '..\pangea-runtime\src') { $PathLines += '..\pangea-runtime\src' }
 Set-Content $PathFile.FullName $PathLines -Encoding ASCII
 New-Item (Join-Path $PythonRoot 'Lib/site-packages') -ItemType Directory -Force | Out-Null
 
