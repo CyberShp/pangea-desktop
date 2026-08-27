@@ -60,7 +60,6 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/build-pangea-desktop.ps1 `
-            -ResolveComponentBranches `
             -UpdatePrivateKeyPath ./.pangea-keys/update-private.pem
 
       - name: Upload workflow artifact

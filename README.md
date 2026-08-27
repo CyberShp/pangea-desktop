@@ -2,7 +2,7 @@
 
 PANGEA Desktop is a portable Windows distribution of the PANGEA analysis product. One ZIP contains the DSH desktop shell, the PANGEA workbench plugins, a locked `pangea-agent` runtime and embedded Python.
 
-The three implementation repositories remain independent. [`pangea.components.json`](./pangea.components.json) records the selected source branches, exact fallback commits and runtime downloads. A cloud release resolves those branches once, checks out the resulting commits into a temporary staging directory and records them in the package manifest.
+The three implementation repositories remain independent. [`pangea.components.json`](./pangea.components.json) records their source branches, exact approved commits and runtime downloads. A cloud release checks out those pinned commits into a temporary staging directory and records them in the package manifest. Updating a component is a separate reviewed operation from creating a new package version.
 
 ## Build on Windows x64
 
@@ -13,7 +13,6 @@ git clone ssh://git@ssh.github.com:443/CyberShp/pangea-desktop.git
 cd pangea-desktop
 node .\scripts\generate-update-key.mjs --output .\.pangea-keys\update-private.pem
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-pangea-desktop.ps1 `
-  -ResolveComponentBranches `
   -UpdatePrivateKeyPath .\.pangea-keys\update-private.pem
 ```
 

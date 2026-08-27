@@ -73,7 +73,7 @@ describe('PANGEA Desktop release contract', () => {
     expect(safeMode).toContain("'dsh-pangea-product'")
     expect(workflow).toContain('workflow_dispatch:')
     expect(workflow).toContain('runs-on: windows-2022')
-    expect(workflow).toContain('-ResolveComponentBranches')
+    expect(workflow).not.toContain('-ResolveComponentBranches')
     expect(workflow).toContain('PANGEA_ARTIFACT_SSH_KEY_B64')
     expect(workflow).toContain('icacls $KeyPath /inheritance:r')
   })

@@ -2,7 +2,7 @@
 
 PANGEA Desktop 是面向 Windows 的便携式 PANGEA 分析产品。一个 ZIP 同时包含 DSH Desktop 外壳、PANGEA 工作台插件、固定版本的 `pangea-agent` Runtime 和内置 Python。
 
-三个实现仓库仍然独立维护。[`pangea.components.json`](./pangea.components.json) 记录选定分支、兜底提交和 Runtime 下载。云端发布会先把分支解析成具体提交，再放进临时目录，并把实际提交写进包内清单。
+三个实现仓库仍然独立维护。[`pangea.components.json`](./pangea.components.json) 记录来源分支、已确认的准确提交和 Runtime 下载。云端发布会把这些锁定提交放进临时目录，并将它们写入包内清单。升级组件与创建新安装包版本是两个独立操作。
 
 ## 在 Windows x64 构建
 
@@ -13,7 +13,6 @@ git clone ssh://git@ssh.github.com:443/CyberShp/pangea-desktop.git
 cd pangea-desktop
 node .\scripts\generate-update-key.mjs --output .\.pangea-keys\update-private.pem
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-pangea-desktop.ps1 `
-  -ResolveComponentBranches `
   -UpdatePrivateKeyPath .\.pangea-keys\update-private.pem
 ```
 
