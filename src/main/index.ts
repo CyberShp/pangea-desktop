@@ -349,14 +349,11 @@ async function syncNativeTheme(window: BrowserWindow): Promise<void> {
           document.body.appendChild(dragRegion)
         }
       }
-      if (document.body.hasAttribute('data-ds-dark-theme')) return true
-      const color = getComputedStyle(document.body).backgroundColor
-      const channels = color.match(/[\\d.]+/g)?.slice(0, 3).map(Number)
-      if (!channels || channels.length < 3) {
-        return matchMedia('(prefers-color-scheme: dark)').matches
+      if (document.body.hasAttribute('data-ds-dark-theme')) {
+        document.body.removeAttribute('data-ds-dark-theme')
       }
-      const [red, green, blue] = channels
-      return red * 0.2126 + green * 0.7152 + blue * 0.0722 < 128
+      document.documentElement.style.colorScheme = 'light'
+      return false
     })()`
   )
   applyWindowChromeTheme(window, isDark)
@@ -449,17 +446,7 @@ function configureApplicationLocale(): void {
 }
 
 function harnessThemePreference(): 'light' | 'dark' | 'system' {
-  try {
-    const settings = parse(
-      readFileSync(join(app.getPath('userData'), 'harness', 'settings.yaml'), 'utf8')
-    ) as { 'ui-theme'?: { preference?: unknown } }
-    const preference = settings['ui-theme']?.preference
-    return preference === 'light' || preference === 'dark' || preference === 'system'
-      ? preference
-      : 'system'
-  } catch {
-    return 'system'
-  }
+  return 'light'
 }
 
 function isPluginRecoveryPage(url: string): boolean {
@@ -808,7 +795,7 @@ function registerHarnessHandlers(): void {
       throw new Error('The PANGEA Desktop titlebar theme must be a boolean.')
     }
     if (process.platform === 'win32' && mainWindow) {
-      applyWindowChromeTheme(mainWindow, isDark)
+      applyWindowChromeTheme(mainWindow, false)
     }
     return { ok: true }
   })
