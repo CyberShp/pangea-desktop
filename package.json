@@ -1,7 +1,7 @@
 {
   "name": "pangea-desktop",
   "version": "0.1.0",
-  "description": "Windows desktop distribution for PANGEA analysis.",
+  "description": "AI-first desktop test workbench for PANGEA analysis and test plugins.",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
@@ -128,6 +128,14 @@
       {
         "from": "build/splash.html",
         "to": "splash.html"
+      },
+      {
+        "from": "build/splash-logo-light.png",
+        "to": "splash-logo-light.png"
+      },
+      {
+        "from": "build/splash-logo-dark.png",
+        "to": "splash-logo-dark.png"
       },
       {
         "from": "build/dsh-loader.gif",

@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js b/node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js
-index b75d41b..6d6d7e7 100644
+index b75d41b..8d74a4b 100644
 --- a/node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js
 +++ b/node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js
 @@ -23,16 +23,23 @@ window.__ModuleLoader__.load({
@@ -28,59 +28,44 @@ index b75d41b..6d6d7e7 100644
  			"brand": "hHd-Xa_brand",
  			"brandIdentity": "hHd-Xa_brandIdentity",
  			"brandMark": "hHd-Xa_brandMark",
-@@ -61,6 +68,51 @@ window.__ModuleLoader__.load({
+@@ -61,6 +68,36 @@ window.__ModuleLoader__.load({
  			"wide-in": "hHd-Xa_wide-in"
  		};
  		//#endregion
 +		//#region lib/types/client/DshDesktopLogo.js
 +		const DSH_DESKTOP_LIGHT_LOGO_URL = "/dsh-desktop-logo-light.png";
 +		const DSH_DESKTOP_DARK_LOGO_URL = "/dsh-desktop-logo-dark.png";
-+		function DshDesktopLogo({ height = 18, className }) {
-+			return (0, react_jsx_runtime.jsxs)("svg", {
-+				width: height * 1030 / 590,
-+				height,
++		function DshDesktopLogo({ height = 18, className, compact = false }) {
++			const lightLogo = compact ? "/dsh-desktop-logo-mark.png" : DSH_DESKTOP_LIGHT_LOGO_URL;
++			const darkLogo = compact ? "/dsh-desktop-logo-mark.png" : DSH_DESKTOP_DARK_LOGO_URL;
++			return (0, react_jsx_runtime.jsxs)("span", {
 +				className,
-+				viewBox: "150 330 1030 590",
-+				fill: "none",
++				style: { height, display: "inline-flex", alignItems: "center", maxWidth: "100%" },
 +				"aria-hidden": "true",
 +				children: [(0, react_jsx_runtime.jsx)("style", {
 +					children: ".dshDesktopLogoDark{display:none}body[data-ds-dark-theme] .dshDesktopLogoLight{display:none}body[data-ds-dark-theme] .dshDesktopLogoDark{display:block}"
-+				}), (0, react_jsx_runtime.jsx)("image", {
++				}), (0, react_jsx_runtime.jsx)("img", {
 +					className: "dshDesktopLogoLight",
-+					href: DSH_DESKTOP_LIGHT_LOGO_URL,
-+					x: 150,
-+					y: 330,
-+					width: 1030,
-+					height: 590,
-+					preserveAspectRatio: "xMidYMid meet"
-+				}), (0, react_jsx_runtime.jsx)("image", {
++					src: lightLogo,
++					style: { height: "100%", width: "auto", maxWidth: "100%", objectFit: "contain" }
++				}), (0, react_jsx_runtime.jsx)("img", {
 +					className: "dshDesktopLogoDark",
-+					href: DSH_DESKTOP_DARK_LOGO_URL,
-+					x: 150,
-+					y: 330,
-+					width: 1030,
-+					height: 590,
-+					preserveAspectRatio: "xMidYMid meet"
++					src: darkLogo,
++					style: { height: "100%", width: "auto", maxWidth: "100%", objectFit: "contain" }
 +				})]
 +			});
 +		}
 +		function DshDesktopBrand() {
-+			return (0, react_jsx_runtime.jsxs)("span", {
++			return (0, react_jsx_runtime.jsx)("span", {
 +				className: SidebarRoot_module_css_default.brandLockup,
-+				children: [(0, react_jsx_runtime.jsx)("span", {
-+					className: SidebarRoot_module_css_default.brandMark,
-+					children: (0, react_jsx_runtime.jsx)(DshDesktopLogo, {})
-+				}), (0, react_jsx_runtime.jsx)("span", {
-+					className: SidebarRoot_module_css_default.brandWordmark,
-+					children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.BrandWordmark, {})
-+				})]
++				children: (0, react_jsx_runtime.jsx)(DshDesktopLogo, { height: 24 })
 +			});
 +		}
 +		//#endregion
  		//#region lib/types/client/SidebarRoot.js
  		/**
  		* Sidebar shell: column geometry only. Collapse is a slide plus crossfade:
-@@ -143,6 +195,8 @@ window.__ModuleLoader__.load({
+@@ -143,6 +180,8 @@ window.__ModuleLoader__.load({
  			}, [pointerInside]);
  			return (0, react_jsx_runtime.jsxs)("div", {
  				ref: column,
@@ -89,7 +74,7 @@ index b75d41b..6d6d7e7 100644
  				className: clsx(SidebarRoot_module_css_default.root, !wide && SidebarRoot_module_css_default.collapsed, !wide && everWide.current && SidebarRoot_module_css_default.railIn, collapsed && wide && SidebarRoot_module_css_default.fading, !pointerInside && SidebarRoot_module_css_default.quietBars),
  				style: wide ? { width: collapsed ? lastWideWidth.current : width } : void 0,
  				onPointerEnter: () => {
-@@ -162,23 +216,7 @@ window.__ModuleLoader__.load({
+@@ -162,23 +201,7 @@ window.__ModuleLoader__.load({
  							onClick: () => {
  								startSession();
  							},
@@ -114,7 +99,7 @@ index b75d41b..6d6d7e7 100644
  						}), (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
  							label: collapsed ? t("toggle.open") : t("toggle.collapse"),
  							delayMs: 500,
-@@ -189,10 +227,9 @@ window.__ModuleLoader__.load({
+@@ -189,10 +212,10 @@ window.__ModuleLoader__.load({
  								onClick: () => {
  									toggleSidebar();
  								},
@@ -124,11 +109,12 @@ index b75d41b..6d6d7e7 100644
 -									children: renderSlot("sidebar.brand.mark", { size: 24 }, { fallback: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.FishLogo, { size: 24 }) })
 +								children: [!wide && (0, react_jsx_runtime.jsx)(DshDesktopLogo, {
 +									className: SidebarRoot_module_css_default.railFish,
-+									height: 17
++									height: 20,
++									compact: true
  								}), (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconPanelLeftOutline16, {
  									className: SidebarRoot_module_css_default.panelIcon,
  									size: wide ? 16 : 18
-@@ -227,11 +264,13 @@ window.__ModuleLoader__.load({
+@@ -227,11 +250,13 @@ window.__ModuleLoader__.load({
  						})
  					}),
  					(0, react_jsx_runtime.jsxs)("div", {
