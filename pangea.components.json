@@ -13,7 +13,7 @@
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
     "branch": "codex/pangea-workflow-rebuild",
-    "commit": "48dec5f9261fee728a9d9474e46d1abdba6d6a63"
+    "commit": "c71ea5f0ca03ac1240fd15b4189d5f7dbadbdec1"
   },
   "python": {
     "version": "3.12.10",
