@@ -314,8 +314,15 @@ async function configurePangeaProduct(): Promise<void> {
   if (!existsSync(paths.manifestPath)) {
     throw new Error(`PANGEA component manifest was not found: ${paths.manifestPath}`)
   }
-  const dataRoot = await ensurePangeaWorkspace(launchDirectory, paths.runtimeRoot)
-  Object.assign(process.env, pangeaEnvironment(paths, launchDirectory, dataRoot, process.env))
+  const desktopVersion = app.getVersion()
+  const dataRoot = await ensurePangeaWorkspace(launchDirectory, paths.runtimeRoot, {
+    pythonExecutable: paths.pythonExecutable,
+    desktopVersion
+  })
+  Object.assign(
+    process.env,
+    pangeaEnvironment(paths, launchDirectory, dataRoot, process.env, desktopVersion)
+  )
 }
 
 async function syncNativeTheme(window: BrowserWindow): Promise<void> {
@@ -1511,7 +1518,7 @@ async function bootstrap(): Promise<void> {
     }
   })
   if (!startInSafeMode) void mobileBridge.start().catch(showUnexpectedError)
-  ipcMain.handle('directory-picker:open', async (event) => {
+  ipcMain.handle('directory-picker:open', async (event, options?: unknown) => {
     if (
       !mainWindow ||
       mainWindow.isDestroyed() ||
@@ -1521,8 +1528,14 @@ async function bootstrap(): Promise<void> {
       throw new Error('Directory picker requests are only allowed from the main Harness window')
     }
 
+    const purpose = options && typeof options === 'object' && 'purpose' in options
+      ? (options as { purpose?: unknown }).purpose
+      : undefined
+    const repositoryPicker = purpose === 'repository'
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: harnessLocale() === 'zh' ? '选择工作区目录' : 'Select Workspace Directory',
+      title: harnessLocale() === 'zh'
+        ? repositoryPicker ? '选择源码仓库目录' : '选择工作区目录'
+        : repositoryPicker ? 'Select Source Repository' : 'Select Workspace Directory',
       properties: ['openDirectory']
     })
     return result.canceled ? null : result.filePaths[0] ?? null
