@@ -50,6 +50,18 @@ describe('desktop update card visibility', () => {
     expect(updateMessage(downloading, 'zh')).toBe('正在校验升级包 42%')
     expect(updateMessage(downloading, 'en')).toBe('Verifying update package 42%')
   })
+
+  it('shows a persisted install failure after the working version restarts', () => {
+    const failed: UpdateStatus = {
+      phase: 'install-error',
+      currentVersion: '1.0.0',
+      availableVersion: '1.1.0',
+      message: 'restored',
+      manual: true
+    }
+    expect(shouldShowUpdate(failed)).toBe(true)
+    expect(updateMessage(failed, 'zh')).toBe('PANGEA Desktop 1.1.0 升级未完成')
+  })
 })
 
 describe('secure update card wiring', () => {

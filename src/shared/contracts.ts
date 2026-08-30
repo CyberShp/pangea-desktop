@@ -18,6 +18,7 @@ export type UpdatePhase =
   | 'checking'
   | 'downloading'
   | 'downloaded'
+  | 'install-error'
   | 'error'
   | 'unsupported'
 

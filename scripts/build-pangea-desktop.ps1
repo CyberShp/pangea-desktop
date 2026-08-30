@@ -20,6 +20,17 @@ $CacheRoot = Join-Path $StageRoot 'cache'
 $UpdateRoot = Join-Path $StageRoot 'update'
 $Components = Get-Content (Join-Path $ProjectRoot 'pangea.components.json') -Raw | ConvertFrom-Json
 
+$UpdaterTokens = $null
+$UpdaterErrors = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile(
+  (Join-Path $ProjectRoot 'build/apply-portable-update.ps1'),
+  [ref]$UpdaterTokens,
+  [ref]$UpdaterErrors
+)
+if ($UpdaterErrors.Count -gt 0) {
+  throw "Portable updater script is invalid: $($UpdaterErrors[0].Message)"
+}
+
 function Invoke-Checked {
   param([string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory = $ProjectRoot)
   Push-Location $WorkingDirectory
@@ -230,6 +241,10 @@ if (-not $SkipTests) {
   Invoke-Checked 'npm' @('run', 'typecheck')
   Invoke-Checked 'npm' @(
     'test', '--', '--run',
+    'test/product-workspace-bootstrap.test.ts',
+    'test/update-state.test.ts',
+    'test/update-ui.test.ts',
+    'test/finalize-windows-release.test.ts',
     'test/pangea-product.test.ts',
     'test/pangea-profile.test.ts',
     'test/safe-mode.test.ts',

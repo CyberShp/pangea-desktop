@@ -5,6 +5,7 @@ export type UpdateStateEvent =
   | { type: 'progress'; percent: number }
   | { type: 'downloaded'; version: string }
   | { type: 'install-error'; message: string }
+  | { type: 'restore-error'; version: string; message: string }
   | { type: 'error'; message: string }
   | { type: 'unsupported'; message: string }
   | { type: 'reset' }
@@ -28,6 +29,14 @@ export function reduceUpdateStatus(
       return { ...base, phase: 'downloaded', availableVersion: event.version }
     case 'install-error':
       return { ...current, phase: 'downloaded', message: event.message }
+    case 'restore-error':
+      return {
+        ...base,
+        phase: 'install-error',
+        manual: true,
+        availableVersion: event.version,
+        message: event.message
+      }
     case 'error':
       return { ...base, phase: 'error', message: event.message }
     case 'unsupported':

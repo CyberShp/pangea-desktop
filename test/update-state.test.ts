@@ -62,4 +62,18 @@ describe('desktop update state', () => {
       message: 'analysis is still running'
     })
   })
+
+  it('restores a failed external update as a visible manual error', () => {
+    expect(reduceUpdateStatus(initialUpdateStatus('1.0.0'), {
+      type: 'restore-error',
+      version: '1.1.0',
+      message: 'the working version was restored'
+    })).toEqual({
+      phase: 'install-error',
+      currentVersion: '1.0.0',
+      availableVersion: '1.1.0',
+      manual: true,
+      message: 'the working version was restored'
+    })
+  })
 })

@@ -271,6 +271,7 @@ window.addEventListener('unhandledrejection', (event) => {
 contextBridge.exposeInMainWorld(
   'dshDesktop',
   Object.freeze({
+    productWorkspace: (): Promise<string> => ipcRenderer.invoke('pangea:product-workspace'),
     restartHarness: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('harness:restart')
   })
 )

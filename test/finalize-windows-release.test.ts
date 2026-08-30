@@ -85,9 +85,12 @@ describe('signed portable Windows package', () => {
     ])
     expect(manager).toContain('expected_size: imported.packageSize')
     expect(manager).toContain('expected_sha256: imported.packageSha256')
+    expect(manager).toContain('result_path: resultPath')
     expect(helper).toContain('Get-FileHash $PackagePath -Algorithm SHA256')
     expect(helper).toContain('Move-Item $BackupRoot $InstallRoot')
-    expect(helper).toContain('Start-Process -FilePath $RestoredExecutable')
+    expect(helper).toContain("Write-UpdateResult 'failed' $FailureMessage")
+    expect(helper).toContain('Start-Process -FilePath $InstalledExecutable')
+    expect(helper).toContain('New-Object System.Windows.Forms.ProgressBar')
   })
 })
 

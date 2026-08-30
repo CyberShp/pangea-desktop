@@ -749,6 +749,12 @@ function restartHarness(): Promise<void> {
 }
 
 function registerHarnessHandlers(): void {
+  ipcMain.removeHandler('pangea:product-workspace')
+  ipcMain.handle('pangea:product-workspace', (event) => {
+    assertTrustedMainWindowEvent(event)
+    return launchDirectory
+  })
+
   ipcMain.removeHandler('harness:restart')
   ipcMain.handle('harness:restart', async (event) => {
     if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {

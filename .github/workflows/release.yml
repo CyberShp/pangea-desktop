@@ -15,7 +15,7 @@ on:
       version:
         description: Base version for test builds or exact version for releases (SemVer)
         required: true
-        default: 0.1.2
+        default: 0.1.3
         type: string
 
 permissions:

@@ -4,7 +4,7 @@ export type UpdateLocale = 'en' | 'zh'
 
 export function shouldShowUpdate(status: UpdateStatus): boolean {
   if (['downloading', 'downloaded'].includes(status.phase)) return true
-  return status.manual && ['checking', 'error', 'unsupported'].includes(status.phase)
+  return status.manual && ['checking', 'install-error', 'error', 'unsupported'].includes(status.phase)
 }
 
 export function isUpdateDismissed(
@@ -50,6 +50,13 @@ export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): Upda
           ? `${version} 已验证；完成当前分析后可重启升级。`
           : `${version} is verified. Restart after current analysis finishes.`
       }
+    case 'install-error':
+      return {
+        title: zh ? '升级未完成' : 'Update was not completed',
+        description: zh
+          ? `${version} 未安装，当前可用版本已重新启动。`
+          : `${version} was not installed. The current working version was restarted.`
+      }
     case 'unsupported':
       return {
         title: zh ? '无法导入升级包' : 'Package import unavailable',
@@ -78,6 +85,8 @@ export function updateMessage(status: UpdateStatus, locale: UpdateLocale): strin
     }
     case 'downloaded':
       return zh ? `PANGEA Desktop${version} 已验证完成` : `PANGEA Desktop${version} is verified and ready`
+    case 'install-error':
+      return zh ? `PANGEA Desktop${version} 升级未完成` : `PANGEA Desktop${version} update was not completed`
     case 'unsupported':
       return zh ? '当前版本无法导入升级包' : 'Package import is unavailable in this build'
     case 'error':

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { copyFile, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import type { UpdateStatus } from '../../shared/contracts'
@@ -12,6 +12,15 @@ import { initialUpdateStatus, reduceUpdateStatus, type UpdateStateEvent } from '
 interface LoadedUpdateConfig {
   publicKeyPem: string
 }
+
+interface PortableUpdateResult {
+  schema_version: 1
+  status: 'success' | 'failed'
+  version: string
+  message?: string
+}
+
+const LAST_UPDATE_RESULT = 'last-update-result.json'
 
 let status = initialUpdateStatus(app.getVersion())
 let prepareToInstall: (() => Promise<void>) | undefined
@@ -37,6 +46,7 @@ export function registerUpdateHandlers(): void {
 export function startUpdateManager(options: { prepareToInstall: () => Promise<void> }): void {
   prepareToInstall = options.prepareToInstall
   loadedConfig = loadUpdateConfig()
+  restoreLastUpdateFailure()
 }
 
 export async function importPortableUpdatePackage(): Promise<UpdateStatus> {
@@ -107,9 +117,11 @@ async function launchPortableUpdateHelper(imported: StagedPortablePackage): Prom
   const helperPath = join(updateRoot, 'apply-portable-update.ps1')
   const planPath = join(updateRoot, 'update-plan.json')
   const healthMarker = join(updateRoot, `healthy-${randomUUID()}.json`)
+  const resultPath = join(app.getPath('userData'), 'updates', LAST_UPDATE_RESULT)
   const helperSource = join(process.resourcesPath, 'update', 'apply-portable-update.ps1')
   if (!existsSync(helperSource)) throw new Error('升级助手缺失。')
   await copyFile(helperSource, helperPath)
+  await rm(resultPath, { force: true })
   await writeFile(planPath, JSON.stringify({
     schema_version: 1,
     parent_pid: process.pid,
@@ -120,11 +132,12 @@ async function launchPortableUpdateHelper(imported: StagedPortablePackage): Prom
     expected_size: imported.packageSize,
     expected_sha256: imported.packageSha256,
     health_marker: healthMarker,
+    result_path: resultPath,
     log_path: join(updateRoot, 'apply-update.log')
   }, null, 2), 'utf8')
 
   const child = spawn('powershell.exe', [
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Sta', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass',
     '-File', helperPath, '-PlanPath', planPath
   ], {
     cwd: updateRoot,
@@ -137,6 +150,28 @@ async function launchPortableUpdateHelper(imported: StagedPortablePackage): Prom
     child.once('error', reject)
   })
   child.unref()
+}
+
+function restoreLastUpdateFailure(): void {
+  try {
+    const resultPath = join(app.getPath('userData'), 'updates', LAST_UPDATE_RESULT)
+    const serialized = readFileSync(resultPath, 'utf8').replace(/^\uFEFF/, '')
+    rmSync(resultPath, { force: true })
+    const result = JSON.parse(serialized) as PortableUpdateResult
+    if (
+      result.schema_version !== 1
+      || result.status !== 'failed'
+      || typeof result.version !== 'string'
+      || typeof result.message !== 'string'
+    ) return
+    transition({
+      type: 'restore-error',
+      version: result.version,
+      message: `升级到 v${result.version} 失败：${result.message}`
+    }, true)
+  } catch {
+    // A missing result means there is no previous update outcome to report.
+  }
 }
 
 export function stopUpdateManager(): void {
