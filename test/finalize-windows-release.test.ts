@@ -15,17 +15,18 @@ afterEach(async () => {
 
 describe('signed portable Windows package', () => {
   it('uses one ZIP for extraction and in-app package import', async () => {
+    const packageVersion = JSON.parse(await readFile('package.json', 'utf8')).version as string
     const root = await mkdtemp(path.join(tmpdir(), 'pangea-portable-package-'))
     temporaryRoots.push(root)
     const appDirectory = path.join(root, 'win-unpacked')
     const updateDirectory = path.join(appDirectory, 'resources', 'update')
     const privateKeyPath = path.join(root, 'update-private.pem')
-    const outputPath = path.join(root, 'pangea-desktop-0.1.0-windows-x64-portable.zip')
+    const outputPath = path.join(root, `pangea-desktop-${packageVersion}-windows-x64-portable.zip`)
     await mkdir(updateDirectory, { recursive: true })
     await Promise.all([
       writeFile(path.join(appDirectory, 'PANGEA Desktop.exe'), 'desktop executable'),
       writeFile(path.join(appDirectory, 'resources', 'pangea-manifest.json'), JSON.stringify({
-        product: { name: 'PANGEA Desktop', version: '0.1.0' },
+        product: { name: 'PANGEA Desktop', version: packageVersion },
         components: { python: { version: '3.12.10' } }
       })),
       writeFile(path.join(updateDirectory, 'apply-portable-update.ps1'), 'Write-Host update')
@@ -60,7 +61,7 @@ describe('signed portable Windows package', () => {
       currentVersion: '0.0.9',
       onProgress: (percent) => { lastProgress = percent }
     })
-    expect(staged.manifest.version).toBe('0.1.0')
+    expect(staged.manifest.version).toBe(packageVersion)
     expect(staged.manifest.components?.python).toEqual({ version: '3.12.10' })
     expect(staged.manifest.files.map((file) => file.path)).toContain('PANGEA Desktop.exe')
     expect(staged.manifest.files.some((file) => file.path.includes('update-private'))).toBe(false)
