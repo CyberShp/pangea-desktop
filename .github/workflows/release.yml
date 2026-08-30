@@ -168,15 +168,23 @@ jobs:
           $PackageName = "pangea-desktop-$env:RELEASE_VERSION-windows-x64-portable.zip"
           $PackagePath = (Resolve-Path "dist/$PackageName").Path.Replace('\', '/')
           $HashPath = (Resolve-Path "dist/$PackageName.sha256").Path.Replace('\', '/')
+          $RemotePackagePath = "/uploads/$PackageName"
+          $RemoteHashPath = "$RemotePackagePath.sha256"
+          $PendingSuffix = ".pending.$env:GITHUB_RUN_ID"
           @(
-            "put `"$PackagePath`" `"/uploads/$PackageName`""
-            "put `"$HashPath`" `"/uploads/$PackageName.sha256`""
+            "put `"$PackagePath`" `"$RemotePackagePath$PendingSuffix`""
+            "put `"$HashPath`" `"$RemoteHashPath$PendingSuffix`""
+            "rename `"$RemotePackagePath$PendingSuffix`" `"$RemotePackagePath`""
+            "rename `"$RemoteHashPath$PendingSuffix`" `"$RemoteHashPath`""
           ) | Set-Content $BatchPath -Encoding ASCII
           & sftp `
             -b $BatchPath `
             -i $KeyPath `
             -o BatchMode=yes `
+            -o ConnectTimeout=20 `
             -o IdentitiesOnly=yes `
+            -o ServerAliveInterval=30 `
+            -o ServerAliveCountMax=6 `
             -o StrictHostKeyChecking=yes `
             -o "UserKnownHostsFile=$KnownHostsPath" `
             "pangea-artifact@$env:ARTIFACT_HOST"
