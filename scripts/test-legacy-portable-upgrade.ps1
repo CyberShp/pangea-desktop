@@ -20,7 +20,7 @@ $OriginalLocalAppData = $env:LOCALAPPDATA
 
 try {
   New-Item $InstallRoot -ItemType Directory -Force | Out-Null
-  Set-Content (Join-Path $InstallRoot 'PANGEA Desktop.exe') 'legacy placeholder' -Encoding ASCII
+  Copy-Item (Join-Path $env:SystemRoot 'System32\cmd.exe') (Join-Path $InstallRoot 'PANGEA Desktop.exe')
 
   $LegacySource = & git -C $ProjectRoot show "$LegacyCommit`:build/apply-portable-update.ps1"
   if ($LASTEXITCODE -ne 0 -or -not $LegacySource) {
@@ -78,6 +78,13 @@ try {
   }
 
   Write-Host "Legacy portable upgrade reached PANGEA workspace readiness on $ExpectedVersion."
+} catch {
+  Write-Host 'Legacy upgrade diagnostics:'
+  Get-ChildItem $TemporaryRoot -Recurse -File -Filter '*.log' -ErrorAction SilentlyContinue | ForEach-Object {
+    Write-Host "--- $($_.FullName.Substring($TemporaryRoot.Length + 1))"
+    Get-Content $_.FullName -Tail 250 -ErrorAction SilentlyContinue | Out-Host
+  }
+  throw
 } finally {
   Get-Process -ErrorAction SilentlyContinue | Where-Object {
     try { $_.Path -and $_.Path.StartsWith($InstallRoot, [System.StringComparison]::OrdinalIgnoreCase) }

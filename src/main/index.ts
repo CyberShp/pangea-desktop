@@ -534,6 +534,7 @@ function createWindow(): BrowserWindow {
     const sourceUrl = details.sourceId || window.webContents.getURL()
     if (!sourceUrl.startsWith('http://127.0.0.1:')) return
     appendRendererPluginFailureLog(details.message)
+    runtime?.note(`[renderer] ${details.message}`)
   })
   installPluginRecoveryNavigation(window)
   secureWindow(window)
@@ -757,6 +758,7 @@ function registerHarnessHandlers(onProductWorkspaceReady: () => void): void {
   ipcMain.removeHandler('pangea:product-workspace-ready')
   ipcMain.handle('pangea:product-workspace-ready', (event) => {
     assertTrustedMainWindowEvent(event)
+    runtime?.note(`[desktop] product workspace ready: ${launchDirectory}`)
     onProductWorkspaceReady()
     return { ok: true }
   })

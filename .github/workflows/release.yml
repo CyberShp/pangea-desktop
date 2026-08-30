@@ -83,15 +83,6 @@ jobs:
           ./scripts/build-pangea-desktop.ps1 `
             -UpdatePrivateKeyPath ./.pangea-keys/update-private.pem
 
-      - name: Validate legacy in-app upgrade to 0.1.3
-        if: inputs.channel == 'release' && inputs.version == '0.1.3'
-        shell: pwsh
-        timeout-minutes: 6
-        run: |
-          ./scripts/test-legacy-portable-upgrade.ps1 `
-            -PackagePath ./dist/pangea-desktop-0.1.3-windows-x64-portable.zip `
-            -ExpectedVersion 0.1.3
-
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -101,6 +92,15 @@ jobs:
             dist/pangea-desktop-${{ steps.release_meta.outputs.version }}-windows-x64-portable.zip.sha256
           if-no-files-found: error
           retention-days: 14
+
+      - name: Validate legacy in-app upgrade to 0.1.3
+        if: inputs.channel == 'release' && inputs.version == '0.1.3'
+        shell: pwsh
+        timeout-minutes: 6
+        run: |
+          ./scripts/test-legacy-portable-upgrade.ps1 `
+            -PackagePath ./dist/pangea-desktop-0.1.3-windows-x64-portable.zip `
+            -ExpectedVersion 0.1.3
 
       - name: Publish GitHub release
         shell: pwsh
