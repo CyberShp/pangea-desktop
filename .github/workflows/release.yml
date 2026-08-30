@@ -21,10 +21,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: pangea-windows-release
-  cancel-in-progress: false
-
 jobs:
   build:
     runs-on: windows-2022
