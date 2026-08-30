@@ -15,8 +15,7 @@ $InstallRoot = Join-Path $TemporaryRoot 'PANGEA Desktop'
 $LegacyHelper = Join-Path $TemporaryRoot 'apply-portable-update.ps1'
 $PlanPath = Join-Path $TemporaryRoot 'update-plan.json'
 $LogPath = Join-Path $TemporaryRoot 'apply-update.log'
-$OriginalAppData = $env:APPDATA
-$OriginalLocalAppData = $env:LOCALAPPDATA
+$UserDataRoot = Join-Path $env:APPDATA 'pangea-desktop'
 
 try {
   New-Item $InstallRoot -ItemType Directory -Force | Out-Null
@@ -28,16 +27,14 @@ try {
   }
   Set-Content $LegacyHelper $LegacySource -Encoding UTF8
 
-  $env:APPDATA = Join-Path $TemporaryRoot 'AppData\Roaming'
-  $env:LOCALAPPDATA = Join-Path $TemporaryRoot 'AppData\Local'
-  New-Item $env:APPDATA, $env:LOCALAPPDATA -ItemType Directory -Force | Out-Null
-  $UpdateRoot = Join-Path $env:APPDATA 'pangea-desktop\updates'
+  Remove-Item $UserDataRoot -Recurse -Force -ErrorAction SilentlyContinue
+  $UpdateRoot = Join-Path $UserDataRoot 'updates'
   New-Item $UpdateRoot -ItemType Directory -Force | Out-Null
   $HealthMarker = Join-Path $UpdateRoot 'legacy-upgrade-healthy.json'
 
   $ParentProcess = Start-Process `
-    -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') `
-    -ArgumentList '/c', 'ping 127.0.0.1 -n 3 > nul' `
+    -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+    -ArgumentList '-NoProfile', '-Command', 'Start-Sleep -Seconds 2' `
     -WindowStyle Hidden `
     -PassThru
 
@@ -73,7 +70,7 @@ try {
   if ([string]$Manifest.product.version -ne $ExpectedVersion) {
     throw 'The installed component manifest does not match the requested version.'
   }
-  if (-not (Test-Path (Join-Path $env:APPDATA 'pangea-desktop\launch-root\pangea-data') -PathType Container)) {
+  if (-not (Test-Path (Join-Path $UserDataRoot 'launch-root\pangea-data') -PathType Container)) {
     throw 'First startup did not initialize the PANGEA data directory.'
   }
 
@@ -84,14 +81,17 @@ try {
     Write-Host "--- $($_.FullName.Substring($TemporaryRoot.Length + 1))"
     Get-Content $_.FullName -Tail 250 -ErrorAction SilentlyContinue | Out-Host
   }
+  Get-ChildItem $UserDataRoot -Recurse -File -Filter '*.log' -ErrorAction SilentlyContinue | ForEach-Object {
+    Write-Host "--- user-data\$($_.FullName.Substring($UserDataRoot.Length + 1))"
+    Get-Content $_.FullName -Tail 250 -ErrorAction SilentlyContinue | Out-Host
+  }
   throw
 } finally {
   Get-Process -ErrorAction SilentlyContinue | Where-Object {
     try { $_.Path -and $_.Path.StartsWith($InstallRoot, [System.StringComparison]::OrdinalIgnoreCase) }
     catch { $false }
   } | Stop-Process -Force -ErrorAction SilentlyContinue
-  $env:APPDATA = $OriginalAppData
-  $env:LOCALAPPDATA = $OriginalLocalAppData
   Start-Sleep -Milliseconds 500
   Remove-Item $TemporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item $UserDataRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
