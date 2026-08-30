@@ -272,6 +272,8 @@ contextBridge.exposeInMainWorld(
   'dshDesktop',
   Object.freeze({
     productWorkspace: (): Promise<string> => ipcRenderer.invoke('pangea:product-workspace'),
+    productWorkspaceReady: (): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('pangea:product-workspace-ready'),
     restartHarness: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('harness:restart')
   })
 )

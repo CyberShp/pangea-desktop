@@ -9,8 +9,10 @@ describe('PANGEA product workspace bootstrap bridge', () => {
     ])
 
     expect(main).toContain("ipcMain.handle('pangea:product-workspace'")
+    expect(main).toContain("ipcMain.handle('pangea:product-workspace-ready'")
     expect(main).toContain('assertTrustedMainWindowEvent(event)')
     expect(main).toContain('return launchDirectory')
     expect(preload).toContain("ipcRenderer.invoke('pangea:product-workspace')")
+    expect(preload).toContain("ipcRenderer.invoke('pangea:product-workspace-ready')")
   })
 })

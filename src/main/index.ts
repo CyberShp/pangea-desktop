@@ -748,11 +748,17 @@ function restartHarness(): Promise<void> {
   return launchHarness()
 }
 
-function registerHarnessHandlers(): void {
+function registerHarnessHandlers(onProductWorkspaceReady: () => void): void {
   ipcMain.removeHandler('pangea:product-workspace')
   ipcMain.handle('pangea:product-workspace', (event) => {
     assertTrustedMainWindowEvent(event)
     return launchDirectory
+  })
+  ipcMain.removeHandler('pangea:product-workspace-ready')
+  ipcMain.handle('pangea:product-workspace-ready', (event) => {
+    assertTrustedMainWindowEvent(event)
+    onProductWorkspaceReady()
+    return { ok: true }
   })
 
   ipcMain.removeHandler('harness:restart')
@@ -1481,6 +1487,13 @@ async function bootstrap(): Promise<void> {
   createWindow()
   const updateHealthMarker = portableUpdateHealthMarker(process.argv, app.getPath('userData'))
   let updateHealthReported = false
+  const reportUpdateHealth = (): void => {
+    if (updateHealthReported) return
+    updateHealthReported = true
+    void markPortableUpdateHealthy(updateHealthMarker, app.getVersion()).catch((error) => {
+      console.warn('[portable-updater] failed to report product readiness', error)
+    })
+  }
   runtime = new HarnessRuntime({
     dshEntryPath: dshEntryPath(),
     nodeExecutablePath: bundledNodePath(),
@@ -1496,19 +1509,13 @@ async function bootstrap(): Promise<void> {
         : spawn(executablePath, args, options),
     onChanged: (snapshot) => {
       if (snapshot.phase === 'ready' && snapshot.url) {
-        if (!updateHealthReported) {
-          updateHealthReported = true
-          void markPortableUpdateHealthy(updateHealthMarker, app.getVersion()).catch((error) => {
-            console.warn('[portable-updater] failed to report startup health', error)
-          })
-        }
         void openHarness(snapshot.url).catch(showUnexpectedError)
       } else if (snapshot.phase === 'failed') {
         void showRuntimeFailure(snapshot)
       }
     }
   })
-  registerHarnessHandlers()
+  registerHarnessHandlers(reportUpdateHealth)
   mobileBridge = new LanMobileBridge({
     harnessUrl: () => runtime.snapshot().url,
     locale: harnessLocale,
