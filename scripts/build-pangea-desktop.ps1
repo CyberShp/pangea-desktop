@@ -3,6 +3,8 @@ param(
   [string]$DshPangeaSource,
   [string]$PangeaAgentSource,
   [string]$UpdatePrivateKeyPath,
+  [ValidateSet('stable', 'test')]
+  [string]$PackageChannel,
   [switch]$ResolveComponentBranches,
   [switch]$SkipTests,
   [switch]$SkipPackage
@@ -19,6 +21,13 @@ $RuntimeRoot = Join-Path $StageRoot 'runtime'
 $CacheRoot = Join-Path $StageRoot 'cache'
 $UpdateRoot = Join-Path $StageRoot 'update'
 $Components = Get-Content (Join-Path $ProjectRoot 'pangea.components.json') -Raw | ConvertFrom-Json
+
+if (-not $PackageChannel) {
+  $PackageChannel = if ($env:PANGEA_PACKAGE_CHANNEL) { $env:PANGEA_PACKAGE_CHANNEL } else { 'stable' }
+}
+if ($PackageChannel -notin @('stable', 'test')) {
+  throw "Unsupported package channel: $PackageChannel"
+}
 
 $UpdaterTokens = $null
 $UpdaterErrors = $null
@@ -264,6 +273,7 @@ if (-not $SkipPackage) {
     (Join-Path $ProjectRoot 'scripts/create-signed-portable-package.mjs'),
     '--app-dir', (Join-Path $ProjectRoot 'dist/win-unpacked'),
     '--private-key', $UpdatePrivateKeyPath,
+    '--channel', $PackageChannel,
     '--output', $PackagePath
   )
   if (-not (Test-Path $PackagePath -PathType Leaf)) {

@@ -8,6 +8,7 @@ import unzipper from 'unzipper'
 import {
   isNewerPortableVersion,
   normalizePortableEntryPath,
+  portableUpdateChannelForVersion,
   PORTABLE_UPDATE_MANIFEST_PATH,
   PORTABLE_UPDATE_SIGNATURE_PATH,
   verifyPortableUpdateManifest,
@@ -63,8 +64,14 @@ export async function stagePortablePackage(options: {
   const signatureEntry = requiredEntry(entries, PORTABLE_UPDATE_SIGNATURE_PATH)
   const manifestBytes = await readLimitedEntry(manifestEntry, MAX_METADATA_BYTES)
   const signature = (await readLimitedEntry(signatureEntry, 1024)).toString('utf8')
-  const manifest = verifyPortableUpdateManifest(manifestBytes, signature, options.publicKeyPem)
-  if (!isNewerPortableVersion(manifest.version, options.currentVersion)) {
+  const expectedChannel = portableUpdateChannelForVersion(options.currentVersion)
+  const manifest = verifyPortableUpdateManifest(
+    manifestBytes,
+    signature,
+    options.publicKeyPem,
+    expectedChannel
+  )
+  if (!isNewerPortableVersion(manifest.version, options.currentVersion, expectedChannel)) {
     throw new Error(`升级包版本 ${manifest.version} 不高于当前版本 ${options.currentVersion}。`)
   }
 

@@ -3,8 +3,13 @@ import { createPublicKey, verify } from 'node:crypto'
 export const PORTABLE_UPDATE_SCHEMA_VERSION = 1
 export const PORTABLE_UPDATE_PRODUCT = 'PANGEA Desktop'
 export const PORTABLE_UPDATE_CHANNEL = 'stable'
+export const PORTABLE_UPDATE_TEST_CHANNEL = 'test'
 export const PORTABLE_UPDATE_MANIFEST_PATH = 'resources/update/pangea-package-manifest.json'
 export const PORTABLE_UPDATE_SIGNATURE_PATH = `${PORTABLE_UPDATE_MANIFEST_PATH}.sig`
+
+export type PortableUpdateChannel =
+  | typeof PORTABLE_UPDATE_CHANNEL
+  | typeof PORTABLE_UPDATE_TEST_CHANNEL
 
 export interface PortablePackageFile {
   path: string
@@ -15,7 +20,7 @@ export interface PortablePackageFile {
 export interface PortableUpdateManifest {
   schema_version: number
   product: string
-  channel: string
+  channel: PortableUpdateChannel
   version: string
   published_at: string
   files: PortablePackageFile[]
@@ -28,7 +33,10 @@ export interface PortableUpdateConfig {
   public_key_file?: string
 }
 
-export function parsePortableUpdateManifest(input: Buffer | string): PortableUpdateManifest {
+export function parsePortableUpdateManifest(
+  input: Buffer | string,
+  expectedChannel: PortableUpdateChannel = PORTABLE_UPDATE_CHANNEL
+): PortableUpdateManifest {
   const value = JSON.parse(input.toString()) as Partial<PortableUpdateManifest>
   if (value.schema_version !== PORTABLE_UPDATE_SCHEMA_VERSION) {
     throw new Error(`Unsupported PANGEA package schema: ${String(value.schema_version)}`)
@@ -36,10 +44,16 @@ export function parsePortableUpdateManifest(input: Buffer | string): PortableUpd
   if (value.product !== PORTABLE_UPDATE_PRODUCT) {
     throw new Error(`Unexpected package product: ${String(value.product)}`)
   }
-  if (value.channel !== PORTABLE_UPDATE_CHANNEL) {
+  if (value.channel !== expectedChannel) {
     throw new Error(`Unexpected package channel: ${String(value.channel)}`)
   }
-  if (!isStableVersion(value.version)) throw new Error('Package version must be stable SemVer')
+  if (!isVersionForChannel(value.version, expectedChannel)) {
+    throw new Error(
+      expectedChannel === PORTABLE_UPDATE_CHANNEL
+        ? 'Package version must be stable SemVer'
+        : 'Test package version must match x.y.z-test.run.sha'
+    )
+  }
   if (!value.published_at || Number.isNaN(Date.parse(value.published_at))) {
     throw new Error('Package publication time is invalid')
   }
@@ -76,7 +90,8 @@ export function parsePortableUpdateManifest(input: Buffer | string): PortableUpd
 export function verifyPortableUpdateManifest(
   manifestBytes: Buffer,
   signatureBase64: string,
-  publicKeyPem: string
+  publicKeyPem: string,
+  expectedChannel: PortableUpdateChannel = PORTABLE_UPDATE_CHANNEL
 ): PortableUpdateManifest {
   const signature = Buffer.from(signatureBase64.trim(), 'base64')
   if (signature.length !== 64) throw new Error('Package manifest signature is invalid')
@@ -87,7 +102,7 @@ export function verifyPortableUpdateManifest(
   if (!verify(null, manifestBytes, publicKey, signature)) {
     throw new Error('Package manifest signature verification failed')
   }
-  return parsePortableUpdateManifest(manifestBytes)
+  return parsePortableUpdateManifest(manifestBytes, expectedChannel)
 }
 
 export function normalizePortableEntryPath(value: unknown): string {
@@ -105,16 +120,45 @@ export function normalizePortableEntryPath(value: unknown): string {
   return parts.join('/')
 }
 
-export function isNewerPortableVersion(candidate: string, current: string): boolean {
-  if (!isStableVersion(candidate) || !isStableVersion(current)) return false
-  const next = candidate.split('.').map(Number) as [number, number, number]
-  const installed = current.split('.').map(Number) as [number, number, number]
-  for (const index of [0, 1, 2] as const) {
-    if (next[index] !== installed[index]) return next[index] > installed[index]
+export function portableUpdateChannelForVersion(version: string): PortableUpdateChannel {
+  if (isStableVersion(version)) return PORTABLE_UPDATE_CHANNEL
+  if (isTestVersion(version)) return PORTABLE_UPDATE_TEST_CHANNEL
+  throw new Error(`Unsupported PANGEA Desktop version: ${version}`)
+}
+
+export function isNewerPortableVersion(
+  candidate: string,
+  current: string,
+  channel: PortableUpdateChannel = PORTABLE_UPDATE_CHANNEL
+): boolean {
+  const next = comparableVersion(candidate, channel)
+  const installed = comparableVersion(current, channel)
+  if (!next || !installed) return false
+  for (let index = 0; index < next.length; index += 1) {
+    const nextPart = next[index]
+    const installedPart = installed[index]
+    if (nextPart === undefined || installedPart === undefined) return false
+    if (nextPart !== installedPart) return nextPart > installedPart
   }
   return false
 }
 
 function isStableVersion(value: unknown): value is string {
   return typeof value === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value)
+}
+
+function isTestVersion(value: unknown): value is string {
+  return typeof value === 'string' &&
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-test\.(0|[1-9]\d*)\.[0-9a-f]{7}$/.test(value)
+}
+
+function isVersionForChannel(value: unknown, channel: PortableUpdateChannel): value is string {
+  return channel === PORTABLE_UPDATE_CHANNEL ? isStableVersion(value) : isTestVersion(value)
+}
+
+function comparableVersion(version: string, channel: PortableUpdateChannel): number[] | undefined {
+  if (!isVersionForChannel(version, channel)) return undefined
+  if (channel === PORTABLE_UPDATE_CHANNEL) return version.split('.').map(Number)
+  const match = /^(\d+)\.(\d+)\.(\d+)-test\.(\d+)\.[0-9a-f]{7}$/.exec(version)
+  return match?.slice(1, 5).map(Number)
 }

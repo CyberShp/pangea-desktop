@@ -53,9 +53,11 @@ jobs:
           if ($env:BUILD_CHANNEL -eq 'test') {
             $ShortSha = $env:GITHUB_SHA.Substring(0, 7)
             $ResolvedVersion = "$env:REQUESTED_VERSION-test.$env:GITHUB_RUN_NUMBER.$ShortSha"
+            $PackageChannel = 'test'
             $ReleaseTitle = "PANGEA Desktop test $ResolvedVersion"
           } elseif ($env:BUILD_CHANNEL -eq 'release') {
             $ResolvedVersion = $env:REQUESTED_VERSION
+            $PackageChannel = 'stable'
             $ReleaseTitle = "PANGEA Desktop $ResolvedVersion"
           } else {
             throw "Unsupported build channel: $env:BUILD_CHANNEL"
@@ -72,6 +74,7 @@ jobs:
             [Convert]::FromBase64String($env:UPDATE_PRIVATE_KEY_B64)
           )
           "RELEASE_VERSION=$ResolvedVersion" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PANGEA_PACKAGE_CHANNEL=$PackageChannel" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "version=$ResolvedVersion" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "tag=v$ResolvedVersion" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "title=$ReleaseTitle" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append

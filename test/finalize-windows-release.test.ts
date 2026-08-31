@@ -15,7 +15,13 @@ afterEach(async () => {
 
 describe('signed portable Windows package', () => {
   it('uses one ZIP for extraction and in-app package import', async () => {
-    const packageVersion = JSON.parse(await readFile('package.json', 'utf8')).version as string
+    const packageVersion = process.env.RELEASE_VERSION ??
+      JSON.parse(await readFile('package.json', 'utf8')).version as string
+    const packageChannel = process.env.PANGEA_PACKAGE_CHANNEL ??
+      (packageVersion.includes('-test.') ? 'test' : 'stable')
+    const currentVersion = packageChannel === 'test'
+      ? `${packageVersion.split('-')[0]}-test.0.0000000`
+      : '0.0.9'
     const root = await mkdtemp(path.join(tmpdir(), 'pangea-portable-package-'))
     temporaryRoots.push(root)
     const appDirectory = path.join(root, 'win-unpacked')
@@ -49,6 +55,8 @@ describe('signed portable Windows package', () => {
       path.join(process.cwd(), 'scripts', 'create-signed-portable-package.mjs'),
       '--app-dir', appDirectory,
       '--private-key', privateKeyPath,
+      '--channel', packageChannel,
+      '--version', packageVersion,
       '--output', outputPath
     ], { encoding: 'utf8' })
     expect(packaged.status, packaged.stderr).toBe(0)
@@ -58,7 +66,7 @@ describe('signed portable Windows package', () => {
       sourcePath: outputPath,
       destinationPath: path.join(root, 'import', 'pangea-desktop.zip'),
       publicKeyPem: await readFile(path.join(updateDirectory, 'pangea-update-public-key.pem'), 'utf8'),
-      currentVersion: '0.0.9',
+      currentVersion,
       onProgress: (percent) => { lastProgress = percent }
     })
     expect(staged.manifest.version).toBe(packageVersion)
@@ -75,7 +83,7 @@ describe('signed portable Windows package', () => {
       sourcePath: modifiedPackage,
       destinationPath: path.join(root, 'modified-import', 'pangea-desktop.zip'),
       publicKeyPem: await readFile(path.join(updateDirectory, 'pangea-update-public-key.pem'), 'utf8'),
-      currentVersion: '0.0.9'
+      currentVersion
     })).rejects.toThrow(/不匹配|校验失败/)
   })
 

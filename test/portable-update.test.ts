@@ -7,7 +7,7 @@ import {
   verifyPortableUpdateManifest
 } from '../src/main/update/portable-update'
 
-function manifest(version = '1.2.3'): Buffer {
+function manifest(version = '1.2.3', channel: 'stable' | 'test' = 'stable'): Buffer {
   const required = [
     'PANGEA Desktop.exe',
     'resources/pangea-manifest.json',
@@ -18,7 +18,7 @@ function manifest(version = '1.2.3'): Buffer {
   return Buffer.from(JSON.stringify({
     schema_version: 1,
     product: 'PANGEA Desktop',
-    channel: 'stable',
+    channel,
     version,
     published_at: '2026-08-27T00:00:00.000Z',
     files: required.map((path, index) => ({
@@ -59,5 +59,14 @@ describe('portable package contract', () => {
     expect(isNewerPortableVersion('1.2.4', '1.2.3')).toBe(true)
     expect(isNewerPortableVersion('1.2.3', '1.2.3')).toBe(false)
     expect(isNewerPortableVersion('1.1.9', '1.2.3')).toBe(false)
+  })
+
+  it('keeps test packages on the test channel', () => {
+    const version = '1.2.3-test.42.abcdef0'
+    expect(parsePortableUpdateManifest(manifest(version, 'test'), 'test').version).toBe(version)
+    expect(() => parsePortableUpdateManifest(manifest(version, 'test'))).toThrow(/channel/)
+    expect(() => parsePortableUpdateManifest(manifest('1.2.3', 'test'), 'test')).toThrow(/Test package/)
+    expect(isNewerPortableVersion(version, '1.2.3-test.41.1234567', 'test')).toBe(true)
+    expect(isNewerPortableVersion(version, version, 'test')).toBe(false)
   })
 })

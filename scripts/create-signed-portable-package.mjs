@@ -8,13 +8,22 @@ const appDirectory = path.resolve(required('--app-dir'))
 const privateKeyPath = path.resolve(required('--private-key'))
 const outputPath = path.resolve(required('--output'))
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+const packageVersion = valueAfter('--version') ?? packageJson.version
+const packageChannel = valueAfter('--channel') ?? 'stable'
 const metadataDirectory = path.join(appDirectory, 'resources', 'update')
 const manifestPath = path.join(metadataDirectory, 'pangea-package-manifest.json')
 const signaturePath = `${manifestPath}.sig`
 const publicKeyPath = path.join(metadataDirectory, 'pangea-update-public-key.pem')
 const componentManifestPath = path.join(appDirectory, 'resources', 'pangea-manifest.json')
 
-const expectedName = `pangea-desktop-${packageJson.version}-windows-x64-portable.zip`
+if (!['stable', 'test'].includes(packageChannel)) throw new Error(`Unsupported package channel: ${packageChannel}`)
+const stableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+const testVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-test\.(0|[1-9]\d*)\.[0-9a-f]{7}$/
+if (packageChannel === 'stable' ? !stableVersion.test(packageVersion) : !testVersion.test(packageVersion)) {
+  throw new Error(`Package version ${packageVersion} is invalid for channel ${packageChannel}`)
+}
+
+const expectedName = `pangea-desktop-${packageVersion}-windows-x64-portable.zip`
 if (path.basename(outputPath) !== expectedName) throw new Error(`Portable package must be named ${expectedName}`)
 const outputRelativeToApp = path.relative(appDirectory, outputPath)
 if (
@@ -44,7 +53,7 @@ if (!embeddedPublicKey.equals(signingPublicKey)) {
 }
 
 const componentManifest = JSON.parse((await readFile(componentManifestPath, 'utf8')).replace(/^\uFEFF/, ''))
-if (componentManifest.product?.version !== packageJson.version) {
+if (componentManifest.product?.version !== packageVersion) {
   throw new Error('Component manifest and Desktop package versions differ')
 }
 
@@ -60,8 +69,8 @@ files.sort((left, right) => left.path.localeCompare(right.path, 'en'))
 const manifest = {
   schema_version: 1,
   product: 'PANGEA Desktop',
-  channel: 'stable',
-  version: packageJson.version,
+  channel: packageChannel,
+  version: packageVersion,
   published_at: new Date().toISOString(),
   files,
   components: componentManifest.components
