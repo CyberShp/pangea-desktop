@@ -15,7 +15,7 @@ const installedModelsClient = path.join(
 )
 
 describe('PANGEA model settings entry', () => {
-  it('ships and activates a browser client for the desktop product plugin', async () => {
+  it('keeps the desktop product plugin active without injecting duplicate product navigation', async () => {
     const pkg = JSON.parse(await readFile(productPackage, 'utf8')) as {
       exports?: Record<string, string>
       dsh?: { client?: { platform?: string; inject?: string[] } }
@@ -30,9 +30,9 @@ describe('PANGEA model settings entry', () => {
     expect(pkg.dsh?.client?.inject).toContain('@deepseek-ai/dsh-client-runtime')
     expect(patch).toContain('id: pangea-product-shell')
     expect(patch).toContain('name: dsh-pangea-product')
-    expect(client).toContain("const OPEN_EVENT = 'pangea:open-model-settings'")
-    expect(client).toContain("button.setAttribute('aria-label', '设置')")
-    expect(client).toContain("toolList.appendChild(createSettingsButton())")
+    expect(client).toContain('Product navigation and first-launch affordances are rendered by dsh-pangea')
+    expect(client).not.toContain('MutationObserver')
+    expect(client).not.toContain('createSettingsButton')
     execFileSync(process.execPath, ['--check', productClient])
   })
 
@@ -44,6 +44,15 @@ describe('PANGEA model settings entry', () => {
     expect(client).toContain('name: "shell.overlay"')
     expect(client).toContain('children: (0, react_jsx_runtime.jsx)(ModelsSection, { ...props })')
     expect(client).toContain('pangea:open-model-settings')
+  })
+
+  it('publishes model readiness for the PANGEA-owned first-launch UI', async () => {
+    const client = await readFile(installedModelsClient, 'utf8')
+
+    expect(client).toContain('pangea:model-onboarding-state')
+    expect(client).toContain('pangea:query-model-onboarding')
+    expect(client).toContain('const customAvailable = state.namespaces.get("llm-pi-ai") !== void 0')
+    expect(client).toContain('!state.rows.some(providerUsable)')
   })
 
   it('opens the native custom-provider card directly from first-run onboarding', async () => {
