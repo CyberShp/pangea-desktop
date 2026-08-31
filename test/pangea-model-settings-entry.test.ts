@@ -46,12 +46,14 @@ describe('PANGEA model settings entry', () => {
     expect(client).toContain('pangea:open-model-settings')
   })
 
-  it('offers the same model-only settings surface from first-run onboarding', async () => {
+  it('opens the native custom-provider card directly from first-run onboarding', async () => {
     const client = await readFile(installedModelsClient, 'utf8')
 
     expect(client).toContain('onboardingCustomProvider: "自定义 / 内部模型提供方"')
     expect(client).toContain('onboardingCustomProviderHint: "OpenAI 兼容接口、私有部署或内网模型"')
     expect(client).toContain('children: t("onboardingCustomProvider")')
-    expect(client).toContain('window.dispatchEvent(new CustomEvent("pangea:open-model-settings"))')
+    expect(client).toContain('event?.detail?.mode === "custom" ? "custom" : "models"')
+    expect(client).toContain('(0, react_jsx_runtime.jsx)(CustomProviderCard, {')
+    expect(client).toContain('new CustomEvent("pangea:open-model-settings", { detail: { mode: "custom" } })')
   })
 })
