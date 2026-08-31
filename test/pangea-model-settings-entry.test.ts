@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 const productClient = path.join('packages', 'dsh-pangea-product', 'client.js')
 const productPackage = path.join('packages', 'dsh-pangea-product', 'package.json')
+const productPatch = path.join('packages', 'dsh-pangea-product', 'cordis.patch.yml')
 const installedModelsClient = path.join(
   'node_modules',
   '@deepseek-ai',
@@ -14,16 +15,21 @@ const installedModelsClient = path.join(
 )
 
 describe('PANGEA model settings entry', () => {
-  it('ships a browser client for the desktop product plugin', async () => {
+  it('ships and activates a browser client for the desktop product plugin', async () => {
     const pkg = JSON.parse(await readFile(productPackage, 'utf8')) as {
       exports?: Record<string, string>
       dsh?: { client?: { platform?: string; inject?: string[] } }
     }
-    const client = await readFile(productClient, 'utf8')
+    const [client, patch] = await Promise.all([
+      readFile(productClient, 'utf8'),
+      readFile(productPatch, 'utf8')
+    ])
 
     expect(pkg.exports?.['./client']).toBe('./client.js')
     expect(pkg.dsh?.client?.platform).toBe('web')
     expect(pkg.dsh?.client?.inject).toContain('@deepseek-ai/dsh-client-runtime')
+    expect(patch).toContain('id: pangea-product-shell')
+    expect(patch).toContain('name: dsh-pangea-product')
     expect(client).toContain("const OPEN_EVENT = 'pangea:open-model-settings'")
     expect(client).toContain("button.setAttribute('aria-label', '设置')")
     expect(client).toContain("toolList.appendChild(createSettingsButton())")
