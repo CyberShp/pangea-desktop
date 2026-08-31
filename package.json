@@ -74,7 +74,8 @@
   "devDependencies": {
     "@types/archiver": "^8.0.0",
     "@types/node": "24.10.1",
-    "@types/qrcode": "^0.10.11",
+    "@types/qrcode": "^1.5.6",
+    "@types/unzipper": "^0.10.11",
     "archiver": "^8.0.0",
     "electron": "43.4.0",
     "electron-builder": "26.15.3",
