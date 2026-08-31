@@ -65,7 +65,7 @@ describe('PANGEA Desktop release contract', () => {
     expect(lock.desktopBase.commit).toMatch(/^[0-9a-f]{40}$/)
     expect(lock.desktopBase.branch).toBe('main')
     expect(lock.dshPangea.commit).toMatch(/^[0-9a-f]{40}$/)
-    expect(lock.dshPangea.branch).toBe('codex/desktop-task-workbench')
+    expect(lock.dshPangea.branch).toBe('codex/dsh-pangea-workbench')
     expect(lock.pangeaAgent.commit).toMatch(/^[0-9a-f]{40}$/)
     expect(lock.pangeaAgent.branch).toBe('codex/pangea-workflow-rebuild')
     expect(lock.python.sha256).toMatch(/^[0-9a-f]{64}$/)
