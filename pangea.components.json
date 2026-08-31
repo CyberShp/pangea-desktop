@@ -8,7 +8,7 @@
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
     "branch": "codex/desktop-task-workbench",
-    "commit": "8e975c7dec7a230f69efac8ebe60431a171ef8db"
+    "commit": "7d1c43e7b6621d859ce78b4cc7a53af6fb7cc7b9"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
