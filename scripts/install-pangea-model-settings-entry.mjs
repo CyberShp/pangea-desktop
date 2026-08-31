@@ -87,11 +87,11 @@ function suppressNativeOnboardingInProductShell(source) {
     'native onboarding product-shell state',
   )
 
-  const decisionAnchor = '\t\t\tif (state.status === "idle" || state.status === "loading" || anyUsable || selected === void 0 || !state.writable) return null;\n'
+  const rowAnchor = '\t\t\tconst row = selected.row;\n'
   return replaceExactlyOnce(
     source,
-    decisionAnchor,
-    `\t\t\tif (${PRODUCT_ONBOARDING_MARKER}) return null;\n${decisionAnchor}`,
+    rowAnchor,
+    `\t\t\tif (${PRODUCT_ONBOARDING_MARKER}) return null;\n${rowAnchor}`,
     'native onboarding product-shell guard',
   )
 }
