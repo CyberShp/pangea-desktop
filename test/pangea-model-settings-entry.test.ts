@@ -55,6 +55,13 @@ describe('PANGEA model settings entry', () => {
     expect(client).toContain('!state.rows.some(providerUsable)')
   })
 
+  it('suppresses the native DSH onboarding chrome while the PANGEA product shell owns first launch', async () => {
+    const client = await readFile(installedModelsClient, 'utf8')
+
+    expect(client).toContain('document.body.hasAttribute("data-pangea-product-shell")')
+    expect(client).toContain('if (pangeaProductShell) return null')
+  })
+
   it('opens the native custom-provider card directly from first-run onboarding', async () => {
     const client = await readFile(installedModelsClient, 'utf8')
 
