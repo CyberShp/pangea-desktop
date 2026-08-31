@@ -242,6 +242,7 @@ if (-not $SkipTests) {
   Invoke-Checked 'npm' @(
     'test', '--', '--run',
     'test/product-workspace-bootstrap.test.ts',
+    'test/launch-root.test.ts',
     'test/pangea-model-settings-entry.test.ts',
     'test/update-state.test.ts',
     'test/update-ui.test.ts',
