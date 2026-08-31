@@ -22,7 +22,10 @@ dist\pangea-desktop-<version>-windows-x64-portable.zip.sha256
 1. 在没有 Python、pangea-agent 和 dsh-pangea 的 Windows 用户环境中创建一个可写目录。
 2. 把便携包完整解压到该目录，运行 `PANGEA Desktop.exe`。
 3. 确认主界面中存在 PANGEA Analysis 与 Assets 入口。
-4. 断开外网后重启一次，确认入口仍存在。
+4. 确认 PANGEA 左侧产品导航底部存在“设置”；点击后只能进入模型配置，不应暴露 DSH 的通用、插件或其他内部设置页。
+5. 清空模型配置重新触发首次模型引导，确认存在“自定义 / 内部模型提供方”，点击后直接进入 DSH 原生自定义 Provider 表单，可填写 Base URL、API 类型、API Key 和模型列表。
+6. 关闭并重新打开“设置”，确认刚才写入的 Provider 与模型仍在，证明首次引导和日常设置共用同一份 DSH 配置。
+7. 断开外网后重启一次，确认 PANGEA 入口和“设置”入口仍存在。
 
 ## 3. 检查内置 Runtime
 
