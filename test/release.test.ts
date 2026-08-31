@@ -65,7 +65,7 @@ describe('PANGEA Desktop release contract', () => {
     expect(lock.desktopBase.commit).toMatch(/^[0-9a-f]{40}$/)
     expect(lock.desktopBase.branch).toBe('main')
     expect(lock.dshPangea.commit).toMatch(/^[0-9a-f]{40}$/)
-    expect(lock.dshPangea.branch).toBe('codex/dsh-pangea-workbench')
+    expect(lock.dshPangea.branch).toBe('codex/desktop-task-workbench')
     expect(lock.pangeaAgent.commit).toMatch(/^[0-9a-f]{40}$/)
     expect(lock.pangeaAgent.branch).toBe('codex/pangea-workflow-rebuild')
     expect(lock.python.sha256).toMatch(/^[0-9a-f]{64}$/)
@@ -74,8 +74,10 @@ describe('PANGEA Desktop release contract', () => {
     expect(workflow).toContain('workflow_dispatch:')
     expect(workflow).toContain('runs-on: windows-2022')
     expect(workflow).not.toContain('-ResolveComponentBranches')
-    expect(workflow).toContain('PANGEA_ARTIFACT_SSH_KEY_B64')
-    expect(workflow).toContain('icacls $KeyPath /inheritance:r')
+    expect(workflow).toContain('actions/upload-artifact@v4')
+    expect(workflow).toContain('gh release upload')
+    expect(workflow).not.toContain('PANGEA_ARTIFACT_')
+    expect(workflow).not.toContain('sftp')
   })
 
   it('builds through the single Windows assembly entrypoint', async () => {

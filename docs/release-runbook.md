@@ -16,7 +16,7 @@ Keep `update-private.pem` and its passphrase in the build secret store. The buil
 The `Build Windows package` workflow is started manually with a SemVer package version. It builds the exact approved commits in `pangea.components.json` and records them in the package manifest. Their source branches are:
 
 - `dsh-desktop`: `main`
-- `dsh-pangea`: `codex/dsh-pangea-workbench`
+- `dsh-pangea`: `codex/desktop-task-workbench`
 - `pangea-agent`: `codex/pangea-workflow-rebuild`
 
 Creating a package does not advance these component commits. Component upgrades are a separate maintenance operation: select the desired source commits, update `pangea.components.json`, run compatibility checks, and merge the selected `dsh-desktop` baseline into the product when that component is upgraded. Every imported package must have a version greater than the currently running application, and every release must use the same package key.
@@ -40,7 +40,7 @@ The ZIP contains the complete application plus its signed file manifest. It is u
 
 ## Internal handoff
 
-1. Download the versioned ZIP and `.sha256` from `/srv/pangea-artifacts/uploads` on the cloud server.
+1. Open the matching GitHub Release and download the versioned ZIP plus `.sha256`. For a short-lived test build, download the workflow artifact from the completed GitHub Actions run.
 2. Copy that ZIP to the internal shared location.
 3. Internal users download the ZIP to their PC.
 4. In PANGEA Desktop, choose **Import update package** beside DSH settings and select the ZIP.
