@@ -36,23 +36,36 @@ describe('PANGEA model settings entry', () => {
     execFileSync(process.execPath, ['--check', productClient])
   })
 
-  it('patches the native Models component into a model-only PANGEA overlay', async () => {
+  it('portals internal model settings to document.body instead of the DSH layout pane', async () => {
     const client = await readFile(installedModelsClient, 'utf8')
 
     expect(client).toContain('data-pangea-model-settings-overlay')
     expect(client).toContain('id: "pangea-model-settings"')
     expect(client).toContain('name: "shell.overlay"')
-    expect(client).toContain('children: (0, react_jsx_runtime.jsx)(ModelsSection, { ...props })')
-    expect(client).toContain('pangea:open-model-settings')
+    expect(client).toContain('const pangea_react_dom = require("react-dom")')
+    expect(client).toContain('pangea_react_dom.createPortal')
+    expect(client).toContain('document.body)')
+    expect(client).toContain('width: "min(1040px, calc(100vw - 48px))"')
   })
 
-  it('publishes model readiness for the PANGEA-owned first-launch UI', async () => {
+  it('exposes only DSH internal custom-provider create/edit surfaces', async () => {
+    const client = await readFile(installedModelsClient, 'utf8')
+
+    expect(client).toContain('function PangeaInternalModelSettings(props)')
+    expect(client).toContain('row.entry.settingsNs === "llm-pi-ai" && row.entry.declared === true')
+    expect(client).toContain('(0, react_jsx_runtime.jsx)(CustomProviderCard, {')
+    expect(client).toContain('(0, react_jsx_runtime.jsx)(ProviderEditor, {')
+    expect(client).not.toContain('children: (0, react_jsx_runtime.jsx)(ModelsSection, { ...props })')
+  })
+
+  it('publishes readiness based only on internal custom LLM routes', async () => {
     const client = await readFile(installedModelsClient, 'utf8')
 
     expect(client).toContain('pangea:model-onboarding-state')
     expect(client).toContain('pangea:query-model-onboarding')
     expect(client).toContain('const customAvailable = state.namespaces.get("llm-pi-ai") !== void 0')
-    expect(client).toContain('!state.rows.some(providerUsable)')
+    expect(client).toContain('const internalRows = state.rows.filter((row) => row.entry.settingsNs === "llm-pi-ai" && row.entry.declared === true)')
+    expect(client).toContain('!internalRows.some(providerUsable)')
   })
 
   it('wraps native DSH onboarding at registration while the PANGEA shell owns first launch', async () => {
@@ -61,14 +74,5 @@ describe('PANGEA model settings entry', () => {
     expect(client).toContain('function PangeaAwareDeepSeekOnboardingDialog(props)')
     expect(client).toContain('document.body.hasAttribute("data-pangea-product-shell")')
     expect(client).toContain('}, PangeaAwareDeepSeekOnboardingDialog));')
-  })
-
-  it('reuses the native custom-provider card when PANGEA requests custom mode', async () => {
-    const client = await readFile(installedModelsClient, 'utf8')
-
-    expect(client).toContain('event?.detail?.mode === "custom" ? "custom" : "models"')
-    expect(client).toContain('(0, react_jsx_runtime.jsx)(CustomProviderCard, {')
-    expect(client).toContain('children: mode === "custom"')
-    expect(client).not.toContain('onboardingCustomProvider: "自定义 / 内部模型提供方"')
   })
 })
