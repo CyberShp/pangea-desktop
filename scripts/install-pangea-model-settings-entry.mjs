@@ -17,6 +17,7 @@ const STATE_EVENT = 'pangea:model-onboarding-state'
 const QUERY_EVENT = 'pangea:query-model-onboarding'
 const OVERLAY_MARKER = 'data-pangea-model-settings-overlay'
 const ONBOARDING_MARKER = 'onboardingCustomProvider'
+const PRODUCT_ONBOARDING_MARKER = 'pangeaProductShell'
 
 function replaceExactlyOnce(source, needle, replacement, label) {
   const first = source.indexOf(needle)
@@ -75,8 +76,29 @@ function installCustomOnboardingEntry(source) {
   return installOnboardingLocaleCopy(source)
 }
 
+function suppressNativeOnboardingInProductShell(source) {
+  if (source.includes(PRODUCT_ONBOARDING_MARKER)) return source
+
+  const stateAnchor = '\t\t\tconst state = useModels((snapshot) => snapshot);\n'
+  source = replaceExactlyOnce(
+    source,
+    stateAnchor,
+    `${stateAnchor}\t\t\tconst ${PRODUCT_ONBOARDING_MARKER} = typeof document !== "undefined" && document.body.hasAttribute("data-pangea-product-shell");\n`,
+    'native onboarding product-shell state',
+  )
+
+  const decisionAnchor = '\t\t\tif (state.status === "idle" || state.status === "loading" || anyUsable || selected === void 0 || !state.writable) return null;\n'
+  return replaceExactlyOnce(
+    source,
+    decisionAnchor,
+    `\t\t\tif (${PRODUCT_ONBOARDING_MARKER}) return null;\n${decisionAnchor}`,
+    'native onboarding product-shell guard',
+  )
+}
+
 let source = await readFile(clientPath, 'utf8')
 const before = source
 source = installOverlay(source)
 source = installCustomOnboardingEntry(source)
+source = suppressNativeOnboardingInProductShell(source)
 if (source !== before) await writeFile(clientPath, source, 'utf8')
