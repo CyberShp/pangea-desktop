@@ -161,7 +161,7 @@ if ($LockedComposition -ne $ProductComposition) {
 }
 
 Reset-StageDirectory $PluginRoot
-foreach ($Plugin in @('dsh-pangea', 'dsh-pangea-companion', 'dsh-pangea-asset-catalog')) {
+foreach ($Plugin in @('dsh-pangea', 'dsh-pangea-companion', 'dsh-pangea-asset-catalog', 'dsh-pangea-run-ui')) {
   $Source = Join-Path $DshPangea "plugins/$Plugin"
   $Destination = Join-Path $PluginRoot $Plugin
   Copy-Item $Source $Destination -Recurse -Force
@@ -244,7 +244,7 @@ Invoke-Checked 'node' $UpdateArguments
 
 if (-not $SkipTests) {
   Write-Host 'Running focused product checks...'
-  foreach ($Plugin in @('dsh-pangea', 'dsh-pangea-companion', 'dsh-pangea-asset-catalog')) {
+  foreach ($Plugin in @('dsh-pangea', 'dsh-pangea-companion', 'dsh-pangea-asset-catalog', 'dsh-pangea-run-ui')) {
     Invoke-Checked 'npm' @('--prefix', (Join-Path $PluginRoot $Plugin), 'test')
   }
   Invoke-Checked 'npm' @('run', 'typecheck')
