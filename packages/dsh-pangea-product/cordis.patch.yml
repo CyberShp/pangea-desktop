@@ -8,6 +8,8 @@
       name: dsh-pangea
     - id: pangea-companion
       name: dsh-pangea-companion
+    - id: pangea-run-ui
+      name: dsh-pangea-run-ui
     - id: pangea-report-policy
       name: dsh-pangea-companion/report-policy
     - id: pangea-asset-catalog
