@@ -8,7 +8,7 @@
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
     "branch": "codetalks-skill",
-    "commit": "8aba4b6b1b86e651bf825f6886ec5f725921516a"
+    "commit": "6fb5168ebf6523215ed1af2450bb46e53d61247f"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
