@@ -16,8 +16,8 @@ Keep `update-private.pem` and its passphrase in the build secret store. The buil
 The `Build Windows package` workflow is started manually with a SemVer package version. It builds the exact approved commits in `pangea.components.json` and records them in the package manifest. Their source branches are:
 
 - `dsh-desktop`: `main`
-- `dsh-pangea`: `codex/desktop-task-workbench`
-- `pangea-agent`: `codex/pangea-workflow-rebuild`
+- `dsh-pangea`: `codetalks-skill`
+- `pangea-agent`: `codetalks-skill`
 
 Creating a package does not advance these component commits. Component upgrades are a separate maintenance operation: select the desired source commits, update `pangea.components.json`, run compatibility checks, and merge the selected `dsh-desktop` baseline into the product when that component is upgraded. Every imported package must have a version greater than the currently running application, and every release must use the same package key.
 

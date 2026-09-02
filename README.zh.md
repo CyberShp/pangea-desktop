@@ -4,6 +4,8 @@ PANGEA Desktop 是面向 Windows 的便携式 PANGEA 分析产品。一个 ZIP �
 
 三个实现仓库仍然独立维护。[`pangea.components.json`](./pangea.components.json) 记录来源分支、已确认的准确提交和 Runtime 下载。云端发布会把这些锁定提交放进临时目录，并将它们写入包内清单。升级组件与创建新安装包版本是两个独立操作。
 
+当前组件组固定运行 `codetalks-skill 1.0.0`。每个 Run 都冻结自己的 Skill 副本，工作台只从持久化 Run 状态展示冻结版本和当前步骤编号。
+
 ## 在 Windows x64 构建
 
 准备 Git、Node.js、npm、PowerShell 5.1 或更高版本，并确保构建机能访问代码仓、Python.org 和 PyPI。
