@@ -15,15 +15,18 @@ if (-not (Test-Path $ExecutablePath -PathType Leaf)) {
 }
 
 $TemporaryRoot = Join-Path $env:RUNNER_TEMP "pangea-packaged-smoke-$([Guid]::NewGuid().ToString('N'))"
-$SmokeAppData = Join-Path $TemporaryRoot 'appdata'
-$UserDataRoot = Join-Path $SmokeAppData 'pangea-desktop'
+$UserDataRoot = Join-Path $env:APPDATA 'pangea-desktop'
+$ExistingUserDataBackup = Join-Path $TemporaryRoot 'existing-user-data'
 $ProfileRoot = Join-Path $UserDataRoot 'harness\profiles\web'
 $HealthMarker = Join-Path $UserDataRoot 'updates\packaged-harness-healthy.json'
-$OriginalAppData = $env:APPDATA
-$OriginalLocalAppData = $env:LOCALAPPDATA
+$ExistingUserDataPresent = Test-Path $UserDataRoot
 $DesktopProcess = $null
 
 try {
+  New-Item $TemporaryRoot -ItemType Directory -Force | Out-Null
+  if ($ExistingUserDataPresent) {
+    Move-Item $UserDataRoot $ExistingUserDataBackup
+  }
   New-Item $ProfileRoot -ItemType Directory -Force | Out-Null
   New-Item (Split-Path -Parent $HealthMarker) -ItemType Directory -Force | Out-Null
 
@@ -59,13 +62,9 @@ try {
       name: dsh-pangea-asset-catalog
 '@ | Set-Content (Join-Path $ProfileRoot 'cordis.patch.yml') -Encoding UTF8
 
-  $env:APPDATA = $SmokeAppData
-  $env:LOCALAPPDATA = Join-Path $TemporaryRoot 'localappdata'
-  New-Item $env:LOCALAPPDATA -ItemType Directory -Force | Out-Null
-
   $DesktopProcess = Start-Process `
     -FilePath $ExecutablePath `
-    -ArgumentList @("--user-data-dir=$UserDataRoot", "--pangea-update-health=$HealthMarker") `
+    -ArgumentList "--pangea-update-health=$HealthMarker" `
     -WorkingDirectory $PackageDirectory `
     -PassThru
 
@@ -122,12 +121,16 @@ try {
   }
   throw
 } finally {
-  $env:APPDATA = $OriginalAppData
-  $env:LOCALAPPDATA = $OriginalLocalAppData
   Get-Process -ErrorAction SilentlyContinue | Where-Object {
     try { $_.Path -and $_.Path.StartsWith($PackageDirectory, [System.StringComparison]::OrdinalIgnoreCase) }
     catch { $false }
   } | Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Milliseconds 500
+  if (-not $ExistingUserDataPresent -or (Test-Path $ExistingUserDataBackup)) {
+    Remove-Item $UserDataRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  if (Test-Path $ExistingUserDataBackup) {
+    Move-Item $ExistingUserDataBackup $UserDataRoot
+  }
   Remove-Item $TemporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
