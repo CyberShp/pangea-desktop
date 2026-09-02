@@ -3,7 +3,7 @@
   "desktopBase": {
     "repository": "https://github.com/dataelement/dsh-desktop.git",
     "branch": "main",
-    "commit": "e589bf688624871d953f8c58418f913c407dfc7e"
+    "commit": "bbc668d84843ac4f4e0c81acf00f73d6bc943a66"
   },
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
