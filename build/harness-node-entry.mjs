@@ -19,8 +19,27 @@ function report(label, value) {
   process.stderr.write(`[harness-node] ${label}: ${value}\n`)
 }
 
-process.on('uncaughtException', (error) => report('uncaught exception', error?.stack ?? error))
-process.on('unhandledRejection', (error) => report('unhandled rejection', error?.stack ?? error))
+function describeError(error, seen = new Set()) {
+  if ((typeof error !== 'object' && typeof error !== 'function') || error === null) {
+    return String(error)
+  }
+  if (seen.has(error)) return '[circular error]'
+  seen.add(error)
+
+  const lines = [error.stack ?? error.message ?? String(error)]
+  if (error.cause !== undefined) {
+    lines.push(`Caused by: ${describeError(error.cause, seen)}`)
+  }
+  if (Array.isArray(error.errors)) {
+    for (const [index, member] of error.errors.entries()) {
+      lines.push(`Aggregate member ${index + 1}: ${describeError(member, seen)}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+process.on('uncaughtException', (error) => report('uncaught exception', describeError(error)))
+process.on('unhandledRejection', (error) => report('unhandled rejection', describeError(error)))
 
 process.stdout.write(
   `[harness-node] runtime node=${process.version} platform=${process.platform} arch=${process.arch}\n`
@@ -39,7 +58,7 @@ if (!dshEntryPath) {
     await import(pathToFileURL(dshEntryPath).href)
     process.stdout.write('[harness-node] DSH entry loaded\n')
   } catch (error) {
-    report('DSH entry failed', error?.stack ?? error)
+    report('DSH entry failed', describeError(error))
     process.exitCode = 1
   }
 }
