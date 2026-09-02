@@ -18,6 +18,7 @@ describe('PANGEA model settings entry', () => {
   it('keeps the desktop product plugin active without injecting duplicate product navigation', async () => {
     const pkg = JSON.parse(await readFile(productPackage, 'utf8')) as {
       exports?: Record<string, string>
+      dependencies?: Record<string, string>
       dsh?: { client?: { platform?: string; inject?: string[] } }
     }
     const [client, patch] = await Promise.all([
@@ -28,8 +29,14 @@ describe('PANGEA model settings entry', () => {
     expect(pkg.exports?.['./client']).toBe('./client.js')
     expect(pkg.dsh?.client?.platform).toBe('web')
     expect(pkg.dsh?.client?.inject).toContain('@deepseek-ai/dsh-client-runtime')
+    expect(pkg.dependencies?.['@deepseek-ai/dsh-subagent-acp']).toBe('0.1.1-rc.2')
+    expect(pkg.dependencies?.['@deepseek-ai/dsh-subagent-claude-code']).toBe('0.1.1-rc.2')
     expect(patch).toContain('id: pangea-product-shell')
     expect(patch).toContain('name: dsh-pangea-product')
+    expect(patch).not.toContain('id: pangea-jobs-local')
+    expect(patch).not.toContain('id: pangea-subagent')
+    expect(patch).not.toContain('id: pangea-subprocess-local')
+    expect(patch).not.toContain("name: '@deepseek-ai/dsh-subagent-acp'")
     expect(client).toContain('Product navigation and first-launch affordances are rendered by dsh-pangea')
     expect(client).not.toContain('MutationObserver')
     expect(client).not.toContain('createSettingsButton')
@@ -48,24 +55,23 @@ describe('PANGEA model settings entry', () => {
     expect(client).toContain('width: "min(1040px, calc(100vw - 48px))"')
   })
 
-  it('exposes only DSH internal custom-provider create/edit surfaces', async () => {
+  it('exposes the complete DSH model catalog, including official and custom providers', async () => {
     const client = await readFile(installedModelsClient, 'utf8')
 
     expect(client).toContain('function PangeaInternalModelSettings(props)')
-    expect(client).toContain('row.entry.settingsNs === "llm-pi-ai" && row.entry.declared === true')
-    expect(client).toContain('(0, react_jsx_runtime.jsx)(CustomProviderCard, {')
-    expect(client).toContain('(0, react_jsx_runtime.jsx)(ProviderEditor, {')
-    expect(client).not.toContain('children: (0, react_jsx_runtime.jsx)(ModelsSection, { ...props })')
+    expect(client).toContain('return (0, react_jsx_runtime.jsx)(ModelsSection, { ...props });')
+    expect(client).toContain('function ModelsSection(props)')
+    expect(client).toContain('deepseek-official')
   })
 
-  it('publishes readiness based only on internal custom LLM routes', async () => {
+  it('publishes readiness based on every usable DSH model route', async () => {
     const client = await readFile(installedModelsClient, 'utf8')
 
     expect(client).toContain('pangea:model-onboarding-state')
     expect(client).toContain('pangea:query-model-onboarding')
     expect(client).toContain('const customAvailable = state.namespaces.get("llm-pi-ai") !== void 0')
-    expect(client).toContain('const internalRows = state.rows.filter((row) => row.entry.settingsNs === "llm-pi-ai" && row.entry.declared === true)')
-    expect(client).toContain('!internalRows.some(providerUsable)')
+    expect(client).toContain('const modelAvailable = state.rows.some(providerUsable)')
+    expect(client).toContain('{ required, modelAvailable, customAvailable, status: state.status }')
   })
 
   it('wraps native DSH onboarding at registration while the PANGEA shell owns first launch', async () => {

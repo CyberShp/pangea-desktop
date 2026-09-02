@@ -97,4 +97,21 @@ describe('PANGEA Desktop release contract', () => {
     expect(script).toContain("'--channel', $PackageChannel")
     expect(script).toContain('UpdatePrivateKeyPath is required')
   })
+
+  it('boots the packaged Harness against a legacy PANGEA profile before publishing', async () => {
+    const [workflow, smoke] = await Promise.all([
+      readFile(path.join(projectRoot, '.github', 'workflows', 'release.yml'), 'utf8'),
+      readFile(path.join(projectRoot, 'scripts', 'test-packaged-harness-startup.ps1'), 'utf8')
+    ])
+    expect(workflow).toContain('test-packaged-harness-startup.ps1')
+    expect(workflow.indexOf('test-packaged-harness-startup.ps1')).toBeLessThan(
+      workflow.indexOf('Publish GitHub release')
+    )
+    expect(smoke).toContain("'dsh-pangea-product'")
+    expect(smoke).toContain("'dsh-pangea-companion'")
+    expect(smoke).toContain('--pangea-update-health=')
+    expect(smoke).toContain('product-workspace readiness')
+    expect(smoke).toContain('Harness entry failed during startup')
+    expect(smoke).toContain("Join-Path $UserDataRoot 'logs\\harness.log'")
+  })
 })

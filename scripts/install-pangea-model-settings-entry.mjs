@@ -52,6 +52,27 @@ function installOverlay(source) {
   )
 }
 
+function restoreNativeModelsSection(source) {
+  if (source.includes('children: (0, react_jsx_runtime.jsx)(ModelsSection, { ...props })')) return source
+  const internalSection = /\t\tfunction PangeaInternalModelSettings\(props\) \{[\s\S]*?\n\t\t\}\n\t\tfunction PangeaModelSettingsOverlay/g
+  return replaceRegexExactlyOnce(
+    source,
+    internalSection,
+    '\t\tfunction PangeaInternalModelSettings(props) {\n\t\t\treturn (0, react_jsx_runtime.jsx)(ModelsSection, { ...props });\n\t\t}\n\t\tfunction PangeaModelSettingsOverlay',
+    'native models section',
+  )
+}
+
+function publishAllModelReadiness(source) {
+  const readiness = /const customAvailable = state\.namespaces\.get\("llm-pi-ai"\) !== void 0;\n\s*const internalRows = state\.rows\.filter\(\(row\) => row\.entry\.settingsNs === "llm-pi-ai" && row\.entry\.declared === true\);\n\s*const required = state\.status === "ready" && state\.writable && customAvailable && !internalRows\.some\(providerUsable\);\n\s*window\.dispatchEvent\(new CustomEvent\(([^,]+), \{ detail: \{ required, customAvailable, status: state\.status \} \}\)\);/g
+  return replaceRegexExactlyOnce(
+    source,
+    readiness,
+    'const customAvailable = state.namespaces.get("llm-pi-ai") !== void 0;\n\t\t\t\t\tconst modelAvailable = state.rows.some(providerUsable);\n\t\t\t\t\tconst required = state.status === "ready" && state.writable && !modelAvailable;\n\t\t\t\t\twindow.dispatchEvent(new CustomEvent($1, { detail: { required, modelAvailable, customAvailable, status: state.status } }));',
+    'model readiness publication',
+  )
+}
+
 function wrapNativeOnboardingRegistration(source) {
   if (source.includes(`}, ${PRODUCT_ONBOARDING_MARKER}));`)) return source
   const registration = /(ctx\.slots\.inject\("settings\.onboarding", \(\) => ctx\.slots\.register\(\{[\s\S]*?id: "deepseek-official",[\s\S]*?\}, )DeepSeekOnboardingDialog(\)\);)/g
@@ -66,5 +87,8 @@ function wrapNativeOnboardingRegistration(source) {
 let source = await readFile(clientPath, 'utf8')
 const before = source
 source = installOverlay(source)
+source = restoreNativeModelsSection(source)
+source = publishAllModelReadiness(source)
+source = source.replaceAll('内部模型设置', '模型与 API 设置')
 source = wrapNativeOnboardingRegistration(source)
 if (source !== before) await writeFile(clientPath, source, 'utf8')

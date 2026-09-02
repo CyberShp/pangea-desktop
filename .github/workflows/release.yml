@@ -102,6 +102,14 @@ jobs:
           ./scripts/build-pangea-desktop.ps1 `
             -UpdatePrivateKeyPath ./.pangea-keys/update-private.pem
 
+      - name: Start packaged Harness with a migrated profile
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          ./scripts/test-packaged-harness-startup.ps1 `
+            -PackageDirectory ./dist/win-unpacked `
+            -ExpectedVersion $env:RELEASE_VERSION
+
       - name: Generate signed incremental patch
         if: inputs.patch_from_version != ''
         shell: pwsh

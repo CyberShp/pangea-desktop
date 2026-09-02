@@ -6,28 +6,6 @@
       disabled: !!js "[...ctx.loader.entries()].some((e) => e.options.name === 'dsh-better-sidebar' && e.options.id !== 'better-sidebar' && !e.disabled)"
     - id: pangea-workbench
       name: dsh-pangea
-    - id: pangea-jobs-local
-      name: '@deepseek-ai/dsh-jobs-local'
-    - id: pangea-subagent
-      name: '@deepseek-ai/dsh-subagent'
-    - id: pangea-subprocess-local
-      name: '@deepseek-ai/dsh-subprocess-local'
-    - id: pangea-nga-acp
-      name: '@deepseek-ai/dsh-subagent-acp'
-      config:
-        providerName: pangea-nga
-        command: nga
-        args: [acp]
-        permission: allow
-        env: {}
-    - id: pangea-codeagent-acp
-      name: '@deepseek-ai/dsh-subagent-acp'
-      config:
-        providerName: pangea-codeagent
-        command: codeagent
-        args: [acp]
-        permission: allow
-        env: {}
     - id: pangea-companion
       name: dsh-pangea-companion
     - id: pangea-asset-catalog

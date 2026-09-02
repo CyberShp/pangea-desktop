@@ -50,4 +50,65 @@ describe('PANGEA web profile', () => {
     ])
     expect(await readFile(join(directory, 'cordis.patch.yml'), 'utf8')).toBe('# keep me\n[]\n')
   })
+
+  it('migrates legacy PANGEA bundles without deleting user plugins or overrides', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'pangea-profile-'))
+    temporaryRoots.push(home)
+    const directory = join(home, 'profiles', 'web')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'package.json'), JSON.stringify({
+      name: 'legacy-pangea-web',
+      dependencies: {
+        'dsh-pangea': '0.1.0',
+        'dsh-pangea-companion': '0.10.0',
+        'dsh-pangea-asset-catalog': '0.1.0',
+        'user-bundle': '1.0.0'
+      },
+      dsh: {
+        profile: {
+          bundles: [
+            '@deepseek-ai/dsh-base',
+            '@deepseek-ai/dsh-web-app',
+            'dsh-pangea',
+            'dsh-pangea-companion',
+            'dsh-pangea-asset-catalog',
+            'user-bundle'
+          ]
+        }
+      }
+    }))
+    await writeFile(join(directory, 'cordis.patch.yml'), `# keep the user's layer
+- insert:
+    - id: legacy-workbench
+      name: dsh-pangea
+    - id: legacy-companion
+      name: dsh-pangea-companion
+    - id: user-tool
+      name: user-bundle
+- id: pangea-workbench
+  config:
+    preservedUserSetting: true
+- insert:
+    - id: legacy-assets
+      name: dsh-pangea-asset-catalog
+`)
+
+    await ensurePangeaWebProfile(home)
+
+    const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
+    expect(manifest.dependencies).toEqual({ 'user-bundle': '1.0.0' })
+    expect(manifest.dsh.profile.bundles).toEqual([
+      '@deepseek-ai/dsh-base',
+      '@deepseek-ai/dsh-web-app',
+      'user-bundle',
+      PANGEA_CORE_BUNDLE
+    ])
+    const patch = await readFile(join(directory, 'cordis.patch.yml'), 'utf8')
+    expect(patch).not.toContain('name: dsh-pangea\n')
+    expect(patch).not.toContain('name: dsh-pangea-companion')
+    expect(patch).not.toContain('name: dsh-pangea-asset-catalog')
+    expect(patch).toContain('name: user-bundle')
+    expect(patch).toContain('id: pangea-workbench')
+    expect(patch).toContain('preservedUserSetting: true')
+  })
 })
