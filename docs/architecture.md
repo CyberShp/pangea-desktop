@@ -3,8 +3,8 @@
 PANGEA Desktop is a Windows product assembled from three independently maintained repositories:
 
 - `pangea-desktop`: Electron host, portable packaging, product identity and update lifecycle.
-- `dsh-pangea`: PANGEA Workbench, Analysis companion, report policy and Assets UI/API.
-- `pangea-agent`: deterministic PANGEA data, Run, adapter, report and validation runtime.
+- `dsh-pangea`: PANGEA Workbench, Codetalks lifecycle companion and Assets UI/API.
+- `pangea-agent`: direct Codetalks Skill Run creation, frozen Skill distribution and Markdown lifecycle metadata.
 
 [`pangea.components.json`](../pangea.components.json) pins their exact commits. The assembly script checks out those commits into `.pangea-build`; it never reads uncommitted files from developer working copies.
 

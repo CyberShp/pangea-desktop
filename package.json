@@ -170,10 +170,6 @@
         "to": "app/node_modules/dsh-pangea-asset-catalog"
       },
       {
-        "from": ".pangea-build/plugins/dsh-pangea-run-ui",
-        "to": "app/node_modules/dsh-pangea-run-ui"
-      },
-      {
         "from": ".pangea-build/runtime/pangea-runtime",
         "to": "pangea-runtime"
       },

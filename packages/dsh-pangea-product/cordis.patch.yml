@@ -8,13 +8,5 @@
       name: dsh-pangea
     - id: pangea-companion
       name: dsh-pangea-companion
-    - id: pangea-run-ui
-      name: dsh-pangea-run-ui
-    - id: pangea-report-policy
-      name: dsh-pangea-companion/report-policy
     - id: pangea-asset-catalog
       name: dsh-pangea-asset-catalog
-
-- id: tool-subagent-report
-  name: '@deepseek-ai/dsh-tool-subagent-report'
-  disabled: true

@@ -7,8 +7,6 @@ const required = [
   '.pangea-build/plugins/dsh-pangea/package.json',
   '.pangea-build/plugins/dsh-pangea-companion/package.json',
   '.pangea-build/plugins/dsh-pangea-asset-catalog/package.json',
-  '.pangea-build/plugins/dsh-pangea-run-ui/package.json',
-  '.pangea-build/plugins/dsh-pangea-run-ui/lib/client.js',
   '.pangea-build/runtime/pangea-runtime/src/pangea_agent/cli/main.py',
   '.pangea-build/runtime/pangea-runtime/.agents/pangea/dsh.md',
   '.pangea-build/runtime/python/python.exe',
