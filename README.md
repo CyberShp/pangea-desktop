@@ -23,13 +23,15 @@ The portable product is written to:
 ```text
 dist\pangea-desktop-<version>-windows-x64-portable.zip
 dist\pangea-desktop-<version>-windows-x64-portable.zip.sha256
+dist\pangea-desktop-<version>-from-<base-version>-windows-x64.patch.zip
+dist\pangea-desktop-<version>-from-<base-version>-windows-x64.patch.zip.sha256
 ```
 
 Extract the ZIP into a writable directory and run `PANGEA Desktop.exe`. Application data remains in `%APPDATA%\pangea-desktop`, so replacing the program directory does not remove workspaces or Runs. See [`docs/windows-validation.md`](./docs/windows-validation.md) for the first-PC acceptance flow.
 
 ## In-app ZIP updates
 
-The same portable ZIP is also the in-app update package. Move the cloud-built ZIP to the internal shared location. Users download it, choose **Import update package** beside DSH settings, and restart after verification. PANGEA Desktop validates the embedded Ed25519-signed file manifest before accepting the package.
+The complete portable ZIP and an incremental patch ZIP are both accepted by the in-app update flow. Move the cloud-built package to the internal shared location. Users download it, choose **Import update package** beside DSH settings, and restart after verification. PANGEA Desktop detects the package type and validates the embedded Ed25519 signatures and file manifests. A patch is accepted only from its declared base version.
 
 The update helper keeps the previous program directory and restores it unless the new Harness reaches Ready. Application data remains outside the program directory. See [`docs/release-runbook.md`](./docs/release-runbook.md) for release-key and internal handoff instructions.
 

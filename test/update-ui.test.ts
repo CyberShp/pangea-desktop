@@ -51,6 +51,19 @@ describe('desktop update card visibility', () => {
     expect(updateMessage(downloading, 'en')).toBe('Verifying update package 42%')
   })
 
+  it('explains the exact base and target for a patch', () => {
+    const patch: UpdateStatus = {
+      phase: 'downloaded',
+      currentVersion: '1.0.0',
+      availableVersion: '1.0.1',
+      packageType: 'patch',
+      baseVersion: '1.0.0',
+      manual: true
+    }
+    expect(updateMessage(patch, 'zh')).toContain('1.0.0 → 1.0.1')
+    expect(updateMessage(patch, 'en')).toContain('1.0.0 → 1.0.1')
+  })
+
   it('shows a persisted install failure after the working version restarts', () => {
     const failed: UpdateStatus = {
       phase: 'install-error',

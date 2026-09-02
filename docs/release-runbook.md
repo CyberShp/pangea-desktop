@@ -34,16 +34,20 @@ The release output is:
 ```text
 pangea-desktop-<version>-windows-x64-portable.zip
 pangea-desktop-<version>-windows-x64-portable.zip.sha256
+pangea-desktop-<version>-from-<base-version>-windows-x64.patch.zip
+pangea-desktop-<version>-from-<base-version>-windows-x64.patch.zip.sha256
 ```
 
-The ZIP contains the complete application plus its signed file manifest. It is used unchanged for both first installation and in-app upgrades.
+The complete ZIP contains the application plus its signed file manifest. When `patch_from_version` is supplied to the workflow, the build also downloads that exact base release and produces a signed file-level patch. The patch contains only changed files plus the target manifest; CI reconstructs the target directory from the base package and rejects any mismatch.
+
+The first build that introduces patch support must be installed as a complete ZIP. For example, users on `0.1.7-test.43.faea7da` must first install the next complete migration build. Later versions can use the matching `from_version` patch. Test and stable channels never cross, and a patch cannot skip its declared base version.
 
 ## Internal handoff
 
-1. Open the matching GitHub Release and download the versioned ZIP plus `.sha256`. For a short-lived test build, download the workflow artifact from the completed GitHub Actions run.
-2. Copy that ZIP to the internal shared location.
-3. Internal users download the ZIP to their PC.
-4. In PANGEA Desktop, choose **Import update package** beside DSH settings and select the ZIP.
+1. Open the matching GitHub Release and download either the exact-base patch plus `.sha256`, or the complete ZIP when installing for the first time or crossing versions. For a short-lived test build, download the workflow artifact from the completed GitHub Actions run.
+2. Copy the selected package to the internal shared location.
+3. Internal users download the package to their PC.
+4. In PANGEA Desktop, choose **Import update package** beside DSH settings and select the package.
 5. After verification, choose **Restart and update**.
 
 Users handle one file only. Keep prior versioned ZIPs in the shared location when rollback or manual reinstallation may be needed.

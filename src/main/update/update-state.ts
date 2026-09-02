@@ -3,7 +3,7 @@ import type { UpdateStatus } from '../../shared/contracts'
 export type UpdateStateEvent =
   | { type: 'check'; manual: boolean }
   | { type: 'progress'; percent: number }
-  | { type: 'downloaded'; version: string }
+  | { type: 'downloaded'; version: string; packageType?: 'full' | 'patch'; baseVersion?: string }
   | { type: 'install-error'; message: string }
   | { type: 'restore-error'; version: string; message: string }
   | { type: 'error'; message: string }
@@ -26,7 +26,13 @@ export function reduceUpdateStatus(
     case 'progress':
       return { ...current, phase: 'downloading', percent: clampPercent(event.percent) }
     case 'downloaded':
-      return { ...base, phase: 'downloaded', availableVersion: event.version }
+      return {
+        ...base,
+        phase: 'downloaded',
+        availableVersion: event.version,
+        ...(event.packageType ? { packageType: event.packageType } : {}),
+        ...(event.baseVersion ? { baseVersion: event.baseVersion } : {})
+      }
     case 'install-error':
       return { ...current, phase: 'downloaded', message: event.message }
     case 'restore-error':

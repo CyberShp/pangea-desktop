@@ -19,6 +19,7 @@ const MAX_PACKAGE_BYTES = 20 * 1024 * 1024 * 1024
 const MAX_METADATA_BYTES = 64 * 1024 * 1024
 
 export interface StagedPortablePackage {
+  kind: 'full'
   manifest: PortableUpdateManifest
   packagePath: string
   packageSize: number
@@ -110,6 +111,7 @@ export async function stagePortablePackage(options: {
   }
 
   return {
+    kind: 'full',
     manifest,
     packagePath: options.destinationPath,
     packageSize: source.size,

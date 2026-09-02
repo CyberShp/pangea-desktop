@@ -6,6 +6,7 @@ import { basename, dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import type { UpdateStatus } from '../../shared/contracts'
 import { stagePortablePackage, type StagedPortablePackage } from './portable-package-validator'
+import { isPortablePatchArchive, stagePortablePatch, type StagedPortablePatch } from './portable-patch-validator'
 import type { PortableUpdateConfig } from './portable-update'
 import { initialUpdateStatus, reduceUpdateStatus, type UpdateStateEvent } from './update-state'
 
@@ -28,7 +29,9 @@ let handlersRegistered = false
 let importing = false
 let installing = false
 let loadedConfig: LoadedUpdateConfig | undefined
-let stagedPackage: StagedPortablePackage | undefined
+type StagedImport = StagedPortablePackage | StagedPortablePatch
+
+let stagedPackage: StagedImport | undefined
 let stagedRoot: string | undefined
 
 export function getUpdateStatus(): UpdateStatus {
@@ -80,14 +83,33 @@ export async function importPortableUpdatePackage(): Promise<UpdateStatus> {
   const destination = join(root, 'pangea-desktop.zip')
   stagedRoot = root
   try {
-    stagedPackage = await stagePortablePackage({
-      sourcePath,
-      destinationPath: destination,
-      publicKeyPem: config.publicKeyPem,
-      currentVersion: app.getVersion(),
-      onProgress: (percent) => transition({ type: 'progress', percent })
-    })
-    transition({ type: 'downloaded', version: stagedPackage.manifest.version })
+    const patch = await isPortablePatchArchive(sourcePath)
+    if (patch) {
+      const staged = await stagePortablePatch({
+        sourcePath,
+        destinationPath: destination,
+        publicKeyPem: config.publicKeyPem,
+        currentVersion: app.getVersion(),
+        onProgress: (percent) => transition({ type: 'progress', percent })
+      })
+      stagedPackage = staged
+      transition({
+        type: 'downloaded',
+        version: staged.manifest.to_version,
+        packageType: 'patch',
+        baseVersion: staged.manifest.from_version
+      })
+    } else {
+      const staged = await stagePortablePackage({
+        sourcePath,
+        destinationPath: destination,
+        publicKeyPem: config.publicKeyPem,
+        currentVersion: app.getVersion(),
+        onProgress: (percent) => transition({ type: 'progress', percent })
+      })
+      stagedPackage = staged
+      transition({ type: 'downloaded', version: staged.manifest.version, packageType: 'full' })
+    }
   } catch (error) {
     await clearStagedPackage()
     transition({ type: 'error', message: errorMessage(error) }, true)
@@ -111,8 +133,10 @@ export async function installImportedUpdate(): Promise<void> {
   }
 }
 
-async function launchPortableUpdateHelper(imported: StagedPortablePackage): Promise<void> {
-  const version = imported.manifest.version
+async function launchPortableUpdateHelper(imported: StagedImport): Promise<void> {
+  const patch = imported.kind === 'patch'
+  const version = imported.kind === 'patch' ? imported.manifest.to_version : imported.manifest.version
+  const baseVersion = imported.kind === 'patch' ? imported.manifest.from_version : undefined
   const updateRoot = dirname(imported.packagePath)
   const helperPath = join(updateRoot, 'apply-portable-update.ps1')
   const planPath = join(updateRoot, 'update-plan.json')
@@ -123,12 +147,15 @@ async function launchPortableUpdateHelper(imported: StagedPortablePackage): Prom
   await copyFile(helperSource, helperPath)
   await rm(resultPath, { force: true })
   await writeFile(planPath, JSON.stringify({
-    schema_version: 1,
+    schema_version: 2,
+    package_type: patch ? 'patch' : 'full',
     parent_pid: process.pid,
     package_path: imported.packagePath,
     install_root: dirname(process.execPath),
     executable_name: basename(process.execPath),
     expected_version: version,
+    expected_base_version: baseVersion,
+    package_channel: imported.manifest.channel,
     expected_size: imported.packageSize,
     expected_sha256: imported.packageSha256,
     health_marker: healthMarker,

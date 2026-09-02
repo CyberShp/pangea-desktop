@@ -5,13 +5,15 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $Plan = Get-Content $PlanPath -Raw | ConvertFrom-Json
-if ($Plan.schema_version -ne 1) { throw 'Unsupported portable update plan.' }
+if ($Plan.schema_version -notin @(1, 2)) { throw 'Unsupported portable update plan.' }
 
 $InstallRoot = [System.IO.Path]::GetFullPath([string]$Plan.install_root)
 $InstallParent = [System.IO.Path]::GetDirectoryName($InstallRoot)
 $PackagePath = [System.IO.Path]::GetFullPath([string]$Plan.package_path)
 $ExecutableName = [string]$Plan.executable_name
 $ExpectedVersion = [string]$Plan.expected_version
+$PackageType = if ($Plan.package_type) { [string]$Plan.package_type } else { 'full' }
+$ExpectedBaseVersion = if ($Plan.expected_base_version) { [string]$Plan.expected_base_version } else { '' }
 $ExpectedSize = [long]$Plan.expected_size
 $ExpectedSha256 = [string]$Plan.expected_sha256
 $HealthMarker = [System.IO.Path]::GetFullPath([string]$Plan.health_marker)
@@ -153,6 +155,85 @@ function Expand-VerifiedArchive {
   }
 }
 
+function Get-ZipEntry {
+  param($Zip, [string]$Path)
+  $Normalized = $Path.Replace('\', '/')
+  foreach ($Entry in $Zip.Entries) {
+    if ($Entry.FullName.Replace('\', '/') -ieq $Normalized) { return $Entry }
+  }
+  return $null
+}
+
+function Read-ZipEntryText {
+  param($Zip, [string]$Path)
+  $Entry = Get-ZipEntry $Zip $Path
+  if ($null -eq $Entry) { throw "Patch entry is missing: $Path" }
+  $Reader = [System.IO.StreamReader]::new($Entry.Open(), [System.Text.Encoding]::UTF8, $true)
+  try { return $Reader.ReadToEnd() } finally { $Reader.Dispose() }
+}
+
+function Extract-ZipEntry {
+  param($Zip, [string]$Path, [string]$Destination)
+  $Entry = Get-ZipEntry $Zip $Path
+  if ($null -eq $Entry) { throw "Patch entry is missing: $Path" }
+  $DestinationFull = [System.IO.Path]::GetFullPath($Destination)
+  $Parent = [System.IO.Path]::GetDirectoryName($DestinationFull)
+  New-Item $Parent -ItemType Directory -Force | Out-Null
+  $ZipInput = $Entry.Open()
+  try {
+    $Output = [System.IO.File]::Open($DestinationFull, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    try { $ZipInput.CopyTo($Output) } finally { $Output.Dispose() }
+  } finally { $ZipInput.Dispose() }
+}
+
+function Apply-VerifiedPatch {
+  param([string]$Archive, [string]$BaseRoot, [string]$Destination)
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $Zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
+  try {
+    $Patch = Read-ZipEntryText $Zip 'pangea-patch-manifest.json' | ConvertFrom-Json
+    if ($Patch.schema_version -ne 1 -or [string]$Patch.product -ne 'PANGEA Desktop') { throw 'Patch manifest is invalid.' }
+    if ([string]$Patch.from_version -ne $ExpectedBaseVersion -or [string]$Patch.to_version -ne $ExpectedVersion) {
+      throw 'Patch versions do not match the requested update.'
+    }
+    $TargetManifestText = Read-ZipEntryText $Zip 'target/resources/update/pangea-package-manifest.json'
+    $TargetManifest = $TargetManifestText | ConvertFrom-Json
+    if ([string]$TargetManifest.version -ne $ExpectedVersion) { throw 'Patch target manifest version is invalid.' }
+    if ([string]$TargetManifest.channel -ne [string]$Plan.package_channel) { throw 'Patch target manifest channel is invalid.' }
+
+    $Payload = @{}
+    foreach ($File in $Patch.files) {
+      $Payload[([string]$File.path).ToLowerInvariant()] = $File
+      $Target = @($TargetManifest.files | Where-Object { ([string]$_.path).ToLowerInvariant() -eq ([string]$File.path).ToLowerInvariant() })[0]
+      if ($null -eq $Target -or [long]$Target.size -ne [long]$File.size -or ([string]$Target.sha256) -ne ([string]$File.sha256)) {
+        throw "Patch file does not match target manifest: $($File.path)"
+      }
+      $Entry = Get-ZipEntry $Zip ("payload/" + [string]$File.path)
+      if ($null -eq $Entry) { throw "Patch payload is missing: $($File.path)" }
+    }
+
+    New-Item $Destination -ItemType Directory -Force | Out-Null
+    foreach ($File in $TargetManifest.files) {
+      $Relative = [string]$File.path
+      $TargetPath = Join-Path $Destination ($Relative.Replace('/', '\'))
+      $Key = $Relative.ToLowerInvariant()
+      if ($Payload.ContainsKey($Key)) {
+        Extract-ZipEntry $Zip ("payload/" + $Relative) $TargetPath
+      } else {
+        $BasePath = Join-Path $BaseRoot ($Relative.Replace('/', '\'))
+        if (-not (Test-Path $BasePath -PathType Leaf)) { throw "Base package is missing unchanged file: $Relative" }
+        $Parent = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($TargetPath))
+        New-Item $Parent -ItemType Directory -Force | Out-Null
+        Copy-Item $BasePath $TargetPath -Force
+      }
+      if ((Get-Item $TargetPath).Length -ne [long]$File.size) { throw "Patched file size mismatch: $Relative" }
+      if ((Get-FileHash $TargetPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne ([string]$File.sha256)) { throw "Patched file hash mismatch: $Relative" }
+    }
+    Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json' (Join-Path $Destination 'resources\update\pangea-package-manifest.json')
+    Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json.sig' (Join-Path $Destination 'resources\update\pangea-package-manifest.json.sig')
+  } finally { $Zip.Dispose() }
+}
+
 $Leaf = [System.IO.Path]::GetFileName($InstallRoot.TrimEnd('\'))
 $Nonce = [Guid]::NewGuid().ToString('N')
 $CandidateRoot = Join-Path $InstallParent "$Leaf.update-$Nonce"
@@ -191,7 +272,23 @@ try {
   }
 
   Set-UpdateStage 'Preparing the new version...' 42
-  Expand-VerifiedArchive $PackagePath $CandidateRoot
+  if ($PackageType -eq 'patch') {
+    if ([string]::IsNullOrWhiteSpace($ExpectedBaseVersion)) { throw 'Patch base version is missing.' }
+    $BaseManifestPath = Join-Path $InstallRoot 'resources\update\pangea-package-manifest.json'
+    if (-not (Test-Path $BaseManifestPath -PathType Leaf)) { throw 'Installed package manifest is missing.' }
+    $BaseManifest = Get-Content $BaseManifestPath -Raw | ConvertFrom-Json
+    if ([string]$BaseManifest.version -ne $ExpectedBaseVersion) {
+      throw "Installed version $($BaseManifest.version) does not match patch base $ExpectedBaseVersion."
+    }
+    if (Test-Path $BackupRoot) { Remove-Item $BackupRoot -Recurse -Force }
+    Move-Item $InstallRoot $BackupRoot
+    $OriginalMoved = $true
+    Apply-VerifiedPatch $PackagePath $BackupRoot $CandidateRoot
+  } elseif ($PackageType -eq 'full') {
+    Expand-VerifiedArchive $PackagePath $CandidateRoot
+  } else {
+    throw "Unsupported package type: $PackageType"
+  }
   $CandidateExecutable = Join-Path $CandidateRoot $ExecutableName
   $CandidateManifest = Join-Path $CandidateRoot 'resources\pangea-manifest.json'
   if (-not (Test-Path $CandidateExecutable -PathType Leaf)) {
@@ -206,9 +303,11 @@ try {
   }
 
   Set-UpdateStage 'Replacing application files...' 68
-  if (Test-Path $BackupRoot) { Remove-Item $BackupRoot -Recurse -Force }
-  Move-Item $InstallRoot $BackupRoot
-  $OriginalMoved = $true
+  if (-not $OriginalMoved) {
+    if (Test-Path $BackupRoot) { Remove-Item $BackupRoot -Recurse -Force }
+    Move-Item $InstallRoot $BackupRoot
+    $OriginalMoved = $true
+  }
   Move-Item $CandidateRoot $InstallRoot
   $Swapped = $true
 

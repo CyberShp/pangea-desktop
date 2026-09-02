@@ -63,6 +63,21 @@ describe('desktop update state', () => {
     })
   })
 
+  it('keeps the exact patch base in the verified update state', () => {
+    const status = reduceUpdateStatus(initialUpdateStatus('1.0.0'), {
+      type: 'downloaded',
+      version: '1.0.1',
+      packageType: 'patch',
+      baseVersion: '1.0.0'
+    })
+    expect(status).toMatchObject({
+      phase: 'downloaded',
+      availableVersion: '1.0.1',
+      packageType: 'patch',
+      baseVersion: '1.0.0'
+    })
+  })
+
   it('restores a failed external update as a visible manual error', () => {
     expect(reduceUpdateStatus(initialUpdateStatus('1.0.0'), {
       type: 'restore-error',

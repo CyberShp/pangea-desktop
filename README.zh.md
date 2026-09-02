@@ -23,13 +23,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-pangea-deskt
 ```text
 dist\pangea-desktop-<version>-windows-x64-portable.zip
 dist\pangea-desktop-<version>-windows-x64-portable.zip.sha256
+dist\pangea-desktop-<version>-from-<base-version>-windows-x64.patch.zip
+dist\pangea-desktop-<version>-from-<base-version>-windows-x64.patch.zip.sha256
 ```
 
 把 ZIP 解压到可写目录，直接运行 `PANGEA Desktop.exe`。应用数据始终保存在 `%APPDATA%\pangea-desktop`，替换程序目录不会删除工作区和 Run。首次 PC 验证见 [`docs/windows-validation.md`](./docs/windows-validation.md)。
 
 ## DSH 内导包升级
 
-同一个 Portable ZIP 也直接作为升级包。把云端构建得到的 ZIP 搬到内部共享位置；用户下载后，在 DSH 设置区域选择“导入升级包”，校验通过即可重启升级。PANGEA Desktop 会校验 ZIP 内置的 Ed25519 签名文件清单。
+完整 Portable ZIP 和增量 Patch ZIP 都可以作为升级包。把云端构建得到的包搬到内部共享位置；用户下载后，在 DSH 设置区域选择“导入升级包”，应用会自动识别包类型。补丁只接受指定基线版本，校验通过即可重启升级；不满足基线时请改用完整包。PANGEA Desktop 会校验包内置的 Ed25519 签名和逐文件清单。
 
 升级助手会保留上一版程序目录，只有新版本 Harness 成功进入 Ready 才确认升级，否则自动恢复。应用数据始终位于程序目录之外。发布密钥和内部交付步骤见 [`docs/release-runbook.md`](./docs/release-runbook.md)。
 

@@ -6,6 +6,11 @@ export const PORTABLE_UPDATE_CHANNEL = 'stable'
 export const PORTABLE_UPDATE_TEST_CHANNEL = 'test'
 export const PORTABLE_UPDATE_MANIFEST_PATH = 'resources/update/pangea-package-manifest.json'
 export const PORTABLE_UPDATE_SIGNATURE_PATH = `${PORTABLE_UPDATE_MANIFEST_PATH}.sig`
+export const PORTABLE_PATCH_MANIFEST_PATH = 'pangea-patch-manifest.json'
+export const PORTABLE_PATCH_SIGNATURE_PATH = `${PORTABLE_PATCH_MANIFEST_PATH}.sig`
+export const PORTABLE_PATCH_TARGET_MANIFEST_PATH = 'target/resources/update/pangea-package-manifest.json'
+export const PORTABLE_PATCH_TARGET_SIGNATURE_PATH = `${PORTABLE_PATCH_TARGET_MANIFEST_PATH}.sig`
+export const PORTABLE_PATCH_PAYLOAD_PREFIX = 'payload/'
 
 export type PortableUpdateChannel =
   | typeof PORTABLE_UPDATE_CHANNEL
@@ -31,6 +36,27 @@ export interface PortableUpdateConfig {
   schema_version: number
   enabled: boolean
   public_key_file?: string
+}
+
+export type PortablePatchOperation = 'add' | 'replace'
+
+export interface PortablePatchFile {
+  path: string
+  operation: PortablePatchOperation
+  size: number
+  sha256: string
+}
+
+export interface PortablePatchManifest {
+  schema_version: number
+  product: string
+  channel: PortableUpdateChannel
+  from_version: string
+  to_version: string
+  published_at: string
+  target_manifest_sha256: string
+  files: PortablePatchFile[]
+  deletes: string[]
 }
 
 export function parsePortableUpdateManifest(
@@ -103,6 +129,84 @@ export function verifyPortableUpdateManifest(
     throw new Error('Package manifest signature verification failed')
   }
   return parsePortableUpdateManifest(manifestBytes, expectedChannel)
+}
+
+export function parsePortablePatchManifest(
+  input: Buffer | string,
+  expectedChannel: PortableUpdateChannel = PORTABLE_UPDATE_CHANNEL
+): PortablePatchManifest {
+  const value = JSON.parse(input.toString()) as Partial<PortablePatchManifest>
+  if (value.schema_version !== PORTABLE_UPDATE_SCHEMA_VERSION) {
+    throw new Error(`Unsupported PANGEA patch schema: ${String(value.schema_version)}`)
+  }
+  if (value.product !== PORTABLE_UPDATE_PRODUCT) {
+    throw new Error(`Unexpected patch product: ${String(value.product)}`)
+  }
+  if (value.channel !== expectedChannel) {
+    throw new Error(`Unexpected patch channel: ${String(value.channel)}`)
+  }
+  if (!isVersionForChannel(value.from_version, expectedChannel)) {
+    throw new Error('Patch base version is invalid for its channel')
+  }
+  if (!isVersionForChannel(value.to_version, expectedChannel)) {
+    throw new Error('Patch target version is invalid for its channel')
+  }
+  if (value.from_version === value.to_version || !isNewerPortableVersion(value.to_version, value.from_version, expectedChannel)) {
+    throw new Error('Patch target version must be newer than its base version')
+  }
+  if (!value.published_at || Number.isNaN(Date.parse(value.published_at))) {
+    throw new Error('Patch publication time is invalid')
+  }
+  if (typeof value.target_manifest_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(value.target_manifest_sha256)) {
+    throw new Error('Patch target manifest hash is invalid')
+  }
+  if (!Array.isArray(value.files) || value.files.length > 200_000 || !Array.isArray(value.deletes) || value.deletes.length > 200_000) {
+    throw new Error('Patch file manifest is invalid')
+  }
+  const files = new Set<string>()
+  for (const file of value.files) {
+    const normalized = normalizePortableEntryPath(file?.path)
+    const identity = normalized.toLowerCase()
+    if (files.has(identity)) throw new Error(`Patch contains a duplicate path: ${normalized}`)
+    files.add(identity)
+    if (file?.operation !== 'add' && file?.operation !== 'replace') {
+      throw new Error(`Patch operation is invalid: ${normalized}`)
+    }
+    if (!Number.isSafeInteger(file?.size) || file.size < 0) {
+      throw new Error(`Patch file size is invalid: ${normalized}`)
+    }
+    if (typeof file?.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(file.sha256)) {
+      throw new Error(`Patch file hash is invalid: ${normalized}`)
+    }
+    file.path = normalized
+  }
+  const deletes = new Set<string>()
+  for (const path of value.deletes) {
+    const normalized = normalizePortableEntryPath(path)
+    const identity = normalized.toLowerCase()
+    if (deletes.has(identity)) throw new Error(`Patch contains a duplicate deletion: ${normalized}`)
+    if (files.has(identity)) throw new Error(`Patch both changes and deletes: ${normalized}`)
+    deletes.add(identity)
+  }
+  return value as PortablePatchManifest
+}
+
+export function verifyPortablePatchManifest(
+  manifestBytes: Buffer,
+  signatureBase64: string,
+  publicKeyPem: string,
+  expectedChannel: PortableUpdateChannel = PORTABLE_UPDATE_CHANNEL
+): PortablePatchManifest {
+  const signature = Buffer.from(signatureBase64.trim(), 'base64')
+  if (signature.length !== 64) throw new Error('Patch manifest signature is invalid')
+  const publicKey = createPublicKey(publicKeyPem)
+  if (publicKey.asymmetricKeyType !== 'ed25519') {
+    throw new Error('PANGEA patch public key must use Ed25519')
+  }
+  if (!verify(null, manifestBytes, publicKey, signature)) {
+    throw new Error('Patch manifest signature verification failed')
+  }
+  return parsePortablePatchManifest(manifestBytes, expectedChannel)
 }
 
 export function normalizePortableEntryPath(value: unknown): string {

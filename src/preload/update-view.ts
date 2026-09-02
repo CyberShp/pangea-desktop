@@ -47,8 +47,12 @@ export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): Upda
       return {
         title: zh ? '更新已就绪' : 'Update ready',
         description: zh
-          ? `${version} 已验证；完成当前分析后可重启升级。`
-          : `${version} is verified. Restart after current analysis finishes.`
+          ? status.packageType === 'patch'
+            ? `补丁 ${status.baseVersion ?? status.currentVersion} → ${version} 已验证；完成当前分析后可重启升级。`
+            : `${version} 已验证；完成当前分析后可重启升级。`
+          : status.packageType === 'patch'
+            ? `Patch ${status.baseVersion ?? status.currentVersion} → ${version} is verified. Restart after current analysis finishes.`
+            : `${version} is verified. Restart after current analysis finishes.`
       }
     case 'install-error':
       return {
@@ -65,7 +69,7 @@ export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): Upda
     case 'error':
       return {
         title: zh ? '升级包校验失败' : 'Update package verification failed',
-        description: zh ? '请选择由 PANGEA Desktop 构建生成的完整 ZIP。' : 'Choose a complete ZIP produced by the PANGEA Desktop build.'
+        description: zh ? '请选择由 PANGEA Desktop 构建生成的完整包或补丁包。' : 'Choose a full or patch package produced by the PANGEA Desktop build.'
       }
     case 'idle':
       return { title: '', description: '' }
@@ -84,7 +88,11 @@ export function updateMessage(status: UpdateStatus, locale: UpdateLocale): strin
       return zh ? `正在校验升级包 ${percent}%` : `Verifying update package ${percent}%`
     }
     case 'downloaded':
-      return zh ? `PANGEA Desktop${version} 已验证完成` : `PANGEA Desktop${version} is verified and ready`
+      return status.packageType === 'patch'
+        ? (zh
+          ? `PANGEA Desktop 补丁 ${status.baseVersion ?? status.currentVersion} →${version} 已验证完成`
+          : `PANGEA Desktop patch ${status.baseVersion ?? status.currentVersion} →${version} is verified and ready`)
+        : (zh ? `PANGEA Desktop${version} 已验证完成` : `PANGEA Desktop${version} is verified and ready`)
     case 'install-error':
       return zh ? `PANGEA Desktop${version} 升级未完成` : `PANGEA Desktop${version} update was not completed`
     case 'unsupported':
