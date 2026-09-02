@@ -19,6 +19,7 @@ $UserDataRoot = Join-Path $env:APPDATA 'pangea-desktop'
 $ExistingUserDataBackup = Join-Path $TemporaryRoot 'existing-user-data'
 $ProfileRoot = Join-Path $UserDataRoot 'harness\profiles\web'
 $HealthMarker = Join-Path $UserDataRoot 'updates\packaged-harness-healthy.json'
+$HarnessLogPath = Join-Path $UserDataRoot 'logs\harness.log'
 $ExistingUserDataPresent = Test-Path $UserDataRoot
 $DesktopProcess = $null
 
@@ -76,6 +77,12 @@ try {
     if ([DateTime]::UtcNow -ge $Deadline) {
       throw "Packaged Harness did not reach product-workspace readiness within $TimeoutSeconds seconds."
     }
+    if (Test-Path $HarnessLogPath -PathType Leaf) {
+      $HarnessTail = Get-Content $HarnessLogPath -Tail 80 -ErrorAction SilentlyContinue
+      if ($HarnessTail -match '\[desktop\] Harness entry failed during startup') {
+        throw 'Packaged Harness reported a startup failure before product-workspace readiness.'
+      }
+    }
     Start-Sleep -Seconds 1
     $DesktopProcess.Refresh()
   }
@@ -107,7 +114,7 @@ try {
   Write-Host "Packaged Harness migrated a legacy PANGEA profile and reached product-workspace readiness on $ExpectedVersion."
 } catch {
   Write-Host 'Packaged Harness startup diagnostics:'
-  Get-ChildItem $UserDataRoot -Recurse -File -Filter '*.log' -ErrorAction SilentlyContinue | ForEach-Object {
+  Get-ChildItem (Join-Path $UserDataRoot 'logs') -File -Filter '*.log' -ErrorAction SilentlyContinue | ForEach-Object {
     Write-Host "--- user-data\$($_.FullName.Substring($UserDataRoot.Length + 1))"
     Get-Content $_.FullName -Tail 300 -ErrorAction SilentlyContinue | Out-Host
   }

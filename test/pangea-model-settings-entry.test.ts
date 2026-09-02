@@ -18,6 +18,7 @@ describe('PANGEA model settings entry', () => {
   it('keeps the desktop product plugin active without injecting duplicate product navigation', async () => {
     const pkg = JSON.parse(await readFile(productPackage, 'utf8')) as {
       exports?: Record<string, string>
+      dependencies?: Record<string, string>
       dsh?: { client?: { platform?: string; inject?: string[] } }
     }
     const [client, patch] = await Promise.all([
@@ -28,8 +29,13 @@ describe('PANGEA model settings entry', () => {
     expect(pkg.exports?.['./client']).toBe('./client.js')
     expect(pkg.dsh?.client?.platform).toBe('web')
     expect(pkg.dsh?.client?.inject).toContain('@deepseek-ai/dsh-client-runtime')
+    expect(pkg.dependencies?.['@deepseek-ai/dsh-subagent-acp']).toBe('0.1.1-rc.2')
     expect(patch).toContain('id: pangea-product-shell')
     expect(patch).toContain('name: dsh-pangea-product')
+    expect(patch).not.toContain('id: pangea-jobs-local')
+    expect(patch).not.toContain('id: pangea-subagent')
+    expect(patch).not.toContain('id: pangea-subprocess-local')
+    expect(patch).not.toContain("name: '@deepseek-ai/dsh-subagent-acp'")
     expect(client).toContain('Product navigation and first-launch affordances are rendered by dsh-pangea')
     expect(client).not.toContain('MutationObserver')
     expect(client).not.toContain('createSettingsButton')

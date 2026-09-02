@@ -111,5 +111,7 @@ describe('PANGEA Desktop release contract', () => {
     expect(smoke).toContain("'dsh-pangea-companion'")
     expect(smoke).toContain('--pangea-update-health=')
     expect(smoke).toContain('product-workspace readiness')
+    expect(smoke).toContain('Harness entry failed during startup')
+    expect(smoke).toContain("Join-Path $UserDataRoot 'logs\\harness.log'")
   })
 })
