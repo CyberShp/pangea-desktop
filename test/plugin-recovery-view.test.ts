@@ -36,6 +36,17 @@ describe('plugin recovery view model', () => {
     expect(description.detail).not.toContain('/sidebar/api')
   })
 
+  it('shows the exact loader entry and plugin when no friendlier cause is known', () => {
+    const description = describePluginFailure(
+      [],
+      'zh',
+      'Harness could not start. failed to apply loader entry acp-nga (dsh-pangea-nga-acp): ACP command exited before initialization'
+    )
+    expect(description.title).toBe('插件 dsh-pangea-nga-acp 启动失败')
+    expect(description.detail).toContain('acp-nga')
+    expect(description.detail).toContain('ACP command exited before initialization')
+  })
+
   it.each([
     ['cannot resolve profile bundle example', '插件没有完整安装'],
     ['package declares no dsh.bundle', '安装的包不是兼容的 DSH 插件'],

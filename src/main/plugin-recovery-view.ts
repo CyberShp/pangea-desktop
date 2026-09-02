@@ -48,22 +48,45 @@ function latestAttemptText(logs: readonly string[]): string {
   return logs.slice(startIndex + 1).join('\n')
 }
 
+function loaderEntryFailure(text: string): { entryId: string; plugin: string; cause: string } | undefined {
+  const pattern = /failed to (?:apply|import) loader entry\s+([^\s(]+)\s+\(([^)]+)\):\s*/gi
+  let latest: RegExpExecArray | null = null
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) latest = match
+  if (!latest) return undefined
+  const cause = text
+    .slice(latest.index + latest[0].length)
+    .split(/\r?\n/, 1)[0]
+    ?.trim()
+    .slice(0, 400)
+  return {
+    entryId: latest[1] ?? 'unknown',
+    plugin: latest[2] ?? 'unknown',
+    cause: cause || 'No additional error detail was reported.'
+  }
+}
+
 export function describePluginFailure(
   logs: readonly string[],
-  locale: PluginRecoveryLocale
+  locale: PluginRecoveryLocale,
+  rawError = ''
 ): FailureDescription {
-  const text = latestAttemptText(logs)
+  const text = `${latestAttemptText(logs)}\n${rawError}`
+  const loaderFailure = loaderEntryFailure(text)
   const duplicateRoute = text.match(/duplicate prefix route ["']([^"']+)["']/i)?.[1]
 
   if (duplicateRoute) {
     return locale === 'zh'
       ? {
-          title: '插件使用了重复的服务入口',
-          detail: `启动日志显示 ${duplicateRoute} 被重复注册，因此 Harness 无法继续启动。`
+          title: loaderFailure
+            ? `插件 ${loaderFailure.plugin} 使用了重复的服务入口`
+            : '插件使用了重复的服务入口',
+          detail: `启动日志显示 ${duplicateRoute} 被重复注册${loaderFailure ? `（loader entry “${loaderFailure.entryId}”）` : ''}，因此 Harness 无法继续启动。`
         }
       : {
-          title: 'A plugin registered a duplicate service route',
-          detail: `The startup log shows that ${duplicateRoute} was registered more than once, so Harness could not continue.`
+          title: loaderFailure
+            ? `Plugin ${loaderFailure.plugin} registered a duplicate service route`
+            : 'A plugin registered a duplicate service route',
+          detail: `The startup log shows that ${duplicateRoute} was registered more than once${loaderFailure ? ` by loader entry “${loaderFailure.entryId}”` : ''}, so Harness could not continue.`
         }
   }
  
@@ -71,12 +94,16 @@ export function describePluginFailure(
     const entryId = text.match(/duplicate loader entry id:\s*([^\s]+)/i)?.[1]
     return locale === 'zh'
       ? {
-          title: '插件注册了重复的服务组件',
-          detail: `启动日志显示组件 ${entryId ? `"${entryId}"` : ''} 被重复定义，插件之间存在加载冲突，因此 Harness 无法继续启动。`
+          title: loaderFailure
+            ? `插件 ${loaderFailure.plugin} 注册了重复的服务组件`
+            : '插件注册了重复的服务组件',
+          detail: `启动日志显示组件 ${entryId ? `"${entryId}"` : ''} 被重复定义${loaderFailure ? `（loader entry “${loaderFailure.entryId}”）` : ''}，插件之间存在加载冲突，因此 Harness 无法继续启动。`
         }
       : {
-          title: 'A plugin registered a duplicate service component',
-          detail: `The startup log shows that component ${entryId ? `"${entryId}"` : ''} was registered more than once due to a plugin conflict.`
+          title: loaderFailure
+            ? `Plugin ${loaderFailure.plugin} registered a duplicate service component`
+            : 'A plugin registered a duplicate service component',
+          detail: `The startup log shows that component ${entryId ? `"${entryId}"` : ''} was registered more than once${loaderFailure ? ` by loader entry “${loaderFailure.entryId}”` : ''} due to a plugin conflict.`
         }
   }
 
@@ -118,6 +145,17 @@ export function describePluginFailure(
   }
 
   if (/failed to import loader entry/i.test(text)) {
+    if (loaderFailure) {
+      return locale === 'zh'
+        ? {
+            title: `插件 ${loaderFailure.plugin} 加载失败`,
+            detail: `Loader entry “${loaderFailure.entryId}” 启动失败：${loaderFailure.cause}`
+          }
+        : {
+            title: `Plugin ${loaderFailure.plugin} could not load`,
+            detail: `Loader entry “${loaderFailure.entryId}” failed during startup: ${loaderFailure.cause}`
+          }
+    }
     return locale === 'zh'
       ? {
           title: '插件代码加载失败',
@@ -126,6 +164,18 @@ export function describePluginFailure(
       : {
           title: 'The plugin code could not be loaded',
           detail: 'Its files may be damaged, missing a dependency, or incompatible with this Harness version.'
+      }
+  }
+
+  if (loaderFailure) {
+    return locale === 'zh'
+      ? {
+          title: `插件 ${loaderFailure.plugin} 启动失败`,
+          detail: `Loader entry “${loaderFailure.entryId}” 启动失败：${loaderFailure.cause}`
+        }
+      : {
+          title: `Plugin ${loaderFailure.plugin} failed during startup`,
+          detail: `Loader entry “${loaderFailure.entryId}” failed during startup: ${loaderFailure.cause}`
         }
   }
 
@@ -152,7 +202,7 @@ export function buildPluginRecoveryViewModel(options: {
   const plugins = pluginPackages.map(displayPluginName)
   const removedPlugins = [...new Set(options.removedPlugins)].map(displayPluginName)
   const canUninstall = plugins.length > 0
-  const description = describePluginFailure(snapshot.logs, locale)
+  const description = describePluginFailure(snapshot.logs, locale, snapshot.message)
   const multiple = plugins.length > 1
 
   if (locale === 'zh') {
