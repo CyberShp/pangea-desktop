@@ -74,6 +74,7 @@ describe('PANGEA Desktop release contract', () => {
     expect(workflow).toContain('workflow_dispatch:')
     expect(workflow).toContain('runs-on: windows-2022')
     expect(workflow).not.toContain('-ResolveComponentBranches')
+    expect(workflow).toContain('-RequireCurrentComponentHeads')
     expect(workflow).toContain('actions/upload-artifact@v4')
     expect(workflow).toContain('PANGEA_PACKAGE_CHANNEL')
     expect(workflow).toContain('gh release upload')

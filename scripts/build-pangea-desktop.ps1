@@ -6,6 +6,7 @@ param(
   [ValidateSet('stable', 'test')]
   [string]$PackageChannel,
   [switch]$ResolveComponentBranches,
+  [switch]$RequireCurrentComponentHeads,
   [switch]$SkipTests,
   [switch]$SkipPackage
 )
@@ -143,6 +144,18 @@ if ($ResolveComponentBranches) {
   $Components.desktopBase.commit = $DesktopBaseCommit
   $Components.dshPangea.commit = Resolve-BranchCommit 'dsh-pangea' $Components.dshPangea.repository $Components.dshPangea.branch
   $Components.pangeaAgent.commit = Resolve-BranchCommit 'pangea-agent' $Components.pangeaAgent.repository $Components.pangeaAgent.branch
+}
+
+if ($RequireCurrentComponentHeads) {
+  foreach ($Component in @(
+    [ordered]@{ name = 'dsh-pangea'; value = $Components.dshPangea },
+    [ordered]@{ name = 'pangea-agent'; value = $Components.pangeaAgent }
+  )) {
+    $BranchCommit = Resolve-BranchCommit $Component.name $Component.value.repository $Component.value.branch
+    if ($BranchCommit -ne $Component.value.commit) {
+      throw "$($Component.name) lock is stale: $($Component.value.branch) is $BranchCommit, but pangea.components.json pins $($Component.value.commit)."
+    }
+  }
 }
 
 New-Item $StageRoot, $SourceRoot, $PluginRoot, $RuntimeRoot, $CacheRoot, $UpdateRoot -ItemType Directory -Force | Out-Null
