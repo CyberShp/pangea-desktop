@@ -5,6 +5,7 @@ import { mkdir } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { dirname, join } from 'node:path'
 import type { RuntimePhase, RuntimeSnapshot } from '../../shared/contracts'
+import { withAcpRuntimeEnvironment } from './acp-runtime-settings'
 
 export interface HarnessRuntimeOptions {
   dshEntryPath: string
@@ -308,6 +309,11 @@ export class HarnessRuntime {
 
     let child: HarnessChildProcess
     try {
+      const environment = withAcpRuntimeEnvironment(
+        this.options.dshHome,
+        resolveShellEnvironment(),
+        process.platform
+      )
       child = this.options.launchProcess(
         this.options.nodeExecutablePath,
         args,
@@ -315,7 +321,7 @@ export class HarnessRuntime {
           launchDirectory,
           this.options.dshHome,
           process.platform,
-          resolveShellEnvironment()
+          environment
         )
       )
     } catch (error) {

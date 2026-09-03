@@ -42,4 +42,20 @@ describe('PANGEA product server runtime', () => {
     expect(plugin.mock.calls[3][0].name).toBe('subagent-claude-code')
     expect(plugin.mock.calls[3][1]).toEqual({ providerName: 'pangea-claude-code', permissionMode: 'bypassPermissions', env: {} })
   })
+
+  it('uses resolved commands and omits unavailable providers', () => {
+    const entries = product.configuredProviderPlugins({
+      PANGEA_ACP_RUNTIME_CONFIG: JSON.stringify({
+        version: 1,
+        providers: {
+          'pangea-nga': { available: false },
+          'pangea-opencode': { available: true, resolved_command: 'C:\\Tools\\opencode.exe', args: ['acp'] }
+        }
+      })
+    })
+    expect(entries.map(([, config]) => config.providerName)).toEqual([
+      'pangea-codeagent', 'pangea-opencode', 'pangea-claude-code'
+    ])
+    expect(entries[1][1]).toMatchObject({ command: 'C:\\Tools\\opencode.exe', args: ['acp'] })
+  })
 })

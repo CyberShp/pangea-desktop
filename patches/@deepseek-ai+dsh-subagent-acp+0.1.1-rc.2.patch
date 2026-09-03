@@ -1,0 +1,68 @@
+diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
+index b89ccf2..dd62b46 100644
+--- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
+@@ -94,6 +94,24 @@ function toError(value) {
+ 	/* v8 ignore next */
+ 	return value instanceof Error ? value : new Error(String(value));
+ }
++function selectValues(option) {
++	if (option?.type !== "select" || !Array.isArray(option.options)) return [];
++	return option.options.flatMap((entry) => Array.isArray(entry?.options) ? entry.options : [entry]).map((entry) => entry?.value).filter((value) => typeof value === "string");
++}
++async function applyRequestedSessionConfig(conn, sessionId, configOptions, agentOptions) {
++	let options = Array.isArray(configOptions) ? configOptions : [];
++	for (const [category, requested, label] of [
++		["model", agentOptions?.model, "model"],
++		["thought_level", agentOptions?.reasoningEffort, "reasoning effort"]
++	]) {
++		if (typeof requested !== "string" || requested.length === 0) continue;
++		const option = options.find((entry) => entry?.category === category);
++		if (option === void 0) throw new Error(`subagent-acp: child did not advertise a ${label} configuration option`);
++		if (!selectValues(option).includes(requested)) throw new Error(`subagent-acp: child does not support requested ${label} "${requested}"`);
++		const response = await conn.setSessionConfigOption({ sessionId, configId: option.id, value: requested });
++		options = Array.isArray(response?.configOptions) ? response.configOptions : options;
++	}
++}
+ /**
+ * Start and publish one ACP child after initialization and session creation.
+ * Child failures resolve through the run result; startup failures reject after
+@@ -129,11 +147,16 @@ async function startAcpRun(request, spec) {
+ 	let processDisposal;
+ 	const disposeProcess = () => processDisposal ??= disposeAcpChild(child, spec.disposeEofGraceMs);
+ 	const fold = new AssistantOutputFold();
++	let pendingOutput = "";
+ 	const flags = { cancelled: false };
+ 	const makeClient = (_agent) => ({
+ 		sessionUpdate(params) {
+ 			const update = params.update;
+-			if (update.sessionUpdate === "agent_message_chunk") fold.pushText(acpContentText(update.content));
++			if (update.sessionUpdate === "agent_message_chunk") {
++				const text = acpContentText(update.content);
++				fold.pushText(text);
++				pendingOutput += text;
++			}
+ 			return Promise.resolve();
+ 		},
+ 		requestPermission(params) {
+@@ -179,6 +202,7 @@ async function startAcpRun(request, spec) {
+ 				const returnedSessionId = Reflect.get(session, "sessionId");
+ 				if (typeof returnedSessionId !== "string") throw new Error("ACP child published without a session id");
+ 				sessionId = returnedSessionId;
++				await applyRequestedSessionConfig(conn, sessionId, Reflect.get(session, "configOptions"), request.agentOptions);
+ 				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
+ 			})(),
+ 			spawnFailed,
+@@ -231,6 +255,12 @@ async function startAcpRun(request, spec) {
+ 	let disposal;
+ 	return {
+ 		id,
++		processId: child.pid,
++		readOutput() {
++			const output = pendingOutput;
++			pendingOutput = "";
++			return output;
++		},
+ 		localAgent: void 0,
+ 		result,
+ 		dispose() {
