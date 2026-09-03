@@ -14,9 +14,21 @@ const PROVIDERS = [
 export interface ResolvedAgentCommand {
   command: string
   version?: string
+  versionError?: string
 }
 
 type CommandResolver = (command: string, environment: NodeJS.ProcessEnv) => ResolvedAgentCommand
+type PowerShellProbeRunner = (command: string, environment: NodeJS.ProcessEnv) => string
+
+class AgentCommandResolutionError extends Error {
+  constructor(
+    message: string,
+    readonly status: 'not_found' | 'probe_error'
+  ) {
+    super(message)
+    this.name = 'AgentCommandResolutionError'
+  }
+}
 
 function object(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -35,11 +47,11 @@ function configuredRuntime(dshHome: string): Record<string, unknown> {
   return value
 }
 
-export function resolveAgentCommandWithPowerShell(
+function runAgentCommandPowerShellProbe(
   command: string,
   environment: NodeJS.ProcessEnv
-): ResolvedAgentCommand {
-  const output = execFileSync(
+): string {
+  return execFileSync(
     'powershell.exe',
     [
       '-NoLogo',
@@ -49,9 +61,15 @@ export function resolveAgentCommandWithPowerShell(
       'Text',
       '-Command',
       '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ' +
-        '$item=Get-Command -CommandType Application -Name $env:PANGEA_AGENT_COMMAND -ErrorAction Stop | Select-Object -First 1; ' +
-        '$line=(& $item.Source --version 2>&1 | Select-Object -First 1 | Out-String).Trim(); ' +
-        '@{command=$item.Source;version=$line} | ConvertTo-Json -Compress'
+        '$item=Get-Command -CommandType Application -Name $env:PANGEA_AGENT_COMMAND -ErrorAction SilentlyContinue | Select-Object -First 1; ' +
+        "if ($null -eq $item) { @{found=$false} | ConvertTo-Json -Compress; exit 0 }; " +
+        "$line=''; $versionError=''; " +
+        'try { ' +
+        '$versionOutput=& $item.Source --version 2>&1; $versionExitCode=$LASTEXITCODE; ' +
+        '$line=($versionOutput | Select-Object -First 1 | Out-String).Trim(); ' +
+        "if ($versionExitCode -ne 0) { $versionError='--version exited with code ' + $versionExitCode } " +
+        "} catch { $versionError=$_.Exception.Message }; " +
+        '@{found=$true;command=$item.Source;version=$line;version_error=$versionError} | ConvertTo-Json -Compress; exit 0'
     ],
     {
       encoding: 'utf8',
@@ -61,14 +79,51 @@ export function resolveAgentCommandWithPowerShell(
       stdio: ['ignore', 'pipe', 'ignore']
     }
   )
-  const parsed = object(JSON.parse(output.trim()))
+}
+
+export function resolveAgentCommandWithPowerShell(
+  command: string,
+  environment: NodeJS.ProcessEnv,
+  runProbe: PowerShellProbeRunner = runAgentCommandPowerShellProbe
+): ResolvedAgentCommand {
+  let output: string
+  try {
+    output = runProbe(command, environment)
+  } catch {
+    throw new AgentCommandResolutionError(
+      `PowerShell 无法完成启动命令“${command}”的探测。请确认 powershell.exe 可用，并在 Agent Runtime 中填写可执行文件或 .cmd 的绝对路径。`,
+      'probe_error'
+    )
+  }
+
+  let parsed: Record<string, unknown>
+  try {
+    parsed = object(JSON.parse(output.trim()))
+  } catch {
+    throw new AgentCommandResolutionError(
+      `PowerShell 没有返回启动命令“${command}”的有效探测结果。`,
+      'probe_error'
+    )
+  }
+  if (parsed.found === false) {
+    throw new AgentCommandResolutionError(
+      `未找到启动命令“${command}”。请确认它已安装并加入当前用户 PATH，或填写可执行文件或 .cmd 的绝对路径，然后重启 Harness。`,
+      'not_found'
+    )
+  }
   if (typeof parsed.command !== 'string' || parsed.command.trim() === '') {
-    throw new Error(`PowerShell 没有返回 ${command} 的可执行文件路径`)
+    throw new AgentCommandResolutionError(
+      `PowerShell 没有返回启动命令“${command}”的可执行文件路径。`,
+      'probe_error'
+    )
   }
   return {
     command: parsed.command.trim(),
     ...(typeof parsed.version === 'string' && parsed.version.trim()
       ? { version: parsed.version.trim() }
+      : {}),
+    ...(typeof parsed.version_error === 'string' && parsed.version_error.trim()
+      ? { versionError: parsed.version_error.trim() }
       : {})
   }
 }
@@ -120,14 +175,18 @@ export function withAcpRuntimeEnvironment(
         resolved_command: resolved.command,
         resolution_status: 'resolved',
         ...(resolved.version ? { version: resolved.version } : {}),
+        version_status: resolved.version ? 'resolved' : 'unavailable',
+        ...(resolved.versionError ? { version_error: resolved.versionError } : {}),
         login_status: 'not_checked'
       }
     } catch (error) {
       providers[defaults.id] = {
         ...base,
         available: false,
-        resolution_status: 'error',
+        resolution_status:
+          error instanceof AgentCommandResolutionError ? error.status : 'probe_error',
         resolution_error: error instanceof Error ? error.message : String(error),
+        version_status: 'not_checked',
         login_status: 'not_checked'
       }
     }

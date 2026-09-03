@@ -2,7 +2,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { withAcpRuntimeEnvironment } from '../src/main/runtime/acp-runtime-settings'
+import {
+  resolveAgentCommandWithPowerShell,
+  withAcpRuntimeEnvironment
+} from '../src/main/runtime/acp-runtime-settings'
 
 const roots: string[] = []
 
@@ -62,8 +65,48 @@ describe('external Agent runtime environment', () => {
     const config = JSON.parse(environment.PANGEA_ACP_RUNTIME_CONFIG ?? '{}')
     expect(config.providers['pangea-nga']).toMatchObject({
       available: false,
-      resolution_status: 'error',
+      resolution_status: 'probe_error',
       resolution_error: 'Get-Command: nga was not found'
     })
+  })
+
+  it('turns a missing PowerShell command into an actionable status without leaking the shell command', () => {
+    expect(() =>
+      resolveAgentCommandWithPowerShell('nga', {}, () => JSON.stringify({ found: false }))
+    ).toThrowError(/未找到启动命令“nga”/)
+
+    try {
+      resolveAgentCommandWithPowerShell('nga', {}, () => JSON.stringify({ found: false }))
+    } catch (error) {
+      expect(error).toMatchObject({ status: 'not_found' })
+      expect(String(error)).not.toContain('powershell.exe -NoLogo')
+    }
+  })
+
+  it('keeps a resolved provider available when only its version probe fails', () => {
+    const resolved = resolveAgentCommandWithPowerShell('opencode', {}, () =>
+      JSON.stringify({
+        found: true,
+        command: 'C:\\Tools\\opencode.cmd',
+        version_error: '--version exited with code 2'
+      })
+    )
+
+    expect(resolved).toEqual({
+      command: 'C:\\Tools\\opencode.cmd',
+      versionError: '--version exited with code 2'
+    })
+  })
+
+  it('replaces a failed PowerShell process error with a bounded diagnostic', () => {
+    expect(() =>
+      resolveAgentCommandWithPowerShell('codeagent', {}, () => {
+        throw new Error(
+          'Command failed: powershell.exe -NoLogo -Command very-long-internal-probe-script'
+        )
+      })
+    ).toThrowError(
+      'PowerShell 无法完成启动命令“codeagent”的探测。请确认 powershell.exe 可用，并在 Agent Runtime 中填写可执行文件或 .cmd 的绝对路径。'
+    )
   })
 })
