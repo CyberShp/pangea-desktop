@@ -53,7 +53,7 @@ jobs:
         env:
           BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
           REQUESTED_VERSION: ${{ inputs.version || '0.1.9' }}
-          PATCH_FROM_VERSION: ${{ inputs.patch_from_version || '' }}
+          PATCH_FROM_VERSION: ${{ inputs.patch_from_version || '0.1.9-test.58.3ee9128' }}
           UPDATE_PRIVATE_KEY_B64: ${{ secrets.PANGEA_UPDATE_PRIVATE_KEY_B64 }}
         run: |
           if ($env:REQUESTED_VERSION -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
@@ -115,11 +115,11 @@ jobs:
             -ExpectedVersion $env:RELEASE_VERSION
 
       - name: Generate signed incremental patch
-        if: inputs.patch_from_version != ''
+        if: github.event_name == 'push' || inputs.patch_from_version != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
+          PATCH_FROM_VERSION: ${{ inputs.patch_from_version || '0.1.9-test.58.3ee9128' }}
           TARGET_VERSION: ${{ steps.release_meta.outputs.version }}
           PACKAGE_CHANNEL: ${{ inputs.channel == 'release' && 'stable' || 'test' }}
         run: |
@@ -169,7 +169,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
-          PATCH_FROM_VERSION: ${{ inputs.patch_from_version || '' }}
+          PATCH_FROM_VERSION: ${{ inputs.patch_from_version || '0.1.9-test.58.3ee9128' }}
           RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
           RELEASE_TITLE: ${{ steps.release_meta.outputs.title }}
         run: |
