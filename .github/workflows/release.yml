@@ -1,7 +1,10 @@
 name: Build Windows package
-run-name: PANGEA Desktop ${{ inputs.channel }} ${{ inputs.version }}
+run-name: PANGEA Desktop ${{ inputs.channel || 'test' }} ${{ inputs.version || '0.1.9' }}
 
 on:
+  push:
+    branches:
+      - build/test-0.1.9-218e36e
   workflow_dispatch:
     inputs:
       channel:
@@ -48,9 +51,9 @@ jobs:
         id: release_meta
         shell: pwsh
         env:
-          BUILD_CHANNEL: ${{ inputs.channel }}
-          REQUESTED_VERSION: ${{ inputs.version }}
-          PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
+          BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
+          REQUESTED_VERSION: ${{ inputs.version || '0.1.9' }}
+          PATCH_FROM_VERSION: ${{ inputs.patch_from_version || '' }}
           UPDATE_PRIVATE_KEY_B64: ${{ secrets.PANGEA_UPDATE_PRIVATE_KEY_B64 }}
         run: |
           if ($env:REQUESTED_VERSION -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
@@ -165,8 +168,8 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          BUILD_CHANNEL: ${{ inputs.channel }}
-          PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
+          BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
+          PATCH_FROM_VERSION: ${{ inputs.patch_from_version || '' }}
           RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
           RELEASE_TITLE: ${{ steps.release_meta.outputs.title }}
         run: |
