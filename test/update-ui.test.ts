@@ -78,19 +78,27 @@ describe('desktop update card visibility', () => {
 })
 
 describe('secure update card wiring', () => {
-  it('bundles a preload and mounts it without enabling Node in Harness', async () => {
-    const [config, main, preload] = await Promise.all([
+  it('exposes update controls to the PANGEA settings page without enabling Node in Harness', async () => {
+    const [config, main, preload, bridge] = await Promise.all([
       readFile('electron.vite.config.ts', 'utf8'),
       readFile('src/main/index.ts', 'utf8'),
-      readFile('src/preload/index.ts', 'utf8')
+      readFile('src/preload/index.ts', 'utf8'),
+      readFile('src/preload/desktop-bridge.ts', 'utf8')
     ])
 
     expect(config).toContain('preload:')
     expect(main).toContain("preload: join(import.meta.dirname, '../preload/index.cjs')")
     expect(main).toContain('nodeIntegration: false')
     expect(preload).toContain("ipcRenderer.on('updates:status-changed'")
-    expect(preload).toContain("ipcRenderer.invoke('updates:import')")
-    expect(preload).toContain("ipcRenderer.invoke('updates:install')")
+    expect(preload).toContain('createDesktopBridge(ipcRenderer)')
+    expect(bridge).toContain("ipc.invoke('updates:import')")
+    expect(bridge).toContain("ipc.invoke('updates:install')")
+    expect(bridge).toContain('getUpdateStatus: (): Promise<UpdateStatus>')
+    expect(bridge).toContain('importUpdatePackage: (): Promise<UpdateStatus>')
+    expect(bridge).toContain('installUpdate: (): Promise<void>')
+    expect(bridge).toContain('subscribeUpdateStatus: (listener: (status: UpdateStatus) => void): number')
+    expect(bridge).toContain('unsubscribeUpdateStatus: (subscriptionId: number): void')
+    expect(preload).not.toContain('dsh-desktop-update-button')
     expect(preload).toContain("'right:20px'")
     expect(preload).toContain("'bottom:20px'")
   })

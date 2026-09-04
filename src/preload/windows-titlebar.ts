@@ -18,12 +18,6 @@ export function mountWindowsTitlebarLayout(options: TitlebarLayoutMountOptions):
   installDragRegion(document)
   trackSidebarLayout(document)
 
-  document.addEventListener('pointerdown', () => {
-    void ipcRenderer.invoke('desktop-titlebar:close-menu').catch((error: unknown) => {
-      console.warn('[desktop-titlebar] unable to close the application menu', error)
-    })
-  })
-
   syncTheme(document, ipcRenderer)
   const themeObserver = new MutationObserver(() => syncTheme(document, ipcRenderer))
   themeObserver.observe(document.body, {
@@ -57,7 +51,7 @@ function installLayout(document: Document): void {
       padding-top: 6px !important;
     }
     body.dsh-desktop-windows-titlebar-layout [data-slot="conversation.session.header"] > header {
-      padding-right: calc(var(${CAPTION_WIDTH_PROPERTY}, 140px) + 52px) !important;
+      padding-right: calc(var(${CAPTION_WIDTH_PROPERTY}, 140px) + 12px) !important;
     }
     body.dsh-desktop-windows-titlebar-layout button,
     body.dsh-desktop-windows-titlebar-layout a,
@@ -73,7 +67,7 @@ function installLayout(document: Document): void {
       z-index: 2147483644;
       top: 0;
       left: 0;
-      right: calc(var(${CAPTION_WIDTH_PROPERTY}, 140px) + 44px);
+      right: var(${CAPTION_WIDTH_PROPERTY}, 140px);
       height: 36px;
       background: transparent;
       pointer-events: none;

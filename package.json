@@ -159,10 +159,6 @@
         "to": "safe-mode.html"
       },
       {
-        "from": "build/windows-menu.html",
-        "to": "windows-menu.html"
-      },
-      {
         "from": ".pangea-build/plugins/dsh-pangea",
         "to": "app/node_modules/dsh-pangea"
       },

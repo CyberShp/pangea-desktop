@@ -10,8 +10,7 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve('src/preload/index.ts'),
-          'windows-menu': resolve('src/preload/windows-menu.ts')
+          index: resolve('src/preload/index.ts')
         },
         output: {
           format: 'cjs',
