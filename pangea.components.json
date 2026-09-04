@@ -13,7 +13,7 @@
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
     "branch": "codetalks-skill",
-    "commit": "cb2edf2f5fb90cf6f0b91cb810d946b394aa35e3"
+    "commit": "89cfecd1f467db514eb02ddca2dc2e86446b0eaa"
   },
   "python": {
     "version": "3.12.10",
