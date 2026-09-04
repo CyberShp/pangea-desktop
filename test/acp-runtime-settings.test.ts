@@ -46,9 +46,9 @@ describe('external Agent runtime environment', () => {
       resolved_command: 'C:\\Tools\\opencode-custom.exe',
       version: 'opencode-custom 2.0',
       available: true,
-      resolution_status: 'resolved',
-      models: [{ id: 'gpt-5.2-codex', efforts: ['high'] }]
+      resolution_status: 'resolved'
     })
+    expect(config.providers['pangea-opencode']).not.toHaveProperty('models')
     expect(config.providers['pangea-claude-code']).toMatchObject({
       available: true,
       resolution_status: 'built-in'

@@ -145,8 +145,8 @@ export function withAcpRuntimeEnvironment(
         ? override.command.trim()
         : defaults.command
     const args = Array.isArray(override.args) ? override.args : defaults.args
-    const models = Array.isArray(override.models) ? override.models : []
-    const base = { ...override, command, args, models }
+    const { models: _legacyModels, ...runtimeOverride } = override
+    const base = { ...runtimeOverride, command, args }
     if ('builtin' in defaults && defaults.builtin) {
       providers[defaults.id] = {
         ...base,

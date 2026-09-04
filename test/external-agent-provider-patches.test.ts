@@ -11,6 +11,7 @@ describe('external Agent provider patches', () => {
     expect(patch).toContain('setSessionConfigOption')
     expect(patch).toContain('["model", agentOptions?.model')
     expect(patch).toContain('["thought_level", agentOptions?.reasoningEffort')
+    expect(patch).toContain('if (typeof requested !== "string" || requested.length === 0) continue;')
     expect(patch).toContain('processId: child.pid')
     expect(patch).toContain('readOutput()')
     const installed = await readFile(
