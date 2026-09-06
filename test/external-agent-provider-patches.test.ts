@@ -14,11 +14,18 @@ describe('external Agent provider patches', () => {
     expect(patch).toContain('if (typeof requested !== "string" || requested.length === 0) continue;')
     expect(patch).toContain('processId: child.pid')
     expect(patch).toContain('readOutput()')
+    expect(patch).toContain('continuePrompt(prompt)')
     const installed = await readFile(
       join(process.cwd(), 'node_modules', '@deepseek-ai', 'dsh-subagent-acp', 'lib', 'index.js'),
       'utf8'
     )
     expect(installed.indexOf('await applyRequestedSessionConfig')).toBeLessThan(installed.indexOf('await conn.prompt'))
+    expect(installed).toContain('continuePrompt(prompt)')
+    const seamPatch = await readFile(
+      join(process.cwd(), 'patches', '@deepseek-ai+dsh-subagent+0.1.1-rc.2.patch'),
+      'utf8'
+    )
+    expect(seamPatch).toContain('readonly continuePrompt?:')
   })
 
   it('passes Claude model and effort to the official SDK and exposes its process id', async () => {

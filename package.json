@@ -31,6 +31,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:opencode-acp-continuation": "node scripts/verify-opencode-acp-continuation.mjs",
     "package:dir": "node scripts/verify-pangea-staging.mjs && npm run build && electron-builder --dir --win --x64 --publish never",
     "package:dev:dir": "node scripts/verify-pangea-staging.mjs && npm run build && electron-builder --dir --win --x64 --publish never --config electron-builder.dev.cjs",
     "package:dev:win": "node scripts/verify-pangea-staging.mjs && node scripts/verify-target.mjs win32 x64 && npm run build && electron-builder --dir --win --x64 --publish never --config electron-builder.dev.cjs",

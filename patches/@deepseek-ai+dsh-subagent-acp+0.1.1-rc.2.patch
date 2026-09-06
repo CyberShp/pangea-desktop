@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
-index b89ccf2..dd62b46 100644
+index b89ccf2..66174d0 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 @@ -94,6 +94,24 @@ function toError(value) {
@@ -27,11 +27,12 @@ index b89ccf2..dd62b46 100644
  /**
  * Start and publish one ACP child after initialization and session creation.
  * Child failures resolve through the run result; startup failures reject after
-@@ -129,11 +147,16 @@ async function startAcpRun(request, spec) {
+@@ -129,11 +147,18 @@ async function startAcpRun(request, spec) {
  	let processDisposal;
  	const disposeProcess = () => processDisposal ??= disposeAcpChild(child, spec.disposeEofGraceMs);
  	const fold = new AssistantOutputFold();
 +	let pendingOutput = "";
++	let currentTurnOutput = "";
  	const flags = { cancelled: false };
  	const makeClient = (_agent) => ({
  		sessionUpdate(params) {
@@ -41,11 +42,20 @@ index b89ccf2..dd62b46 100644
 +				const text = acpContentText(update.content);
 +				fold.pushText(text);
 +				pendingOutput += text;
++				currentTurnOutput += text;
 +			}
  			return Promise.resolve();
  		},
  		requestPermission(params) {
-@@ -179,6 +202,7 @@ async function startAcpRun(request, spec) {
+@@ -165,6 +190,7 @@ async function startAcpRun(request, spec) {
+ 	};
+ 	request.signal.addEventListener("abort", onAbort, { once: true });
+ 	const collectOutput = () => fold.collect() ?? [];
++	const collectTurnOutput = () => currentTurnOutput ? [{ type: "text", text: currentTurnOutput }] : [];
+ 	try {
+ 		await Promise.race([
+ 			(async () => {
+@@ -179,6 +205,7 @@ async function startAcpRun(request, spec) {
  				const returnedSessionId = Reflect.get(session, "sessionId");
  				if (typeof returnedSessionId !== "string") throw new Error("ACP child published without a session id");
  				sessionId = returnedSessionId;
@@ -53,7 +63,57 @@ index b89ccf2..dd62b46 100644
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -231,6 +255,12 @@ async function startAcpRun(request, spec) {
+@@ -195,42 +222,54 @@ async function startAcpRun(request, spec) {
+ 	/* v8 ignore next */
+ 	if (sessionId === void 0) throw new Error("unreachable: ACP startup fulfilled without a session id");
+ 	const remoteSessionId = sessionId;
+-	const result = (async () => {
++	const runPrompt = async (prompt) => {
++		currentTurnOutput = "";
+ 		try {
+-			const prompt = async () => {
++			const execute = async () => {
+ 				const promptResult = await conn.prompt({
+ 					sessionId: remoteSessionId,
+-					prompt: toAcpPrompt(request.prompt)
++					prompt: toAcpPrompt(prompt)
+ 				});
+ 				return {
+-					output: collectOutput(),
+-					stopReason: acpStopReason(promptResult.stopReason)
++					output: collectTurnOutput(),
++					stopReason: acpStopReason(promptResult.stopReason),
++					protocolStopReason: promptResult.stopReason
+ 				};
+ 			};
+-			return await Promise.race([prompt(), cancelSettled.then(() => ({
+-				output: collectOutput(),
++			return await Promise.race([execute(), cancelSettled.then(() => ({
++				output: collectTurnOutput(),
+ 				stopReason: "aborted"
+ 			}))]);
+ 		} catch (error) {
+ 			/* v8 ignore next */
+ 			if (flags.cancelled) return {
+-				output: collectOutput(),
++				output: collectTurnOutput(),
+ 				stopReason: "aborted"
+ 			};
+ 			try {
+ 				spec.onError?.(toError(error), "error");
+ 			} catch {}
+ 			return {
+-				output: collectOutput(),
++				output: collectTurnOutput(),
+ 				stopReason: "error"
+ 			};
+-		} finally {
+-			request.signal.removeEventListener("abort", onAbort);
+ 		}
+-	})();
++	};
++	let turn = runPrompt(request.prompt);
++	const result = turn;
  	let disposal;
  	return {
  		id,
@@ -62,6 +122,10 @@ index b89ccf2..dd62b46 100644
 +			const output = pendingOutput;
 +			pendingOutput = "";
 +			return output;
++		},
++		continuePrompt(prompt) {
++			turn = turn.then(() => flags.cancelled ? { output: collectOutput(), stopReason: "aborted" } : runPrompt(prompt));
++			return turn;
 +		},
  		localAgent: void 0,
  		result,

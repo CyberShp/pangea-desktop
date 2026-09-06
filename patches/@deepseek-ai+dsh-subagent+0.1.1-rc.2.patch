@@ -1,0 +1,17 @@
+diff --git a/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts b/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts
+index 4c2adb0..98fc28c 100644
+--- a/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts
++++ b/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts
+@@ -258,6 +258,12 @@ export interface SubagentRun {
+      * represent as a stop reason.
+      */
+     readonly result: Promise<SubagentResult>;
++    /**
++     * Continue the same remote child session with another prompt after the
++     * previous result has settled. Present only on transports that support
++     * multiple ACP prompt turns.
++     */
++    readonly continuePrompt?: (prompt: ContentBlock[]) => Promise<SubagentResult>;
+     /**
+      * Cancel remaining work, reach child quiescence, and release resources.
+      * Idempotent.
