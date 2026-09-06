@@ -2,6 +2,12 @@
 
 The supported packaging target is a Windows x64 portable ZIP. macOS can run TypeScript checks, unit tests, the Electron build, exact component tests and a direct Harness composition canary; Windows remains the release gate for ZIP assembly and replacement/rollback behavior.
 
+## Development responsibility
+
+The user supplies commands, confirms actions that require explicit authorization, and performs the final hands-on product acceptance. The Agent owns the routine engineering work: preparing the isolated test project, installing or validating dependencies, running tests and type checks, building plugins and Desktop, synchronizing a local patch into `win-unpacked`, collecting logs/exit codes, and cleaning up test processes it started. The Agent must not hand these routine steps back as a checklist for the user to execute.
+
+Development validation uses the separate `pangea-desktop-analysis-test` project and an uncompressed `win-unpacked` directory. A signed ZIP is a release artifact and must not be edited in place. The Agent may stop only processes it started; existing user Agent/Run/Harness processes, APPDATA/profile data and reports remain untouched unless the user explicitly authorizes otherwise. If physical interaction, credentials or an explicit external authorization is genuinely required, the Agent reports the exact blocker and leaves the user only that final action.
+
 ## Local checks
 
 ```bash
