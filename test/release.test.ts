@@ -31,6 +31,7 @@ describe('PANGEA Desktop release contract', () => {
   it('ships the locked plugin, agent and Python resources', async () => {
     const packageJson = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8'))
     const resources = packageJson.build.extraResources as Array<{ from: string; to: string }>
+    expect(packageJson.build.electronDist).toBe('node_modules/electron/dist')
     for (const expected of [
       { from: '.pangea-build/plugins/dsh-pangea', to: 'app/node_modules/dsh-pangea' },
       {
@@ -45,6 +46,7 @@ describe('PANGEA Desktop release contract', () => {
       { from: '.pangea-build/runtime/python', to: 'pangea-python' },
       { from: '.pangea-build/manifest.json', to: 'pangea-manifest.json' },
       { from: '.pangea-build/update', to: 'update' },
+      { from: 'node_modules/node/bin/node.exe', to: 'app/node_modules/node/bin/node.exe' },
       { from: 'build/apply-portable-update.ps1', to: 'update/apply-portable-update.ps1' }
     ]) {
       expect(resources).toContainEqual(expected)
@@ -89,7 +91,11 @@ describe('PANGEA Desktop release contract', () => {
     ])
     expect(packageJson.scripts['package:pangea:win']).toContain('build-pangea-desktop.ps1')
     expect(script).toContain("Invoke-Checked 'npm' @('ci', '--legacy-peer-deps')")
+    expect(script).toContain("node_modules\\node\\bin\\node.exe")
+    expect(script).toContain('Bundled Node.js runtime was not installed')
     expect(script).toContain("Invoke-Checked 'npm' @('run', 'package:dir')")
+    expect(script).toContain('PANGEA_TEST_APP_ROOT')
+    expect(script).toContain('cordis-launch.integration.mjs')
     expect(script).toContain('Get-VerifiedDownload')
     expect(script).toContain('pangea_agent.cli.main')
     expect(script).toContain("'..\\pangea-runtime\\src'")

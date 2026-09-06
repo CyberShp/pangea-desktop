@@ -98,6 +98,7 @@
     "productName": "PANGEA Desktop",
     "asar": false,
     "npmRebuild": false,
+    "electronDist": "node_modules/electron/dist",
     "compression": "maximum",
     "electronLanguages": [
       "en-US",
@@ -185,6 +186,10 @@
       {
         "from": ".pangea-build/update",
         "to": "update"
+      },
+      {
+        "from": "node_modules/node/bin/node.exe",
+        "to": "app/node_modules/node/bin/node.exe"
       },
       {
         "from": "build/apply-portable-update.ps1",

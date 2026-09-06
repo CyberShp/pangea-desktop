@@ -111,6 +111,15 @@ jobs:
             -PackageDirectory ./dist/win-unpacked `
             -ExpectedVersion $env:RELEASE_VERSION
 
+      - name: Verify packaged Cordis analysis launch
+        shell: pwsh
+        run: |
+          $env:PANGEA_TEST_APP_ROOT = (Resolve-Path './dist/win-unpacked/resources/app').Path
+          $PackagedNode = Join-Path $env:PANGEA_TEST_APP_ROOT 'node_modules/node/bin/node.exe'
+          $IntegrationTest = Join-Path $env:PANGEA_TEST_APP_ROOT 'node_modules/dsh-pangea-companion/tests/cordis-launch.integration.mjs'
+          & $PackagedNode --test $IntegrationTest
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Cordis integration failed with exit code $LASTEXITCODE." }
+
       - name: Generate signed incremental patch
         if: inputs.patch_from_version != ''
         shell: pwsh

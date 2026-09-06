@@ -163,6 +163,11 @@ $Components | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $StageRoot 'compo
 
 Write-Host 'Installing locked Desktop dependencies...'
 Invoke-Checked 'npm' @('ci', '--legacy-peer-deps')
+$BundledNodeExecutable = Join-Path $ProjectRoot 'node_modules\node\bin\node.exe'
+$BundledNodeFile = Get-Item -LiteralPath $BundledNodeExecutable -ErrorAction SilentlyContinue
+if (-not $BundledNodeFile -or $BundledNodeFile.Length -lt 1MB) {
+  throw "Bundled Node.js runtime was not installed: $BundledNodeExecutable. Remove node_modules and rerun npm ci."
+}
 
 Write-Host 'Materializing locked PANGEA components...'
 $DshPangea = Get-ExactSource 'dsh-pangea' $Components.dshPangea.repository $Components.dshPangea.commit $DshPangeaSource
@@ -210,10 +215,9 @@ Copy-Item (Join-Path $PangeaAgent 'pyproject.toml') $AgentRuntime -Force
 $Python = Join-Path $PythonRoot 'python.exe'
 $Requirements = Join-Path $ProjectRoot 'build/pangea-runtime-requirements.txt'
 $SitePackages = Join-Path $PythonRoot 'Lib/site-packages'
-$PipWheelLiteral = ConvertTo-Json $PipWheel -Compress
-$PipBootstrap = "import sys; sys.path.insert(0, $PipWheelLiteral); from pip._internal.cli.main import main; raise SystemExit(main())"
+$PipBootstrap = "import sys; sys.path.insert(0, sys.argv.pop(1)); from pip._internal.cli.main import main; raise SystemExit(main())"
 Invoke-Checked $Python @(
-  '-c', $PipBootstrap, 'install', '--disable-pip-version-check', '--no-compile',
+  '-c', $PipBootstrap, $PipWheel, 'install', '--disable-pip-version-check', '--no-compile',
   '--only-binary=:all:', '--target', $SitePackages, '-r', $Requirements
 )
 
@@ -279,6 +283,21 @@ if (-not $SkipTests) {
 if (-not $SkipPackage) {
   Write-Host 'Packaging the Windows portable ZIP...'
   Invoke-Checked 'npm' @('run', 'package:dir')
+  if (-not $SkipTests) {
+    Write-Host 'Running packaged Cordis analysis launch integration...'
+    $PackagedAppRoot = Join-Path $ProjectRoot 'dist\win-unpacked\resources\app'
+    $PackagedNode = Join-Path $PackagedAppRoot 'node_modules\node\bin\node.exe'
+    $PackagedCordisTest = Join-Path $PackagedAppRoot 'node_modules\dsh-pangea-companion\tests\cordis-launch.integration.mjs'
+    if (-not (Test-Path $PackagedNode -PathType Leaf)) { throw "Packaged Node.js runtime was not found: $PackagedNode" }
+    if (-not (Test-Path $PackagedCordisTest -PathType Leaf)) { throw "Packaged Cordis integration test was not found: $PackagedCordisTest" }
+    $PreviousTestAppRoot = $env:PANGEA_TEST_APP_ROOT
+    try {
+      $env:PANGEA_TEST_APP_ROOT = $PackagedAppRoot
+      Invoke-Checked $PackagedNode @('--test', $PackagedCordisTest)
+    } finally {
+      $env:PANGEA_TEST_APP_ROOT = $PreviousTestAppRoot
+    }
+  }
   $PackageVersion = (Get-Content (Join-Path $ProjectRoot 'package.json') -Raw | ConvertFrom-Json).version
   $PackageName = "pangea-desktop-$PackageVersion-windows-x64-portable.zip"
   $PackagePath = Join-Path $ProjectRoot "dist/$PackageName"
