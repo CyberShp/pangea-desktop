@@ -56,6 +56,12 @@ Before a Windows package is handed to product testing, validate the analysis wor
 
 The packaged Cordis launch integration runs after `package:dir` and before the signed portable archive is created. Harness readiness and the Cordis launch result are reported separately. Real provider credentials are reserved for the final user-authorized smoke test; routine development uses the controlled fixture.
 
+The Windows ACP release gate uses the packaged Node runtime and the modules under the unpacked application's `node_modules`. It resolves temporary `nga.cmd`, `codeagent.bat`, and `opencode.cmd` entries through the same PowerShell probe used by Desktop, then exercises ACP initialize, session creation, a first prompt, continuation in the same session, and cancellation. It also compares the received argv for empty, spaced, Chinese, metacharacter, and trailing-backslash values. A fixture pass proves the packaged launch shape; NGA, CodeAgent, and OpenCode still require separate real-provider smoke results before compatibility with those particular versions is claimed.
+
+The same verification script supports `--native` for cross-platform regression of provider configuration defaults, real ACP prompts, continuation, and cancellation. The focused ACP test runs this path automatically; it is not a substitute for the Windows batch gate. Run presentation consumes the reconciled state endpoint, while Task execution errors remain available in diagnostics; loading another Task must not reuse the previous Task's launch log.
+
+Run status acceptance treats `(data_root, run_id)` as the workflow identity and `task_id + attempt_id + owner_session_id + job_id + startedAt` as execution identity. Browser GET requests may refresh an observed file snapshot but must never create or rewrite ownership. A stale or unreadable state file is shown as stale/unavailable rather than ACK `0/3`; a failed execution can override an older `in_progress` file only when it belongs to the same current attempt. Switching Tasks or Runs must clear the prior snapshot until the exact requested identity is returned.
+
 ## Package import implementation
 
 `create-signed-portable-package.mjs` hashes every file in `win-unpacked`, signs that manifest with Ed25519, places the manifest and signature under `resources\update`, then creates one ZIP. The ZIP can be extracted for a first installation or selected from the DSH settings area for an upgrade.

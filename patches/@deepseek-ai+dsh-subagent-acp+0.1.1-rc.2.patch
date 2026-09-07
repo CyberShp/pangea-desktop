@@ -1,11 +1,18 @@
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
-index b89ccf2..66174d0 100644
+index b89ccf2..7efb6df 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
-@@ -94,6 +94,24 @@ function toError(value) {
+@@ -94,6 +94,31 @@ function toError(value) {
  	/* v8 ignore next */
  	return value instanceof Error ? value : new Error(String(value));
  }
++function launchError(value, details) {
++	const error = toError(value);
++	for (const [key, detail] of Object.entries(details)) {
++		if (detail !== void 0 && error[key] === void 0) error[key] = detail;
++	}
++	return error;
++}
 +function selectValues(option) {
 +	if (option?.type !== "select" || !Array.isArray(option.options)) return [];
 +	return option.options.flatMap((entry) => Array.isArray(entry?.options) ? entry.options : [entry]).map((entry) => entry?.value).filter((value) => typeof value === "string");
@@ -27,7 +34,48 @@ index b89ccf2..66174d0 100644
  /**
  * Start and publish one ACP child after initialization and session creation.
  * Child failures resolve through the run result; startup failures reject after
-@@ -129,11 +147,18 @@ async function startAcpRun(request, spec) {
+@@ -106,34 +131,47 @@ function toError(value) {
+ async function startAcpRun(request, spec) {
+ 	if (request.signal.aborted) throw new Error("subagent request was aborted before the ACP child started");
+ 	const id = SessionId(randomUUID());
+-	const child = spec.spawn({
+-		argv: [spec.command, ...spec.args],
+-		cwd: spec.cwd,
+-		stdio: {
+-			stdin: "pipe",
+-			stdout: "pipe",
+-			stderr: "inherit"
+-		},
+-		graceMs: spec.disposeGraceMs,
+-		env: spec.env
+-	});
++	let child;
++	try {
++		child = spec.spawn({
++			argv: [spec.command, ...spec.args],
++			windowsBatch: spec.windowsBatch,
++			cwd: spec.cwd,
++			stdio: {
++				stdin: "pipe",
++				stdout: "pipe",
++				stderr: "inherit"
++			},
++			graceMs: spec.disposeGraceMs,
++			env: spec.env
++		});
++	} catch (error) {
++		throw launchError(error, { launchStage: "spawn_process" });
++	}
+ 	/* v8 ignore start -- 'pipe' dispositions expose both streams by the seam contract; defensive. */
+ 	if (child.stdin === void 0 || child.stdout === void 0) throw new Error("subagent-acp: subprocess implementation dropped a piped protocol stream");
+ 	/* v8 ignore stop */
+ 	const spawnFailed = child.done.then(
+ 		/* v8 ignore next -- the success arm's never-settling executor is intentionally empty. */
+ 		() => new Promise(() => {}),
+-		(err) => Promise.reject(toError(err))
++		(err) => Promise.reject(launchError(err, { launchStage: "spawn_process" }))
+ 	);
+ 	spawnFailed.catch(() => {});
  	let processDisposal;
  	const disposeProcess = () => processDisposal ??= disposeAcpChild(child, spec.disposeEofGraceMs);
  	const fold = new AssistantOutputFold();
@@ -47,7 +95,7 @@ index b89ccf2..66174d0 100644
  			return Promise.resolve();
  		},
  		requestPermission(params) {
-@@ -165,6 +190,7 @@ async function startAcpRun(request, spec) {
+@@ -165,6 +203,7 @@ async function startAcpRun(request, spec) {
  	};
  	request.signal.addEventListener("abort", onAbort, { once: true });
  	const collectOutput = () => fold.collect() ?? [];
@@ -55,7 +103,7 @@ index b89ccf2..66174d0 100644
  	try {
  		await Promise.race([
  			(async () => {
-@@ -179,6 +205,7 @@ async function startAcpRun(request, spec) {
+@@ -179,6 +218,7 @@ async function startAcpRun(request, spec) {
  				const returnedSessionId = Reflect.get(session, "sessionId");
  				if (typeof returnedSessionId !== "string") throw new Error("ACP child published without a session id");
  				sessionId = returnedSessionId;
@@ -63,7 +111,13 @@ index b89ccf2..66174d0 100644
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -195,42 +222,54 @@ async function startAcpRun(request, spec) {
+@@ -190,47 +230,60 @@ async function startAcpRun(request, spec) {
+ 		request.signal.removeEventListener("abort", onAbort);
+ 		await disposeProcess();
+ 		if (flags.cancelled) throw new Error("subagent request was aborted before the ACP child started");
+-		throw toError(error);
++		throw launchError(error, { launchStage: "acp_initialize" });
+ 	}
  	/* v8 ignore next */
  	if (sessionId === void 0) throw new Error("unreachable: ACP startup fulfilled without a session id");
  	const remoteSessionId = sessionId;
@@ -117,6 +171,7 @@ index b89ccf2..66174d0 100644
  	let disposal;
  	return {
  		id,
++		launch: spec.launch,
 +		processId: child.pid,
 +		readOutput() {
 +			const output = pendingOutput;
@@ -130,3 +185,101 @@ index b89ccf2..66174d0 100644
  		localAgent: void 0,
  		result,
  		dispose() {
+@@ -257,6 +310,7 @@ const inject = ["subagents", "subprocess"];
+ const Config = z.object({
+ 	providerName: z.string().default("acp"),
+ 	command: z.string().required(),
++	configuredCommand: z.string(),
+ 	args: z.array(z.string()).default([]),
+ 	cwd: z.string(),
+ 	permission: z.union(["allow", "reject"]).default("reject"),
+@@ -331,20 +385,50 @@ var AcpProvider = class {
+ 		this.ctx = ctx;
+ 		this.config = config;
+ 	}
+-	start(request) {
+-		return startAcpRun(request, {
+-			command: this.config.command,
++	async start(request) {
++		const cwd = resolveCwd(this.config.cwd, request);
++		const configuredCommand = this.config.configuredCommand ?? this.config.command;
++		let command;
++		try {
++			command = process.platform === "win32"
++				? await this.ctx.subprocess.resolveExecutable(this.config.command, this.config.env, request.signal)
++				: this.config.command;
++		} catch (error) {
++			throw launchError(error, {
++				launchStage: "resolve_executable",
++				configuredCommand,
++				resolvedCommand: this.config.command,
++				launcherKind: "direct",
++				cwd
++			});
++		}
++		const windowsBatch = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
++		const launch = {
++			configuredCommand,
++			resolvedCommand: command,
++			launcherKind: windowsBatch ? "windows-batch" : "direct",
++			launcherCommand: windowsBatch ? process.env.ComSpec ?? "cmd.exe" : command,
++			cwd
++		};
++		try {
++			return await startAcpRun(request, {
++			command,
+ 			args: this.config.args,
+-			cwd: resolveCwd(this.config.cwd, request),
++			cwd,
+ 			permission: this.config.permission,
+ 			env: this.config.env,
+ 			disposeEofGraceMs: this.config.disposeEofGraceMs,
+ 			disposeGraceMs: this.config.disposeGraceMs,
++			windowsBatch,
++			launch,
+ 			spawn: (spec) => this.ctx.subprocess.spawn(spec),
+ 			onError: (error, stopReason) => {
+ 				this.ctx.logger.warn(`subagent-acp "${this.name}": child run failed (${stopReason}): ${error.message}`);
+ 			}
+-		});
++			});
++		} catch (error) {
++			throw launchError(error, launch);
++		}
+ 	}
+ };
+ function apply(ctx, config) {
+diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
+index 76b04b9..7fa9e62 100644
+--- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
++++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
+@@ -17,6 +17,8 @@ export interface Config {
+     providerName: string;
+     /** The executable to spawn for each run (the child ACP agent). */
+     command: string;
++    /** Original user-facing command before Desktop/PATH resolution. */
++    configuredCommand?: string;
+     /** Arguments passed to {@link command}. */
+     args: string[];
+     /**
+diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
+index 764ff1d..5c69786 100644
+--- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
++++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
+@@ -19,6 +19,16 @@ export interface AcpRunSpec {
+     command: string;
+     /** Arguments passed to {@link command}. */
+     args: string[];
++    /** Whether this resolved Windows command is a `.cmd`/`.bat` entry point. */
++    windowsBatch?: boolean;
++    /** Sanitized launch metadata exposed to the owning Job/log lifecycle. */
++    launch?: {
++        configuredCommand: string;
++        resolvedCommand: string;
++        launcherKind: 'direct' | 'windows-batch';
++        launcherCommand: string;
++        cwd: string;
++    };
+     /**
+      * Absolute working directory for the child process AND its ACP session
+      * `cwd`. The provider resolves it before this spec exists: config override,

@@ -273,7 +273,11 @@ if (-not $SkipTests) {
     'test/update-state.test.ts',
     'test/update-ui.test.ts',
     'test/finalize-windows-release.test.ts',
+    'test/acp-runtime-settings.test.ts',
+    'test/acp-provider-launch.test.js',
+    'test/external-agent-provider-patches.test.ts',
     'test/pangea-product.test.ts',
+    'test/pangea-product-runtime.test.js',
     'test/pangea-profile.test.ts',
     'test/safe-mode.test.ts',
     'test/runtime.test.ts'
@@ -294,6 +298,11 @@ if (-not $SkipPackage) {
     try {
       $env:PANGEA_TEST_APP_ROOT = $PackagedAppRoot
       Invoke-Checked $PackagedNode @('--test', $PackagedCordisTest)
+      Invoke-Checked 'powershell.exe' @(
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', (Join-Path $ProjectRoot 'scripts/test-packaged-acp-batch-launch.ps1'),
+        '-AppRoot', $PackagedAppRoot
+      )
     } finally {
       $env:PANGEA_TEST_APP_ROOT = $PreviousTestAppRoot
     }

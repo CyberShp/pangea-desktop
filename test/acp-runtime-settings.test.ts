@@ -33,7 +33,7 @@ describe('external Agent runtime environment', () => {
       })
     )
     const resolver = vi.fn((command: string) => ({
-      command: `C:\\Tools\\${command}.exe`,
+      command: `C:\\Tools\\${command}${command === 'opencode-custom' ? '.cmd' : '.exe'}`,
       version: `${command} 2.0`
     }))
 
@@ -43,7 +43,8 @@ describe('external Agent runtime environment', () => {
     expect(resolver).toHaveBeenCalledTimes(3)
     expect(config.providers['pangea-opencode']).toMatchObject({
       command: 'opencode-custom',
-      resolved_command: 'C:\\Tools\\opencode-custom.exe',
+      resolved_command: 'C:\\Tools\\opencode-custom.cmd',
+      launcher_kind: 'windows-batch',
       version: 'opencode-custom 2.0',
       available: true,
       resolution_status: 'resolved'

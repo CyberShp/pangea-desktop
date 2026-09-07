@@ -26,16 +26,18 @@ export function configuredProviderPlugins(env = process.env) {
   for (const defaults of DEFAULTS) {
     const value = configured[defaults.providerName] ?? {}
     if (value.available === false) continue
+    const configuredCommand = typeof value.command === 'string' && value.command.trim()
+      ? value.command.trim()
+      : defaults.command
     const command = typeof value.resolved_command === 'string' && value.resolved_command.trim()
       ? value.resolved_command.trim()
-      : typeof value.command === 'string' && value.command.trim()
-        ? value.command.trim()
-        : defaults.command
+      : configuredCommand
     const args = Array.isArray(value.args) ? value.args : defaults.args
     if (args.some(item => typeof item !== 'string')) throw new Error(`${defaults.providerName} ACP args must be strings`)
     entries.push([acpSubagent, {
       providerName: defaults.providerName,
       command,
+      configuredCommand,
       args,
       permission: 'allow',
       env: {}

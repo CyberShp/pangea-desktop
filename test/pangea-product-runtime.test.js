@@ -14,6 +14,7 @@ describe('PANGEA product server runtime', () => {
       {
         providerName: 'pangea-nga',
         command: 'nga',
+        configuredCommand: 'nga',
         args: ['acp'],
         permission: 'allow',
         env: {}
@@ -21,6 +22,7 @@ describe('PANGEA product server runtime', () => {
       {
         providerName: 'pangea-codeagent',
         command: 'codeagent',
+        configuredCommand: 'codeagent',
         args: ['acp'],
         permission: 'allow',
         env: {}
@@ -28,6 +30,7 @@ describe('PANGEA product server runtime', () => {
       {
         providerName: 'pangea-opencode',
         command: 'opencode',
+        configuredCommand: 'opencode',
         args: ['acp'],
         permission: 'allow',
         env: {}
@@ -49,13 +52,17 @@ describe('PANGEA product server runtime', () => {
         version: 1,
         providers: {
           'pangea-nga': { available: false },
-          'pangea-opencode': { available: true, resolved_command: 'C:\\Tools\\opencode.exe', args: ['acp'] }
+          'pangea-opencode': { available: true, command: 'opencode-custom', resolved_command: 'C:\\Tools\\opencode.exe', args: ['acp'] }
         }
       })
     })
     expect(entries.map(([, config]) => config.providerName)).toEqual([
       'pangea-codeagent', 'pangea-opencode', 'pangea-claude-code'
     ])
-    expect(entries[1][1]).toMatchObject({ command: 'C:\\Tools\\opencode.exe', args: ['acp'] })
+    expect(entries[1][1]).toMatchObject({
+      command: 'C:\\Tools\\opencode.exe',
+      configuredCommand: 'opencode-custom',
+      args: ['acp']
+    })
   })
 })
