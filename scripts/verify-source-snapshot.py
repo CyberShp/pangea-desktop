@@ -189,10 +189,11 @@ class SourceSnapshotAcceptance(unittest.TestCase):
         real_sleep = snapshot.time.sleep
 
         def publish_with_open_handle(staging, target):
-            # FILE_READ_ATTRIBUTES, SHARE_READ | SHARE_WRITE (no SHARE_DELETE),
+            # GENERIC_READ, SHARE_READ | SHARE_WRITE (no SHARE_DELETE),
             # OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS for a directory handle.
+            # Attribute-only access does not enforce the sharing restriction.
             handle = kernel32.CreateFileW(
-                snapshot._filesystem_path(staging), 0x80, 0x03, None, 3, 0x02000000, None,
+                snapshot._filesystem_path(staging), 0x80000000, 0x03, None, 3, 0x02000000, None,
             )
             if handle == ctypes.c_void_p(-1).value:
                 raise ctypes.WinError(ctypes.get_last_error())
