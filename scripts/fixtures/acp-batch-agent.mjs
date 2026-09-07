@@ -43,7 +43,7 @@ class FixtureAgent {
       sessionId,
       update: {
         sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: `ACP_BATCH_READY turn=${turn} ${JSON.stringify(process.argv.slice(2))}` },
+        content: { type: 'text', text: `ACP_BATCH_READY turn=${turn} ${JSON.stringify(process.argv.slice(2))} shell=${process.env.CODEAGENT3_WINDOWS_SHELL_TYPE ?? 'unset'}` },
       },
     })
     const promptText = (prompt ?? []).map(item => item?.type === 'text' ? item.text : '').join('')

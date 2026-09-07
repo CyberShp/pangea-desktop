@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from 'vitest'
 import * as product from '../packages/dsh-pangea-product/index.js'
 
 describe('PANGEA product server runtime', () => {
+  it('defaults only Windows CodeAgent to PowerShell and preserves explicit shell values', () => {
+    const shell = (env, platform) => product.configuredProviderPlugins(env, platform)
+      .find(([, config]) => config.providerName === 'pangea-codeagent')[1].env
+    expect(shell({}, 'win32')).toEqual({ CODEAGENT3_WINDOWS_SHELL_TYPE: 'powershell' })
+    expect(shell({ CODEAGENT3_WINDOWS_SHELL_TYPE: ' ' }, 'win32')).toEqual({ CODEAGENT3_WINDOWS_SHELL_TYPE: 'powershell' })
+    expect(shell({ codeagent3_windows_shell_type: 'custom-shell' }, 'win32')).toEqual({ codeagent3_windows_shell_type: 'custom-shell' })
+    expect(shell({}, 'linux')).toEqual({})
+    expect(product.configuredProviderPlugins({}, 'win32').find(([, config]) => config.providerName === 'pangea-nga')[1].env).toEqual({})
+  })
   it('mounts NGA, CodeAgent, OpenCode and Claude Code through DSH providers', () => {
     const plugin = vi.fn()
 
@@ -25,13 +34,13 @@ describe('PANGEA product server runtime', () => {
         configuredCommand: 'codeagent',
         args: ['acp'],
         permission: 'allow',
-        env: {}
+        env: process.platform === 'win32' ? { CODEAGENT3_WINDOWS_SHELL_TYPE: 'powershell' } : {}
       },
       {
         providerName: 'pangea-opencode',
         command: 'opencode',
         configuredCommand: 'opencode',
-        args: ['acp'],
+        args: ['acp', '--print-logs', '--log-level', 'ERROR'],
         permission: 'allow',
         env: {}
       },
@@ -62,7 +71,7 @@ describe('PANGEA product server runtime', () => {
     expect(entries[1][1]).toMatchObject({
       command: 'C:\\Tools\\opencode.exe',
       configuredCommand: 'opencode-custom',
-      args: ['acp']
+      args: ['acp', '--print-logs', '--log-level', 'ERROR']
     })
   })
 })

@@ -114,6 +114,9 @@
     },
     "files": [
       "out/**/*",
+      "scripts/diagnose-acp-initialization.mjs",
+      "scripts/prepare-acp-probe.py",
+      "scripts/diagnose-packaged-acp.ps1",
       "node_modules/**/*",
       "package.json",
       "!**/*.map",

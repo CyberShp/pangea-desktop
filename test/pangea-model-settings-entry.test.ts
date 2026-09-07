@@ -55,13 +55,13 @@ describe('PANGEA model settings entry', () => {
     expect(client).toContain('width: "min(1040px, calc(100vw - 48px))"')
   })
 
-  it('exposes the complete DSH model catalog, including official and custom providers', async () => {
+  it('uses DSH model settings with the product provider policy', async () => {
     const client = await readFile(installedModelsClient, 'utf8')
 
     expect(client).toContain('function PangeaInternalModelSettings(props)')
     expect(client).toContain('return (0, react_jsx_runtime.jsx)(ModelsSection, { ...props });')
     expect(client).toContain('function ModelsSection(props)')
-    expect(client).toContain('deepseek-official')
+    expect(client).toContain('providersResponse.result.value.providers.filter(pangeaModelProvider)')
   })
 
   it('publishes readiness based on every usable DSH model route', async () => {

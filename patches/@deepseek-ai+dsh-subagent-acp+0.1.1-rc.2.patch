@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
-index b89ccf2..7efb6df 100644
+index b89ccf2..b8f3405 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 @@ -94,6 +94,31 @@ function toError(value) {
@@ -34,7 +34,7 @@ index b89ccf2..7efb6df 100644
  /**
  * Start and publish one ACP child after initialization and session creation.
  * Child failures resolve through the run result; startup failures reject after
-@@ -106,34 +131,47 @@ function toError(value) {
+@@ -106,34 +131,71 @@ function toError(value) {
  async function startAcpRun(request, spec) {
  	if (request.signal.aborted) throw new Error("subagent request was aborted before the ACP child started");
  	const id = SessionId(randomUUID());
@@ -58,7 +58,7 @@ index b89ccf2..7efb6df 100644
 +			stdio: {
 +				stdin: "pipe",
 +				stdout: "pipe",
-+				stderr: "inherit"
++				stderr: { maxBytes: 8192 }
 +			},
 +			graceMs: spec.disposeGraceMs,
 +			env: spec.env
@@ -81,42 +81,79 @@ index b89ccf2..7efb6df 100644
  	const fold = new AssistantOutputFold();
 +	let pendingOutput = "";
 +	let currentTurnOutput = "";
++	let boundedOutput = "";
++	const retain = (text) => spec.diagnosticOutputLimit ? text.slice(-spec.diagnosticOutputLimit) : text;
++	const diagnostics = { model: null, messageChunks: 0, toolCalls: 0, toolFailures: 0, toolOutput: "", errorCode: null, errorSummary: null };
++	let turnStartedAt = null;
++	diagnostics.processExited = false;
++	diagnostics.outputTruncated = false;
++	child.done.then(outcome => Object.assign(diagnostics, { processExited: true, exitCode: outcome.exitCode, exitSignal: outcome.signal }), () => { diagnostics.processExited = true; });
++	const observeModel = (options) => {
++		const model = options?.find((option) => option.category === "model")?.currentValue;
++		if (typeof model === "string") diagnostics.model = model;
++	};
  	const flags = { cancelled: false };
  	const makeClient = (_agent) => ({
  		sessionUpdate(params) {
  			const update = params.update;
 -			if (update.sessionUpdate === "agent_message_chunk") fold.pushText(acpContentText(update.content));
++			if (turnStartedAt !== null && diagnostics.firstEventMs === null) diagnostics.firstEventMs = Date.now() - turnStartedAt;
++			if (update.sessionUpdate === "config_option_update") observeModel(update.configOptions);
++			if (update.sessionUpdate === "current_model_update" && typeof update.currentModelId === "string") diagnostics.model = update.currentModelId;
++			if (update.sessionUpdate === "tool_call") diagnostics.toolCalls++;
++			if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
++				diagnostics.lastToolId = String(update.toolCallId ?? "").slice(0, 256);
++				diagnostics.lastToolStatus = String(update.status ?? "unknown").slice(0, 64);
++				for (const item of update.content ?? []) if (item.type === "content" && item.content?.type === "text") diagnostics.toolOutput = (diagnostics.toolOutput + item.content.text).slice(-8192);
++			}
++			if ((update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && update.status === "failed") diagnostics.toolFailures++;
 +			if (update.sessionUpdate === "agent_message_chunk") {
++				diagnostics.messageChunks++;
 +				const text = acpContentText(update.content);
-+				fold.pushText(text);
-+				pendingOutput += text;
-+				currentTurnOutput += text;
++				if (spec.diagnosticOutputLimit && currentTurnOutput.length + text.length > spec.diagnosticOutputLimit) diagnostics.outputTruncated = true;
++				if (spec.diagnosticOutputLimit) boundedOutput = retain(boundedOutput + text);
++				else fold.pushText(text);
++				pendingOutput = retain(pendingOutput + text);
++				currentTurnOutput = retain(currentTurnOutput + text);
 +			}
  			return Promise.resolve();
  		},
  		requestPermission(params) {
-@@ -165,6 +203,7 @@ async function startAcpRun(request, spec) {
+@@ -164,14 +226,16 @@ async function startAcpRun(request, spec) {
+ 		requestCancel();
  	};
  	request.signal.addEventListener("abort", onAbort, { once: true });
- 	const collectOutput = () => fold.collect() ?? [];
+-	const collectOutput = () => fold.collect() ?? [];
++	const collectOutput = () => spec.diagnosticOutputLimit ? [{ type: "text", text: boundedOutput }] : fold.collect() ?? [];
 +	const collectTurnOutput = () => currentTurnOutput ? [{ type: "text", text: currentTurnOutput }] : [];
  	try {
  		await Promise.race([
  			(async () => {
-@@ -179,6 +218,7 @@ async function startAcpRun(request, spec) {
+-				await conn.initialize({
++				const initialized = await conn.initialize({
+ 					protocolVersion: PROTOCOL_VERSION,
+ 					clientCapabilities: {}
+ 				});
++				diagnostics.agentVersion = typeof initialized.agentInfo?.version === "string" ? initialized.agentInfo.version.slice(0, 128) : null;
+ 				const session = await conn.newSession({
+ 					cwd: spec.cwd,
+ 					mcpServers: []
+@@ -179,6 +243,9 @@ async function startAcpRun(request, spec) {
  				const returnedSessionId = Reflect.get(session, "sessionId");
  				if (typeof returnedSessionId !== "string") throw new Error("ACP child published without a session id");
  				sessionId = returnedSessionId;
++				diagnostics.model = typeof session.models?.currentModelId === "string" ? session.models.currentModelId : null;
++				observeModel(session.configOptions);
 +				await applyRequestedSessionConfig(conn, sessionId, Reflect.get(session, "configOptions"), request.agentOptions);
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -190,47 +230,60 @@ async function startAcpRun(request, spec) {
+@@ -190,47 +257,75 @@ async function startAcpRun(request, spec) {
  		request.signal.removeEventListener("abort", onAbort);
  		await disposeProcess();
  		if (flags.cancelled) throw new Error("subagent request was aborted before the ACP child started");
 -		throw toError(error);
-+		throw launchError(error, { launchStage: "acp_initialize" });
++		throw launchError(error, { launchStage: "acp_initialize", stderrSummary: child.collected?.stderr?.readFrom(0).text });
  	}
  	/* v8 ignore next */
  	if (sessionId === void 0) throw new Error("unreachable: ACP startup fulfilled without a session id");
@@ -124,6 +161,14 @@ index b89ccf2..7efb6df 100644
 -	const result = (async () => {
 +	const runPrompt = async (prompt) => {
 +		currentTurnOutput = "";
++		turnStartedAt = Date.now();
++		diagnostics.firstEventMs = null;
++		diagnostics.turnDurationMs = null;
++		diagnostics.lastToolId = null;
++		diagnostics.lastToolStatus = null;
++		diagnostics.toolOutput = "";
++		diagnostics.errorCode = null;
++		diagnostics.errorSummary = null;
  		try {
 -			const prompt = async () => {
 +			const execute = async () => {
@@ -153,6 +198,8 @@ index b89ccf2..7efb6df 100644
 +				output: collectTurnOutput(),
  				stopReason: "aborted"
  			};
++			diagnostics.errorCode = error?.code == null ? null : String(error.code).slice(0, 128);
++			diagnostics.errorSummary = toError(error).message.slice(0, 8192);
  			try {
  				spec.onError?.(toError(error), "error");
  			} catch {}
@@ -163,14 +210,20 @@ index b89ccf2..7efb6df 100644
  			};
 -		} finally {
 -			request.signal.removeEventListener("abort", onAbort);
- 		}
+-		}
 -	})();
++		} finally { diagnostics.turnDurationMs = Date.now() - turnStartedAt; }
 +	};
 +	let turn = runPrompt(request.prompt);
 +	const result = turn;
  	let disposal;
  	return {
  		id,
++		remoteSessionId,
++		readDiagnostics() {
++			const stderr = child.collected?.stderr?.readFrom(0);
++			return { ...diagnostics, stderrSummary: stderr?.text ?? "", stderrBytes: stderr?.nextOffset ?? 0, stderrTruncated: stderr?.lossy ?? false };
++		},
 +		launch: spec.launch,
 +		processId: child.pid,
 +		readOutput() {
@@ -185,7 +238,7 @@ index b89ccf2..7efb6df 100644
  		localAgent: void 0,
  		result,
  		dispose() {
-@@ -257,6 +310,7 @@ const inject = ["subagents", "subprocess"];
+@@ -257,10 +352,12 @@ const inject = ["subagents", "subprocess"];
  const Config = z.object({
  	providerName: z.string().default("acp"),
  	command: z.string().required(),
@@ -193,7 +246,12 @@ index b89ccf2..7efb6df 100644
  	args: z.array(z.string()).default([]),
  	cwd: z.string(),
  	permission: z.union(["allow", "reject"]).default("reject"),
-@@ -331,20 +385,50 @@ var AcpProvider = class {
+ 	env: z.dict(z.string()).default({}),
++	diagnosticOutputLimit: z.number(),
+ 	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
+ 	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
+ });
+@@ -331,24 +428,56 @@ var AcpProvider = class {
  		this.ctx = ctx;
  		this.config = config;
  	}
@@ -232,6 +290,7 @@ index b89ccf2..7efb6df 100644
 -			cwd: resolveCwd(this.config.cwd, request),
 +			cwd,
  			permission: this.config.permission,
++			diagnosticOutputLimit: this.config.diagnosticOutputLimit,
  			env: this.config.env,
  			disposeEofGraceMs: this.config.disposeEofGraceMs,
  			disposeGraceMs: this.config.disposeGraceMs,
@@ -239,7 +298,8 @@ index b89ccf2..7efb6df 100644
 +			launch,
  			spawn: (spec) => this.ctx.subprocess.spawn(spec),
  			onError: (error, stopReason) => {
- 				this.ctx.logger.warn(`subagent-acp "${this.name}": child run failed (${stopReason}): ${error.message}`);
+-				this.ctx.logger.warn(`subagent-acp "${this.name}": child run failed (${stopReason}): ${error.message}`);
++				this.ctx.logger.warn(`subagent-acp "${this.name}": child run failed (${stopReason}); see bounded run diagnostics`);
  			}
 -		});
 +			});
@@ -249,8 +309,13 @@ index b89ccf2..7efb6df 100644
  	}
  };
  function apply(ctx, config) {
+ 	const resolved = config;
++	if (resolved.diagnosticOutputLimit !== void 0) assertPositiveFinite("diagnosticOutputLimit", resolved.diagnosticOutputLimit);
+ 	assertPositiveFinite("disposeEofGraceMs", resolved.disposeEofGraceMs);
+ 	assertPositiveFinite("disposeGraceMs", resolved.disposeGraceMs);
+ 	if (resolved.cwd === "") throw new Error("subagent-acp: config cwd must not be empty — omit the key to inherit the parent session cwd");
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
-index 76b04b9..7fa9e62 100644
+index 76b04b9..f991915 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
 @@ -17,6 +17,8 @@ export interface Config {
@@ -262,8 +327,17 @@ index 76b04b9..7fa9e62 100644
      /** Arguments passed to {@link command}. */
      args: string[];
      /**
+@@ -40,6 +42,8 @@ export interface Config {
+      * ambient secrets do not leak implicitly.
+      */
+     env: Record<string, string>;
++    /** Diagnostic-only retained output cap; omitted for ordinary runs. */
++    diagnosticOutputLimit?: number;
+     /**
+      * Grace period (ms) for the child's EOF-driven quiesce on dispose — its
+      * window to flush persistence and tear down its own nested subprocesses
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
-index 764ff1d..5c69786 100644
+index 764ff1d..6c4b6c8 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
 @@ -19,6 +19,16 @@ export interface AcpRunSpec {

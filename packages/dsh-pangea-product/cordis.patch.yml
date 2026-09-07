@@ -1,3 +1,18 @@
+- id: llm-deepseek
+  disabled: true
+
+- id: web-search-deepseek
+  disabled: true
+
+- id: tool-web
+  config:
+    search: false
+
+- id: agent-default-model
+  config:
+    provider: ''
+    model: ''
+
 - insert:
     - id: pangea-product-shell
       name: dsh-pangea-product

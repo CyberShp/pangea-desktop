@@ -11,7 +11,11 @@ $AppRoot = (Resolve-Path $AppRoot).Path
 $PackagedNode = Join-Path $AppRoot 'node_modules\node\bin\node.exe'
 $Fixture = Join-Path $ProjectRoot 'scripts\fixtures\acp-batch-agent.mjs'
 $TestScript = Join-Path $ProjectRoot 'scripts\verify-packaged-acp-batch-launch.mjs'
-$TemporaryRoot = Join-Path $env:RUNNER_TEMP "PANGEA ACP 中文 空格 $([Guid]::NewGuid().ToString('N'))"
+$TestTempBase = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
+$TemporaryRoot = [System.IO.Path]::GetFullPath((Join-Path $TestTempBase "PANGEA ACP 中文 空格 $([Guid]::NewGuid().ToString('N'))"))
+if (-not $TemporaryRoot.StartsWith($TestTempBase.TrimEnd('\') + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+  throw 'ACP fixture directory escaped its temporary root'
+}
 
 if (-not (Test-Path $PackagedNode -PathType Leaf)) { throw "Packaged Node.js runtime was not found: $PackagedNode" }
 if (-not (Test-Path $Fixture -PathType Leaf)) { throw "ACP fixture was not found: $Fixture" }

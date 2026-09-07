@@ -67,6 +67,7 @@ const results = []
 try {
   for (const [plugin, config] of entries) plugin.apply(ctx, plugin.Config({ ...config, cwd: shimDirectory }))
   for (const providerName of ['pangea-nga', 'pangea-codeagent', 'pangea-opencode']) {
+    const providerArgs = providerName === 'pangea-opencode' ? [...expectedArgs, '--print-logs', '--log-level', 'ERROR'] : expectedArgs
     const provider = providers.get(providerName)
     assert.ok(provider, `${providerName} was not registered`)
     const controller = new AbortController()
@@ -83,7 +84,8 @@ try {
       const output = result.output.map(item => item.type === 'text' ? item.text : '').join('')
       assert.match(output, /ACP_BATCH_READY/)
       assert.match(output, /turn=1/)
-      assert.ok(output.includes(JSON.stringify(expectedArgs)), `batch arguments changed: ${output}`)
+      assert.ok(output.includes(JSON.stringify(providerArgs)), `batch arguments changed: ${output}`)
+      if (providerName === 'pangea-codeagent' && process.platform === 'win32') assert.match(output, /shell=powershell/)
       assert.equal(run.launch.launcherKind, native ? 'direct' : 'windows-batch')
       assert.equal(path.resolve(run.launch.resolvedCommand), path.resolve(runtimeConfig.providers[providerName].resolved_command))
       assert.ok(Number.isInteger(run.processId) && run.processId > 0)
@@ -91,7 +93,7 @@ try {
       assert.equal(second.stopReason, 'completed')
       const secondOutput = second.output.map(item => item.type === 'text' ? item.text : '').join('')
       assert.match(secondOutput, /turn=2/)
-      assert.ok(secondOutput.includes(JSON.stringify(expectedArgs)), `continued batch arguments changed: ${secondOutput}`)
+      assert.ok(secondOutput.includes(JSON.stringify(providerArgs)), `continued batch arguments changed: ${secondOutput}`)
       results.push({ provider: providerName, processId: run.processId, launcherKind: run.launch.launcherKind, sameSessionContinuation: true })
     } finally {
       clearTimeout(timer)
