@@ -98,6 +98,7 @@ describe('PANGEA Desktop release contract', () => {
     expect(script).toContain('cordis-launch.integration.mjs')
     expect(script).toContain('Get-VerifiedDownload')
     expect(script).toContain('pangea_agent.cli.main')
+    expect(script).toContain("(Join-Path $ProjectRoot 'scripts/verify-source-snapshot.py')")
     expect(script).toContain("'..\\pangea-runtime\\src'")
     expect(script).toContain('prepare-portable-update.mjs')
     expect(script).toContain('create-signed-portable-package.mjs')

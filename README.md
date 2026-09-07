@@ -27,17 +27,20 @@ dist\pangea-desktop-<version>-from-<base-version>-windows-x64.patch.zip
 dist\pangea-desktop-<version>-from-<base-version>-windows-x64.patch.zip.sha256
 ```
 
-Extract the ZIP into a writable directory and run `PANGEA Desktop.exe`. Application data remains in `%APPDATA%\pangea-desktop`, so replacing the program directory does not remove workspaces or Runs. See [`docs/windows-validation.md`](./docs/windows-validation.md) for the first-PC acceptance flow.
+Extract the ZIP into a writable directory and run `PANGEA Desktop.exe`. Settings, sessions and task records remain in `%APPDATA%\pangea-desktop`, so a newly extracted package can still show historical tasks. The packaged workspace lives beside the executable in `launch-root`; preserve that directory when replacing an existing installation. See [`docs/windows-validation.md`](./docs/windows-validation.md) for the first-PC acceptance flow.
 
 ## In-app ZIP updates
 
 The complete portable ZIP and an incremental patch ZIP are both accepted by the in-app update flow. Move the cloud-built package to the internal shared location. Users download it, choose **Import update package** beside DSH settings, and restart after verification. PANGEA Desktop detects the package type and validates the embedded Ed25519 signatures and file manifests. A patch is accepted only from its declared base version.
 
-The update helper keeps the previous program directory and restores it unless the new Harness reaches Ready. Application data remains outside the program directory. See [`docs/release-runbook.md`](./docs/release-runbook.md) for release-key and internal handoff instructions.
+The update helper keeps the previous program directory and restores it unless the new Harness reaches Ready. Settings and session/task records remain in the user-data directory. See [`docs/release-runbook.md`](./docs/release-runbook.md) for release-key and internal handoff instructions.
 
 ## Runtime layout
 
 - Product runtime: the extracted `resources\pangea-runtime` and `resources\pangea-python` directories.
-- Writable product workspace: `%APPDATA%\pangea-desktop\launch-root`.
-- Repositories selected for analysis: `%APPDATA%\pangea-desktop\launch-root\pangea-data\repositories`.
-- Runs, assets and reports: `%APPDATA%\pangea-desktop\launch-root\pangea-data`.
+- Settings, task records and sessions: `%APPDATA%\pangea-desktop\harness` by default (`PANGEA_USER_DATA_DIR` can override the user-data root).
+- Writable packaged workspace: `<package>\launch-root`, beside `PANGEA Desktop.exe`.
+- Repositories selected for analysis: `<package>\launch-root\pangea-data\repositories`.
+- Runs, assets and reports: `<package>\launch-root\pangea-data`.
+
+There is currently no PANGEA task/Run delete action. To clear historical task listings, stop running tasks and fully exit Desktop, then back up and rename `tasks-v1.json` and `monitor-v1.json` under the Harness `dsh-pangea-companion` directory. To remove a Run's stored files too, back up and move the matching `pangea-data\runs\<run_id>` and `pangea-data\.pangea\skill-runs\<run_id>` directories. Sessions under `harness\sessions` are separate chat history. Keep repositories, assets, methodologies and settings; do not remove the whole Harness directory to clear tasks.

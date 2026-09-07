@@ -229,6 +229,9 @@ try {
   Invoke-Checked $Python @(
     '-m', 'pangea_agent.cli.main', 'system', 'capabilities', '--data-root', $SmokeData
   ) $AgentRuntime
+  Invoke-Checked $Python @(
+    (Join-Path $ProjectRoot 'scripts/verify-source-snapshot.py')
+  ) $AgentRuntime
 } finally {
   $env:PYTHONPATH = $PreviousPythonPath
 }
