@@ -21,7 +21,9 @@ const [{ Context }, { LocalSubprocessRuntime }, product, commandProbe] = await P
   importPackaged('dsh-pangea-product/agent-command-probe.js'),
 ])
 
-const expectedArgs = ['acp', '', 'value with spaces', '中文参数', 'A&B', 'x|y', '<in>', 'caret^', 'bang!', '(group)', 'C:\\tail\\']
+// CALL may duplicate carets inside quoted arguments; batch mode rejects them.
+// The direct path still verifies that a literal caret reaches the child intact.
+const expectedArgs = ['acp', '', 'value with spaces', '中文参数', 'A&B', 'x|y', '<in>', ...(native ? ['caret^'] : []), 'bang!', '(group)', 'C:\\tail\\']
 const fixture = fileURLToPath(new URL('./fixtures/acp-batch-agent.mjs', import.meta.url))
 const shimDirectory = native ? path.dirname(fixture) : path.dirname(ngaShim)
 const probeEnvironment = native ? process.env : {
@@ -115,10 +117,20 @@ try {
   assert.equal(cancelled.stopReason, 'aborted')
   results.push({ provider: 'pangea-opencode', cancellation: 'aborted', processId: cancellation.processId })
 
-  if (!native) assert.throws(() => ctx.subprocess.spawn({
-    argv: [ngaShim, 'unsafe"argument'], windowsBatch: true, cwd: shimDirectory,
-    stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }, graceMs: 1_000,
-  }), /windowsBatch argv cannot contain/)
+  if (!native) {
+    for (const shim of [ngaShim, codeagentShim, opencodeShim]) {
+      for (const invalid of ['caret^', 'unsafe"argument', '%PATH%', 'line\nbreak', 'line\rbreak', 'nul\0byte']) {
+        assert.throws(() => ctx.subprocess.spawn({
+          argv: [shim, invalid], windowsBatch: true, cwd: shimDirectory,
+          stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }, graceMs: 1_000,
+        }), /windowsBatch argv cannot contain.*argv\[1\]/)
+      }
+    }
+    assert.throws(() => ctx.subprocess.spawn({
+      argv: [path.join(shimDirectory, 'agent^unsafe.cmd'), 'acp'], windowsBatch: true, cwd: shimDirectory,
+      stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }, graceMs: 1_000,
+    }), /windowsBatch argv cannot contain.*argv\[0\]/)
+  }
 } finally {
   await serviceContext.fiber.dispose()
 }

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 const root = process.cwd()
 
 describe('external Agent provider patches', () => {
-  it('quotes trailing backslashes before the native argv closing quote', async () => {
+  it('quotes trailing backslashes and rejects argv changed by cmd expansion or nested CALL', async () => {
     const source = await readFile(join(root, 'node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js'), 'utf8')
     const start = source.indexOf('function windowsBatchLaunch(')
     const end = source.indexOf('\n/**', start)
@@ -25,9 +25,10 @@ describe('external Agent provider patches', () => {
     expect(launch.args.slice(0, -1)).toEqual(['/d', '/q', '/v:off', '/s', '/c'])
     expect(launch.args.at(-1)).toBe('"' + '"' + batch + '" "acp" "" "C:\\tail\\\\"' + '"')
     expect(launch.windowsVerbatimArguments).toBe(true)
-    for (const invalid of ['bad"quote', '%PATH%', 'line\nbreak']) {
-      expect(() => encode([batch, invalid], env)).toThrow(/windowsBatch argv cannot contain/)
+    for (const invalid of ['caret^', 'bad"quote', '%PATH%', 'line\nbreak', 'line\rbreak', 'nul\0byte']) {
+      expect(() => encode([batch, invalid], env)).toThrow(/windowsBatch argv cannot contain.*argv\[1\]/)
     }
+    expect(() => encode(['C:\\Agent^Tools\\nga.cmd', 'acp'], env)).toThrow(/windowsBatch argv cannot contain.*argv\[0\]/)
   })
 
   it('applies the explicit Windows batch contract to the installed dependency graph', async () => {

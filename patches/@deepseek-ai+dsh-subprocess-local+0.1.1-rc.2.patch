@@ -44,9 +44,9 @@ index 698efc9..902bdbd 100644
 +	if (batchFile === void 0 || !/\.(?:cmd|bat)$/i.test(extname(batchFile))) {
 +		throw new Error("subprocess-local: windowsBatch requires argv[0] to be a resolved .cmd or .bat file");
 +	}
-+	const unsafe = [batchFile, ...batchArgs].find((value) => /[\0\r\n"%]/.test(value));
-+	if (unsafe !== void 0) {
-+		throw new Error("subprocess-local: windowsBatch argv cannot contain NUL, line breaks, double quotes, or percent signs");
++	const unsafeIndex = argv.findIndex((value) => /[\0\r\n"%^]/.test(value));
++	if (unsafeIndex !== -1) {
++		throw new Error(`subprocess-local: windowsBatch argv cannot contain NUL, line breaks, double quotes, percent signs, or carets at argv[${unsafeIndex}]: cmd expansion and nested CALL cannot preserve these characters`);
 +	}
 +	const systemRoot = environmentValue(env, "SystemRoot");
 +	const commandInterpreter = environmentValue(env, "ComSpec") || (systemRoot ? win32.join(systemRoot, "System32", "cmd.exe") : void 0);
