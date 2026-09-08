@@ -172,11 +172,13 @@ if (-not $BundledNodeFile -or $BundledNodeFile.Length -lt 1MB) {
 Write-Host 'Materializing locked PANGEA components...'
 $DshPangea = Get-ExactSource 'dsh-pangea' $Components.dshPangea.repository $Components.dshPangea.commit $DshPangeaSource
 $PangeaAgent = Get-ExactSource 'pangea-agent' $Components.pangeaAgent.repository $Components.pangeaAgent.commit $PangeaAgentSource
-$LockedComposition = (Get-FileHash (Join-Path $DshPangea 'plugins/dsh-pangea/cordis.patch.yml') -Algorithm SHA256).Hash
-$ProductComposition = (Get-FileHash (Join-Path $ProjectRoot 'packages/dsh-pangea-product/cordis.patch.yml') -Algorithm SHA256).Hash
-if ($LockedComposition -ne $ProductComposition) {
-  throw 'The product core bundle does not match the locked dsh-pangea composition patch.'
-}
+$LockedComposition = Join-Path $DshPangea 'plugins/dsh-pangea/cordis.patch.yml'
+$ProductComposition = Join-Path $ProjectRoot 'packages/dsh-pangea-product/cordis.patch.yml'
+Invoke-Checked 'node' @(
+  (Join-Path $ProjectRoot 'scripts/verify-product-composition.mjs'),
+  $LockedComposition,
+  $ProductComposition
+)
 
 Reset-StageDirectory $PluginRoot
 foreach ($Plugin in @('dsh-pangea', 'dsh-pangea-companion', 'dsh-pangea-asset-catalog')) {
