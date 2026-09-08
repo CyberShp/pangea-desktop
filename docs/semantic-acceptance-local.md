@@ -1,6 +1,6 @@
 # Codetalks 语义修复：本地实现与验收记录
 
-结论：本地实现已提交，真实 MiniMax 九步验收未运行，不满足推送条件。三个仓库均使用 `fix/codetalks-target-mode-semantic-acceptance`，不合入父分支、不触发 Actions。
+结论：本文记录验收分支合入前的实现与自动化证据。后续 Windows 构建已通过，用户确认当前运行无明显问题，并于 2026-09-08 合入三个仓库的 `codetalks-skill`；下文未执行项保留为当时本地环境的验收边界。
 
 ## 基线与实现
 

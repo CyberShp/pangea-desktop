@@ -1,12 +1,7 @@
 name: Build Windows package
-run-name: PANGEA Desktop ${{ inputs.channel || 'test' }} ${{ inputs.version || '1.0.2' }}
+run-name: PANGEA Desktop ${{ inputs.channel }} ${{ inputs.version }}
 
 on:
-  push:
-    branches:
-      - fix/codetalks-target-mode-semantic-acceptance
-    paths:
-      - .github/acceptance-build-trigger
   workflow_dispatch:
     inputs:
       channel:
@@ -53,9 +48,9 @@ jobs:
         id: release_meta
         shell: pwsh
         env:
-          BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
-          REQUESTED_VERSION: ${{ inputs.version || '1.0.2' }}
-          PATCH_FROM_VERSION: ${{ inputs.patch_from_version || '' }}
+          BUILD_CHANNEL: ${{ inputs.channel }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
           UPDATE_PRIVATE_KEY_B64: ${{ secrets.PANGEA_UPDATE_PRIVATE_KEY_B64 }}
         run: |
           if ($env:REQUESTED_VERSION -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
@@ -126,7 +121,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Packaged Cordis integration failed with exit code $LASTEXITCODE." }
 
       - name: Generate signed incremental patch
-        if: github.event_name == 'workflow_dispatch' && inputs.patch_from_version != ''
+        if: inputs.patch_from_version != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,7 +162,7 @@ jobs:
           retention-days: 14
 
       - name: Validate legacy in-app upgrade to 0.1.3
-        if: github.event_name == 'workflow_dispatch' && inputs.channel == 'release' && inputs.version == '0.1.3'
+        if: inputs.channel == 'release' && inputs.version == '0.1.3'
         shell: pwsh
         timeout-minutes: 6
         run: |
@@ -179,8 +174,8 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
-          PATCH_FROM_VERSION: ${{ inputs.patch_from_version || '' }}
+          BUILD_CHANNEL: ${{ inputs.channel }}
+          PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
           RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
           RELEASE_TITLE: ${{ steps.release_meta.outputs.title }}
         run: |

@@ -7,12 +7,12 @@
   },
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
-    "branch": "fix/codetalks-target-mode-semantic-acceptance",
+    "branch": "codetalks-skill",
     "commit": "909bafa90cc3cb93d01514c0d0222da53c909705"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
-    "branch": "fix/codetalks-target-mode-semantic-acceptance",
+    "branch": "codetalks-skill",
     "commit": "08bdd37976b314d8e1baf226cc7f8b496bdb3bed"
   },
   "python": {
