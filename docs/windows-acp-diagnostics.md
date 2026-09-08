@@ -8,7 +8,7 @@
 - ACP 日志分别记录本地、远端会话 ID、Agent 实际返回的模型或 `unavailable`、回合停止原因、消息与工具事件计数、RPC 错误码和受限错误摘要。计数为会话累计事件数，工具失败是失败通知次数，不是去重后的工具数量。
 - stderr 使用现有 subprocess 尾部收集器，保留 8192 字节。OpenCode ACP 增加 `--print-logs`，默认日志级别 ERROR；保留已指定日志级别。日志写盘前遮盖 URL、Bearer/Basic 和常见凭据字段，单字段最多 8192 字符。
 - Windows CodeAgent 仅在 shell 变量不存在或为空时默认 PowerShell；非空值及大小写键名保留。提示词提供 Desktop Python 路径，要求宿主阻塞时报告并结束。
-- 创建分析、执行器设置和产品设置页均明确：外部 Agent 使用新建 ACP 会话的默认模型。
+- 新建分析可自动读取外部 Agent 的可用模型并指定本次模型；未指定时沿用 Agent 默认。详见 [模型选择验收](agent-model-selection.md)。Agent Runtime 的启动命令收在折叠高级设置内，无需手工维护模型目录。
 - 探针依次检查 session、ping、tool、init。失败即停，不自动续接失败阶段；工具阶段要求 ACP 工具输出包含标记，init 阶段要求真实状态文件和 Python API 同时通过。
 
 ## 日志与诊断增强（2026-09-08）

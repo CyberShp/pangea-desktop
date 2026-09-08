@@ -1,8 +1,7 @@
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
-index b89ccf2..b8f3405 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
-@@ -94,6 +94,31 @@ function toError(value) {
+@@ -94,6 +94,52 @@
  	/* v8 ignore next */
  	return value instanceof Error ? value : new Error(String(value));
  }
@@ -17,24 +16,45 @@ index b89ccf2..b8f3405 100644
 +	if (option?.type !== "select" || !Array.isArray(option.options)) return [];
 +	return option.options.flatMap((entry) => Array.isArray(entry?.options) ? entry.options : [entry]).map((entry) => entry?.value).filter((value) => typeof value === "string");
 +}
-+async function applyRequestedSessionConfig(conn, sessionId, configOptions, agentOptions) {
-+	let options = Array.isArray(configOptions) ? configOptions : [];
++function sessionModels(session) {
++	const option = session.configOptions?.find((entry) => entry.category === "model" && entry.type === "select");
++	return {
++		current_model: option?.currentValue ?? session.models?.currentModelId ?? null,
++		models: option ? option.options.flatMap((entry) => entry.options ?? [entry]).map((entry) => ({ id: entry.value, label: entry.name ?? entry.value }))
++			: (session.models?.availableModels ?? []).map((entry) => ({ id: entry.modelId, label: entry.name ?? entry.modelId }))
++	};
++}
++async function applyRequestedSessionConfig(conn, sessionId, session, agentOptions) {
++	let options = Array.isArray(session.configOptions) ? session.configOptions : [];
++	let model = sessionModels(session).current_model;
 +	for (const [category, requested, label] of [
 +		["model", agentOptions?.model, "model"],
 +		["thought_level", agentOptions?.reasoningEffort, "reasoning effort"]
 +	]) {
 +		if (typeof requested !== "string" || requested.length === 0) continue;
 +		const option = options.find((entry) => entry?.category === category);
-+		if (option === void 0) throw new Error(`subagent-acp: child did not advertise a ${label} configuration option`);
++		if (option === void 0) {
++			if (category === "model" && session.models?.availableModels?.some((entry) => entry.modelId === requested)) {
++				await conn.extMethod("session/set_model", { sessionId, modelId: requested });
++				model = requested;
++				continue;
++			}
++			throw new Error(`subagent-acp: child did not advertise requested ${label} "${requested}"`);
++		}
 +		if (!selectValues(option).includes(requested)) throw new Error(`subagent-acp: child does not support requested ${label} "${requested}"`);
 +		const response = await conn.setSessionConfigOption({ sessionId, configId: option.id, value: requested });
 +		options = Array.isArray(response?.configOptions) ? response.configOptions : options;
++		if (category === "model") {
++			model = options.find((entry) => entry.id === option.id)?.currentValue;
++			if (model !== requested) throw new Error(`subagent-acp: child did not apply requested model "${requested}"`);
++		}
 +	}
++	return model;
 +}
  /**
  * Start and publish one ACP child after initialization and session creation.
  * Child failures resolve through the run result; startup failures reject after
-@@ -106,34 +131,71 @@ function toError(value) {
+@@ -106,38 +152,75 @@
  async function startAcpRun(request, spec) {
  	if (request.signal.aborted) throw new Error("subagent request was aborted before the ACP child started");
  	const id = SessionId(randomUUID());
@@ -119,7 +139,20 @@ index b89ccf2..b8f3405 100644
  			return Promise.resolve();
  		},
  		requestPermission(params) {
-@@ -164,14 +226,16 @@ async function startAcpRun(request, spec) {
+-			if (spec.permission === "allow") {
++			if (!request.discoverOnly && spec.permission === "allow") {
+ 				const allow = params.options.find((o) => o.kind === "allow_once" || o.kind === "allow_always");
+ 				if (allow !== void 0) return Promise.resolve({ outcome: {
+ 					outcome: "selected",
+@@ -149,6 +232,7 @@
+ 	});
+ 	const conn = new ClientSideConnection(makeClient, ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout)));
+ 	let sessionId;
++	let modelCatalog;
+ 	let signalCancelSettled;
+ 	const cancelSettled = new Promise((resolve) => {
+ 		signalCancelSettled = resolve;
+@@ -164,14 +248,16 @@
  		requestCancel();
  	};
  	request.signal.addEventListener("abort", onAbort, { once: true });
@@ -138,17 +171,18 @@ index b89ccf2..b8f3405 100644
  				const session = await conn.newSession({
  					cwd: spec.cwd,
  					mcpServers: []
-@@ -179,6 +243,9 @@ async function startAcpRun(request, spec) {
+@@ -179,6 +265,10 @@
  				const returnedSessionId = Reflect.get(session, "sessionId");
  				if (typeof returnedSessionId !== "string") throw new Error("ACP child published without a session id");
  				sessionId = returnedSessionId;
 +				diagnostics.model = typeof session.models?.currentModelId === "string" ? session.models.currentModelId : null;
 +				observeModel(session.configOptions);
-+				await applyRequestedSessionConfig(conn, sessionId, Reflect.get(session, "configOptions"), request.agentOptions);
++				modelCatalog = sessionModels(session);
++				diagnostics.model = await applyRequestedSessionConfig(conn, sessionId, session, request.agentOptions);
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -190,47 +257,75 @@ async function startAcpRun(request, spec) {
+@@ -190,47 +280,80 @@
  		request.signal.removeEventListener("abort", onAbort);
  		await disposeProcess();
  		if (flags.cancelled) throw new Error("subagent request was aborted before the ACP child started");
@@ -159,6 +193,11 @@ index b89ccf2..b8f3405 100644
  	if (sessionId === void 0) throw new Error("unreachable: ACP startup fulfilled without a session id");
  	const remoteSessionId = sessionId;
 -	const result = (async () => {
++	if (request.discoverOnly) {
++		request.signal.removeEventListener("abort", onAbort);
++		await disposeProcess();
++		return modelCatalog;
++	}
 +	const runPrompt = async (prompt) => {
 +		currentTurnOutput = "";
 +		turnStartedAt = Date.now();
@@ -238,7 +277,7 @@ index b89ccf2..b8f3405 100644
  		localAgent: void 0,
  		result,
  		dispose() {
-@@ -257,10 +352,12 @@ const inject = ["subagents", "subprocess"];
+@@ -257,10 +380,12 @@
  const Config = z.object({
  	providerName: z.string().default("acp"),
  	command: z.string().required(),
@@ -251,7 +290,7 @@ index b89ccf2..b8f3405 100644
  	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
  	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
  });
-@@ -331,24 +428,56 @@ var AcpProvider = class {
+@@ -331,24 +456,59 @@
  		this.ctx = ctx;
  		this.config = config;
  	}
@@ -306,6 +345,9 @@ index b89ccf2..b8f3405 100644
 +		} catch (error) {
 +			throw launchError(error, launch);
 +		}
++	}
++	async discoverModels({ cwd, signal }) {
++		return this.start({ parent: { session: { header: { cwd } } }, signal, prompt: [], discoverOnly: true });
  	}
  };
  function apply(ctx, config) {
@@ -315,10 +357,9 @@ index b89ccf2..b8f3405 100644
  	assertPositiveFinite("disposeGraceMs", resolved.disposeGraceMs);
  	if (resolved.cwd === "") throw new Error("subagent-acp: config cwd must not be empty — omit the key to inherit the parent session cwd");
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
-index 76b04b9..f991915 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
-@@ -17,6 +17,8 @@ export interface Config {
+@@ -17,6 +17,8 @@
      providerName: string;
      /** The executable to spawn for each run (the child ACP agent). */
      command: string;
@@ -327,7 +368,7 @@ index 76b04b9..f991915 100644
      /** Arguments passed to {@link command}. */
      args: string[];
      /**
-@@ -40,6 +42,8 @@ export interface Config {
+@@ -40,6 +42,8 @@
       * ambient secrets do not leak implicitly.
       */
      env: Record<string, string>;
@@ -337,10 +378,9 @@ index 76b04b9..f991915 100644
       * Grace period (ms) for the child's EOF-driven quiesce on dispose — its
       * window to flush persistence and tear down its own nested subprocesses
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
-index 764ff1d..6c4b6c8 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
-@@ -19,6 +19,16 @@ export interface AcpRunSpec {
+@@ -19,6 +19,16 @@
      command: string;
      /** Arguments passed to {@link command}. */
      args: string[];

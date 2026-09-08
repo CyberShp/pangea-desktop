@@ -8,7 +8,7 @@
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
     "branch": "feat/module-analysis-five-stages",
-    "commit": "f7df810fe032f30c4f65505e90862d1f7999ed43"
+    "commit": "83e2e12921ad736b0fc3e986b22168c56c0b7774"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",

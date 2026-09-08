@@ -1,8 +1,7 @@
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-claude-code/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent-claude-code/lib/index.js
-index b29080d..3a7f9f2 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-claude-code/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-subagent-claude-code/lib/index.js
-@@ -294,6 +294,8 @@ function claudeQueryOptions(spec, controller, capture, captureDiagnostic) {
+@@ -294,6 +294,8 @@
  	return {
  		abortController: controller,
  		cwd: spec.cwd,
@@ -11,7 +10,34 @@ index b29080d..3a7f9f2 100644
  		env: {
  			...scrubbedParentEnv(),
  			...spec.env
-@@ -473,7 +475,7 @@ async function startClaudeCodeRun(request, spec) {
+@@ -362,14 +364,25 @@
+ 		child = captured;
+ 		managedProcess = process;
+ 	};
++	let releasePrompt;
++	const modelReady = new Promise((resolve) => { releasePrompt = resolve; });
++	const selectedPrompt = async function* () {
++		if (await modelReady) yield { type: "user", message: { role: "user", content: prompt }, parent_tool_use_id: null, session_id: "" };
++	};
+ 	try {
+ 		query$1 = query({
+-			prompt,
++			prompt: spec.model ? selectedPrompt() : prompt,
+ 			options: claudeQueryOptions(spec, controller, captureChild, capturePermissionDiagnostic)
+ 		});
+ 		if (child === void 0 || child.pid <= 0) throw new Error("subagent-claude-code: official SDK did not publish a controllable Claude Code process");
++		if (spec.model) {
++			const models = await query$1.supportedModels();
++			if (!models.some((entry) => entry.value === spec.model)) throw new Error(`subagent-claude-code: requested model is no longer available: ${spec.model}`);
++		}
+ 		if (controller.signal.aborted) throw new Error("subagent-claude-code: request was aborted before SDK startup");
++		releasePrompt(true);
+ 	} catch (error) {
++		releasePrompt(false);
+ 		request.signal.removeEventListener("abort", onAbort);
+ 		const cancelledBeforeCleanup = controller.signal.aborted;
+ 		await Promise.resolve();
+@@ -473,7 +486,7 @@
  		signal: request.signal,
  		onAbort
  	});
@@ -20,7 +46,7 @@ index b29080d..3a7f9f2 100644
  		id: SessionId(randomUUID()),
  		result,
  		signal: request.signal,
-@@ -489,6 +491,8 @@ async function startClaudeCodeRun(request, spec) {
+@@ -489,6 +502,8 @@
  			}
  		}
  	});
@@ -29,7 +55,37 @@ index b29080d..3a7f9f2 100644
  }
  //#endregion
  //#region lib/types/index.js
-@@ -533,6 +537,8 @@ var ClaudeCodeProvider = class {
+@@ -519,6 +534,29 @@
+ 		this.ctx = ctx;
+ 		this.config = config;
+ 	}
++	async discoverModels({ cwd, signal }) {
++		if (signal.aborted) throw signal.reason;
++		const controller = new AbortController();
++		const onAbort = () => controller.abort(signal.reason);
++		signal.addEventListener("abort", onAbort, { once: true });
++		let child, probe, finish;
++		const idle = new Promise((resolve) => { finish = resolve; });
++		const prompt = async function* () { await idle; };
++		try {
++			probe = query({ prompt: prompt(), options: claudeQueryOptions({
++				cwd: resolveChildCwd("subagent-claude-code", void 0, cwd),
++				env: this.config.env, permissionMode: "dontAsk", disposeGraceMs: this.config.disposeGraceMs,
++				spawn: (spec) => this.ctx.subprocess.spawn(spec)
++			}, controller, (value) => { child = value; }, () => {}) });
++			const models = await probe.supportedModels();
++			return { current_model: null, models: models.map((entry) => ({ id: entry.value, label: entry.displayName ?? entry.value })) };
++		} finally {
++			finish();
++			signal.removeEventListener("abort", onAbort);
++			if (child) await disposeClaudeCodeChild(probe, child);
++			else probe?.close();
++		}
++	}
+ 	async start(request) {
+ 		const parentCwd = request.parent.session.header.cwd;
+ 		if (parentCwd === void 0) throw new Error("subagent-claude-code: no working directory for the child — delegate from a parent session that has one");
+@@ -533,6 +571,8 @@
  		}
  		return startClaudeCodeRun(request, {
  			cwd,
