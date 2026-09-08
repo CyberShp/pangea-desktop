@@ -1,6 +1,7 @@
 # Codex 接手：业务流程、覆盖率分析与 Archify
 
 状态：首轮实现已提交。不是已经完成 Windows 产品验收的发布包。
+2026-09-09 接管进展：已构建 Windows 本地测试包，完成真实 OpenCode 覆盖分析与画图、取消及导出验收，修复 SVG XML 和外部图完成误唤醒问题。具体提交、证据与未完成的发布门禁见 [Windows 验收记录](windows-flow-coverage-validation.md)。下文“首轮”结果及待办保留为原始交接上下文。
 用户已授权执行开发并推送 GitHub，后续由 Codex 接手。本轮不合并主干、不发布成品、不触发 Windows Actions 构建。
 
 ## 分支与组件
