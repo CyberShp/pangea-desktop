@@ -23,7 +23,7 @@ def main():
     sys.path.insert(0, str(agent / 'src'))
     from pangea_agent.cli.public_api import import_asset
     from pangea_agent.skill_runs import create_skill_run
-    from pangea_agent.documents.source_snapshot import verify_source_snapshot
+    from pangea_agent.documents.source_snapshot import read_source_snapshot_manifest
 
     fixture = Path(__file__).parent / 'fixtures/semantic-queue'
     data = output / 'pangea-data'
@@ -40,17 +40,17 @@ def main():
     request_path.write_text(json.dumps(request, ensure_ascii=False, indent=2), encoding='utf-8')
     result = create_skill_run(str(request_path))
     run = data / 'runs' / request['run_id']
-    verify_source_snapshot(run / 'inputs/source')
+    source_manifest = read_source_snapshot_manifest(run / 'inputs/source')
     manifest = json.loads((run / 'inputs/assets/manifest.json').read_text(encoding='utf-8'))
     assert len(manifest['assets']) == 2
     for asset in manifest['assets']:
         assert hashlib.sha256(Path(asset['frozen_source_path']).read_bytes()).hexdigest() == asset['source_sha256']
     summary = {'request': request, 'created': result, 'assets': manifest['assets'],
-               'model_run_started': False, 'source_snapshot_verified': True}
+               'model_run_started': False, 'source_snapshot_copied': source_manifest['file_count']}
     (output / 'preparation.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps({'run_id': request['run_id'], 'mode': 'depth', 'asset_ids': request['asset_ids'],
                       'allowed_steps': {a['asset_type']: a['allowed_steps'] for a in manifest['assets']},
-                      'source_snapshot_verified': True, 'model_run_started': False}, ensure_ascii=False))
+                      'source_snapshot_copied': source_manifest['file_count'], 'model_run_started': False}, ensure_ascii=False))
 
 
 if __name__ == '__main__':

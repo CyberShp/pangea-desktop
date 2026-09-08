@@ -6,7 +6,6 @@ entrypoint runs this script against its embedded Python and staged Agent.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import tempfile
 import unittest
@@ -63,26 +62,25 @@ class SourceSnapshotAcceptance(unittest.TestCase):
             repo_id="snapshot-check-repository", run_id="snapshot-check-run",
         )
 
-    def verify(self, target=None):
-        return snapshot.verify_source_snapshot(
+    def read_manifest(self, target=None):
+        return snapshot.read_source_snapshot_manifest(
             target or self.target,
             repo_id="snapshot-check-repository", run_id="snapshot-check-run",
         )
 
-    def test_real_copy_and_manifest_hashes(self):
+    def test_real_copy_and_manifest_inventory(self):
         manifest = self.create()
-        self.assertEqual(self.verify(), manifest)
+        self.assertEqual(self.read_manifest(), manifest)
         self.assertEqual(manifest["file_count"], len(self.contents))
+        self.assertEqual(manifest["total_bytes"], sum(map(len, self.contents.values())))
+        self.assertNotIn("snapshot_digest", manifest)
         for item in manifest["files"]:
             content = self.contents[item["path"]]
-            self.assertEqual(item["sha256"], hashlib.sha256(content).hexdigest())
+            self.assertNotIn("sha256", item)
             self.assertEqual(item["size"], len(content))
             self.assertEqual(
                 (self.target / "repository" / item["path"]).read_bytes(), content,
             )
-        (self.target / "repository" / "driver.c").write_bytes(b"changed\n")
-        with self.assertRaises(ValueError):
-            self.verify()
 
     def test_transient_windows_errors_retry_same_copy(self):
         for code in (5, 32, 33):
@@ -101,7 +99,7 @@ class SourceSnapshotAcceptance(unittest.TestCase):
                     patch.object(snapshot.shutil, "copy2", wraps=snapshot.shutil.copy2) as copy,
                 ):
                     manifest = self.create(target)
-                self.assertEqual(self.verify(target), manifest)
+                self.assertEqual(self.read_manifest(target), manifest)
                 self.assertEqual(len(calls), 3)
                 self.assertEqual(len(set(calls)), 1, "Retries must reuse the same staging directory")
                 self.assertEqual(copy.call_count, len(self.contents), "A retry must not recopy sources")
@@ -222,7 +220,7 @@ class SourceSnapshotAcceptance(unittest.TestCase):
 
         with patch.object(snapshot, "_publish_snapshot", side_effect=publish_with_open_handle):
             manifest = self.create()
-        self.assertEqual(self.verify(), manifest)
+        self.assertEqual(self.read_manifest(), manifest)
 
 
 if __name__ == "__main__":
