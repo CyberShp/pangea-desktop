@@ -3,6 +3,7 @@
 状态：首轮实现已提交。不是已经完成 Windows 产品验收的发布包。
 2026-09-09 接管进展：已构建 Windows 本地测试包，完成真实 OpenCode 覆盖分析与画图、取消及导出验收，修复 SVG XML 和外部图完成误唤醒问题。具体提交、证据与未完成的发布门禁见 [Windows 验收记录](windows-flow-coverage-validation.md)。下文“首轮”结果及待办保留为原始交接上下文。
 同日排版修订：业务流程页已增加主干聚焦、分支分页及独立图表视图，支持按当前页绘制局部分支图。当前 Dev 实例、组件提交与验证见 [多分支排版验收](flow-reader-layout-validation.md)。
+同日导航修复：插件 `40ae41b` 修复新分析会话回到默认工作台、跨会话标签复用，以及任务加载期间的误返回入口；新任务准备期间明确不选择旧 Run。core 25/25、companion 160/160，真实 UI 创建与工作台往返验证通过。Dev 实例仍为 `http://127.0.0.1:12155`，完整故障记录位于插件仓库 `docs/bug-report/analysis-navigation/bug-report.md`。
 用户已授权执行开发并推送 GitHub，后续由 Codex 接手。本轮不合并主干、不发布成品、不触发 Windows Actions 构建。
 
 ## 分支与组件

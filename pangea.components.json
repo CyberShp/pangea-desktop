@@ -8,7 +8,7 @@
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
     "branch": "feat/flow-views-coverage",
-    "commit": "d9c6093023590bdfcb7d6ffb48d5e36497b306dd"
+    "commit": "40ae41b7d97e241704e26ee71a4ccf51f292b3c7"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
