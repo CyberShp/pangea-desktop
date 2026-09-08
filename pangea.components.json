@@ -8,12 +8,12 @@
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
     "branch": "fix/codetalks-target-mode-semantic-acceptance",
-    "commit": "91747a566e5161dae4c5f81f01ce3963a21e5c64"
+    "commit": "909bafa90cc3cb93d01514c0d0222da53c909705"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
     "branch": "fix/codetalks-target-mode-semantic-acceptance",
-    "commit": "2418bcf575900bb500fa1657ea28fbb18324bca3"
+    "commit": "08bdd37976b314d8e1baf226cc7f8b496bdb3bed"
   },
   "python": {
     "version": "3.12.10",
