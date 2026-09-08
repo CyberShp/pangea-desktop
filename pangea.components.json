@@ -7,13 +7,13 @@
   },
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
-    "branch": "feat/module-analysis-five-stages",
-    "commit": "83e2e12921ad736b0fc3e986b22168c56c0b7774"
+    "branch": "feat/flow-views-coverage",
+    "commit": "e7a4708563d4059d00adee7b64fb60e8e403a1ff"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
-    "branch": "feat/module-analysis-five-stages",
-    "commit": "8ae1fb5cb18b2d1a93c83e7fc721777555718ae6"
+    "branch": "feat/flow-views-coverage",
+    "commit": "2572ed0fac483374e9e6f1a77e2a2f8f0e4615d5"
   },
   "python": {
     "version": "3.12.10",

@@ -1440,12 +1440,14 @@ async function bootstrap(): Promise<void> {
     const purpose = options && typeof options === 'object' && 'purpose' in options
       ? (options as { purpose?: unknown }).purpose
       : undefined
+    const coveragePicker = purpose === 'coverage'
     const repositoryPicker = purpose === 'repository'
     const result = await dialog.showOpenDialog(mainWindow, {
       title: harnessLocale() === 'zh'
-        ? repositoryPicker ? '选择源码仓库目录' : '选择工作区目录'
-        : repositoryPicker ? 'Select Source Repository' : 'Select Workspace Directory',
-      properties: ['openDirectory']
+        ? coveragePicker ? '选择覆盖率文件' : repositoryPicker ? '选择源码仓库目录' : '选择工作区目录'
+        : coveragePicker ? 'Select Coverage File' : repositoryPicker ? 'Select Source Repository' : 'Select Workspace Directory',
+      properties: coveragePicker ? ['openFile'] : ['openDirectory'],
+      ...(coveragePicker ? { filters: [{ name: 'Coverage', extensions: ['json', 'csv', 'xlsx'] }] } : {})
     })
     return result.canceled ? null : result.filePaths[0] ?? null
   })
