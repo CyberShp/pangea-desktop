@@ -20,6 +20,7 @@
 - 浏览器实测实际阅读器组件的 32 分支合成样例，包括宽布局、640px 内容宽度、翻页及搜索；浏览器中另行检查真实 DSH 任务的页面与图表。
 - 真实 OpenCode 局部图完成：`3b71ffb0-004a-4daf-8a1d-9e8ae6941404`，绑定原 Run `windows-request-c-handle-260909-01`、流程 `F-001`、范围仅 `B-001`，状态 `ready`。本次没有创建第二个主分析 Run。
 - 实测发现画图启动会自动切离页面，增加回归复现后移除自动打开会话行为，保留手动入口。
+- 图面检查发现模型给终止分支添加了虚假回接，已交由原 OpenCode 会话 `ses_f7df03cacffel5MEmCXoGlIEBD` 修订；修订后 B-001 没有出边，图内明确标注终止，中文 locale 显式设置，renderer 再次通过。修订日志为 `.pangea-build/flow-layout-preview/diagram-repair.log`。
 
 ## 本地验收入口与边界
 
