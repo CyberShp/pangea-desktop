@@ -13,7 +13,7 @@
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
     "branch": "feat/module-analysis-five-stages",
-    "commit": "2572ed0fac483374e9e6f1a77e2a2f8f0e4615d5"
+    "commit": "07006f57ac583f589ae4ef7cb48aaeb0250726f2"
   },
   "python": {
     "version": "3.12.10",
