@@ -107,6 +107,18 @@ class ModuleWorkflowAcceptance(unittest.TestCase):
         self.assertTrue(self.state()["created_at"].endswith("+08:00"))
         self.assertNotIn("01–09", Path(self.created["request_path"]).read_text(encoding="utf-8"))
 
+    def test_publish_reads_steps_from_bound_flow_document_during_step03(self):
+        self.prepare()
+        document = "活文档/流程讲解/流程-FLOW-1-sample.md"
+        flow = {"flow_id": "FLOW-1", "title": "sample", "mainline_steps": [{"step_id": "S1", "title": "读取输入", "processing": "按输入返回结果"}], "branches": []}
+        self.write(self.run / document, "# sample\n实现解释\n```pangea-flow\n" + json.dumps(flow, ensure_ascii=False) + "\n```\n")
+        self.projection["business_flows"] = [{"flow_id": "FLOW-1", "title": "sample", "document_path": document}]
+        self.publish("03")
+        published = json.loads((self.run / "内部索引/工作台投影.json").read_text(encoding="utf-8"))
+        self.assertEqual(published["business_flows"][0]["mainline_steps"], flow["mainline_steps"])
+        self.assertNotIn("03", self.state()["completed_steps"])
+        self.assertEqual(published["publication"]["state"], "draft")
+
     def test_resume_keeps_complex_flow_cursor_progress_and_review_edits_only_target(self):
         self.prepare()
         complex_path = self.run / "活文档/流程讲解/流程-FLOW-2-recovery.md"

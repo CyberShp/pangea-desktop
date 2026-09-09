@@ -240,6 +240,9 @@ try {
   Invoke-Checked $Python @(
     (Join-Path $ProjectRoot 'scripts/verify-coverage-path-quality.py')
   ) $AgentRuntime
+  Invoke-Checked $Python @(
+    (Join-Path $ProjectRoot 'scripts/verify-input-materials.py')
+  ) $AgentRuntime
 } finally {
   $env:PYTHONPATH = $PreviousPythonPath
 }
