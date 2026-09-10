@@ -1,13 +1,13 @@
 # PANGEA Semantic 配套版本
 
 Desktop 和 DSH 均从各自的 `codetalks-skill` 新建
-`codex/pangea-semantic-adaptation` 分支。Desktop 基线为 `8395d59`，DSH 基线为
+`langgraph` 分支。Desktop 基线为 `8395d59`，DSH 基线为
 `48b7921`。固定版本以仓库根目录 `pangea.components.json` 为准：
 
 | 组件 | 分支 | 固定提交 |
 |---|---|---|
-| pangea-agent | codex/pangea-semantic-analysis-rework | 58398f10ef7663b23c24310f932a76d77254d0d2 |
-| dsh-pangea | codex/pangea-semantic-adaptation | ed4d932b434215eba9264729929faa23be227735 |
+| pangea-agent | langgraph | 58398f10ef7663b23c24310f932a76d77254d0d2 |
+| dsh-pangea | langgraph | c4d60c7ad4a9fbfffe848b7d6b537bbec802eb00 |
 
 Desktop 加载 companion 与 report-policy，打包 Agent 的 `.agents`、`.opencode`、
 Python 源码与 schemas。启动时将客户端规则和工具同步到产品工作目录。
