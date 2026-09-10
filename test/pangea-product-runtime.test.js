@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from 'vitest'
 import * as product from '../packages/dsh-pangea-product/index.js'
 
 describe('PANGEA product server runtime', () => {
+  it('defaults only Windows CodeAgent to PowerShell and preserves explicit shell values', () => {
+    const shell = (env, platform) => product.configuredProviderPlugins(env, platform)
+      .find(([, config]) => config.providerName === 'pangea-codeagent')[1].env
+    expect(shell({}, 'win32')).toEqual({ CODEAGENT3_WINDOWS_SHELL_TYPE: 'powershell' })
+    expect(shell({ CODEAGENT3_WINDOWS_SHELL_TYPE: ' ' }, 'win32')).toEqual({ CODEAGENT3_WINDOWS_SHELL_TYPE: 'powershell' })
+    expect(shell({ codeagent3_windows_shell_type: 'custom-shell' }, 'win32')).toEqual({ codeagent3_windows_shell_type: 'custom-shell' })
+    expect(shell({}, 'linux')).toEqual({})
+    expect(product.configuredProviderPlugins({}, 'win32').find(([, config]) => config.providerName === 'pangea-nga')[1].env).toEqual({})
+  })
   it('mounts NGA, CodeAgent, OpenCode and Claude Code through DSH providers', () => {
     const plugin = vi.fn()
 
@@ -14,6 +23,7 @@ describe('PANGEA product server runtime', () => {
       {
         providerName: 'pangea-nga',
         command: 'nga',
+        configuredCommand: 'nga',
         args: ['acp'],
         permission: 'allow',
         env: {}
@@ -21,14 +31,16 @@ describe('PANGEA product server runtime', () => {
       {
         providerName: 'pangea-codeagent',
         command: 'codeagent',
+        configuredCommand: 'codeagent',
         args: ['acp'],
         permission: 'allow',
-        env: {}
+        env: process.platform === 'win32' ? { CODEAGENT3_WINDOWS_SHELL_TYPE: 'powershell' } : {}
       },
       {
         providerName: 'pangea-opencode',
         command: 'opencode',
-        args: ['acp'],
+        configuredCommand: 'opencode',
+        args: ['acp', '--print-logs', '--log-level', 'ERROR'],
         permission: 'allow',
         env: {}
       },
@@ -49,13 +61,17 @@ describe('PANGEA product server runtime', () => {
         version: 1,
         providers: {
           'pangea-nga': { available: false },
-          'pangea-opencode': { available: true, resolved_command: 'C:\\Tools\\opencode.exe', args: ['acp'] }
+          'pangea-opencode': { available: true, command: 'opencode-custom', resolved_command: 'C:\\Tools\\opencode.exe', args: ['acp'] }
         }
       })
     })
     expect(entries.map(([, config]) => config.providerName)).toEqual([
       'pangea-codeagent', 'pangea-opencode', 'pangea-claude-code'
     ])
-    expect(entries[1][1]).toMatchObject({ command: 'C:\\Tools\\opencode.exe', args: ['acp'] })
+    expect(entries[1][1]).toMatchObject({
+      command: 'C:\\Tools\\opencode.exe',
+      configuredCommand: 'opencode-custom',
+      args: ['acp', '--print-logs', '--log-level', 'ERROR']
+    })
   })
 })

@@ -114,3 +114,16 @@ describe('PANGEA product runtime', () => {
     })
   })
 })
+
+
+describe('private Skill and diagram runtime paths', () => {
+  it('resolves beside installation and preserves explicit development overrides', () => {
+    const paths = pangeaProductPaths('/install/resources')
+    const env = pangeaEnvironment(paths, '/launch', '/data', {})
+    expect(env.PANGEA_LOCAL_SKILLS_ROOT).toBe(join('/install', 'local-skills'))
+    expect(env.PANGEA_ARCHIFY_ROOT).toBe(join('/install', 'resources', 'archify'))
+    expect(env.PANGEA_NODE).toBe(join('/install', 'resources', 'app/node_modules/node/bin/node.exe'))
+    expect(env.ARCHIFY_UPDATE_CHECK_DISABLED).toBe('1')
+    expect(pangeaEnvironment(paths, '/launch', '/data', { PANGEA_LOCAL_SKILLS_ROOT: '/private' }).PANGEA_LOCAL_SKILLS_ROOT).toBe('/private')
+  })
+})

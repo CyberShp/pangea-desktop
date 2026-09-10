@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
-import { delimiter, join } from 'node:path'
+import { delimiter, join, dirname } from 'node:path'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
@@ -169,6 +169,10 @@ export function pangeaEnvironment(
 ): NodeJS.ProcessEnv {
   return {
     PANGEA_RUNTIME_ROOT: paths.runtimeRoot,
+    PANGEA_LOCAL_SKILLS_ROOT: inherited.PANGEA_LOCAL_SKILLS_ROOT || join(dirname(dirname(paths.runtimeRoot)), 'local-skills'),
+    PANGEA_ARCHIFY_ROOT: inherited.PANGEA_ARCHIFY_ROOT || join(dirname(paths.runtimeRoot), 'archify'),
+    PANGEA_NODE: inherited.PANGEA_NODE || join(dirname(paths.runtimeRoot), 'app/node_modules/node/bin/node.exe'),
+    ARCHIFY_UPDATE_CHECK_DISABLED: '1',
     PANGEA_PYTHON: paths.pythonExecutable,
     PANGEA_WORKSPACE_ROOT: launchRoot,
     PANGEA_DATA_ROOT: dataRoot,

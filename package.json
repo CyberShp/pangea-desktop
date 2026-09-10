@@ -31,6 +31,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:opencode-acp-continuation": "node scripts/verify-opencode-acp-continuation.mjs",
     "package:dir": "node scripts/verify-pangea-staging.mjs && npm run build && electron-builder --dir --win --x64 --publish never",
     "package:dev:dir": "node scripts/verify-pangea-staging.mjs && npm run build && electron-builder --dir --win --x64 --publish never --config electron-builder.dev.cjs",
     "package:dev:win": "node scripts/verify-pangea-staging.mjs && node scripts/verify-target.mjs win32 x64 && npm run build && electron-builder --dir --win --x64 --publish never --config electron-builder.dev.cjs",
@@ -98,6 +99,7 @@
     "productName": "PANGEA Desktop",
     "asar": false,
     "npmRebuild": false,
+    "electronDist": "node_modules/electron/dist",
     "compression": "maximum",
     "electronLanguages": [
       "en-US",
@@ -112,12 +114,16 @@
     },
     "files": [
       "out/**/*",
+      "scripts/diagnose-acp-initialization.mjs",
+      "scripts/prepare-acp-probe.py",
+      "scripts/diagnose-packaged-acp.ps1",
       "node_modules/**/*",
       "package.json",
       "!**/*.map",
       "!**/node_modules/@mistralai/mistralai/src/**"
     ],
     "extraResources": [
+      { "from": "vendor/archify", "to": "archify" },
       {
         "from": "build/app-icon.png",
         "to": "icon.png"
@@ -185,6 +191,10 @@
       {
         "from": ".pangea-build/update",
         "to": "update"
+      },
+      {
+        "from": "node_modules/node/bin/node.exe",
+        "to": "app/node_modules/node/bin/node.exe"
       },
       {
         "from": "build/apply-portable-update.ps1",

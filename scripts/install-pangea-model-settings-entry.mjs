@@ -64,6 +64,7 @@ function restoreNativeModelsSection(source) {
 }
 
 function publishAllModelReadiness(source) {
+  if (source.includes('const modelAvailable = state.rows.some(providerUsable);')) return source
   const readiness = /const customAvailable = state\.namespaces\.get\("llm-pi-ai"\) !== void 0;\n\s*const internalRows = state\.rows\.filter\(\(row\) => row\.entry\.settingsNs === "llm-pi-ai" && row\.entry\.declared === true\);\n\s*const required = state\.status === "ready" && state\.writable && customAvailable && !internalRows\.some\(providerUsable\);\n\s*window\.dispatchEvent\(new CustomEvent\(([^,]+), \{ detail: \{ required, customAvailable, status: state\.status \} \}\)\);/g
   return replaceRegexExactlyOnce(
     source,
@@ -84,6 +85,18 @@ function wrapNativeOnboardingRegistration(source) {
   )
 }
 
+function removeOfficialModelSetup(source) {
+  if (source.includes('function pangeaModelProvider(entry)')) return source
+  source = replaceExactlyOnce(source,
+    '\t\tfunction providerUsable(row) {',
+    '\t\tfunction pangeaModelProvider(entry) {\n\t\t\treturn entry.settingsNs !== "llm-deepseek" && entry.provider !== "deepseek-official" && entry.provider !== "deepseek";\n\t\t}\n\t\tfunction providerUsable(row) {',
+    'provider setup policy')
+  return replaceExactlyOnce(source,
+    'providers = providersResponse.result.value.providers;',
+    'providers = providersResponse.result.value.providers.filter(pangeaModelProvider);',
+    'provider directory')
+}
+
 let source = await readFile(clientPath, 'utf8')
 const before = source
 source = installOverlay(source)
@@ -91,4 +104,5 @@ source = restoreNativeModelsSection(source)
 source = publishAllModelReadiness(source)
 source = source.replaceAll('内部模型设置', '模型与 API 设置')
 source = wrapNativeOnboardingRegistration(source)
+source = removeOfficialModelSetup(source)
 if (source !== before) await writeFile(clientPath, source, 'utf8')

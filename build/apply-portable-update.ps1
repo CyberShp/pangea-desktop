@@ -26,6 +26,16 @@ $UpdateForm = $null
 $UpdateLabel = $null
 $UpdateProgress = $null
 
+function Copy-LocalSkills([string]$PreviousRoot, [string]$CandidateRoot) {
+  # Copy rather than move: rollback still owns the original private Skill.
+  $LocalSkills = Join-Path $PreviousRoot 'local-skills'
+  if (Test-Path -LiteralPath $LocalSkills -PathType Container) {
+    $CandidateSkills = Join-Path $CandidateRoot 'local-skills'
+    if (Test-Path -LiteralPath $CandidateSkills) { Remove-Item -LiteralPath $CandidateSkills -Recurse -Force }
+    Copy-Item -LiteralPath $LocalSkills -Destination $CandidateSkills -Recurse -Force
+  }
+}
+
 function Write-UpdateLog {
   param([string]$Message)
   try {
@@ -301,6 +311,9 @@ try {
   if ([string]$Manifest.product.version -ne $ExpectedVersion) {
     throw "Updated product version does not match $ExpectedVersion."
   }
+
+  $PreviousRoot = if ($OriginalMoved) { $BackupRoot } else { $InstallRoot }
+  Copy-LocalSkills $PreviousRoot $CandidateRoot
 
   Set-UpdateStage 'Replacing application files...' 68
   if (-not $OriginalMoved) {

@@ -80,7 +80,7 @@ const domObserver = new MutationObserver(() => {
 })
 
 contextBridge.exposeInMainWorld('dshDesktopDirectoryPicker', {
-  pick: (options?: { purpose?: 'workspace' | 'repository' }): Promise<string | null> =>
+  pick: (options?: { purpose?: 'workspace' | 'repository' | 'coverage' }): Promise<string | null> =>
     ipcRenderer.invoke('directory-picker:open', options)
 })
 

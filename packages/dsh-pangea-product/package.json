@@ -6,6 +6,10 @@
   "main": "./index.js",
   "exports": {
     ".": "./index.js",
+    "./agent-command-probe": {
+      "types": "./agent-command-probe.d.ts",
+      "default": "./agent-command-probe.js"
+    },
     "./client": "./client.js",
     "./package.json": "./package.json"
   },
@@ -27,7 +31,7 @@
   "peerDependencies": {
     "dsh-better-sidebar": "0.15.2",
     "dsh-pangea": "0.1.0",
-    "dsh-pangea-companion": "0.10.0",
+    "dsh-pangea-companion": "0.11.0",
     "dsh-pangea-asset-catalog": "0.1.0"
   },
   "peerDependenciesMeta": {

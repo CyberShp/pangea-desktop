@@ -1,0 +1,30 @@
+diff --git a/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts b/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts
+index 4c2adb0..8627e84 100644
+--- a/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts
++++ b/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts
+@@ -258,6 +258,25 @@ export interface SubagentRun {
+      * represent as a stop reason.
+      */
+     readonly result: Promise<SubagentResult>;
++    /**
++     * Continue the same remote child session with another prompt after the
++     * previous result has settled. Present only on transports that support
++     * multiple ACP prompt turns.
++     */
++    readonly continuePrompt?: (prompt: ContentBlock[]) => Promise<SubagentResult>;
++    /** ACP remote identity, distinct from the parent-scoped id. */
++    readonly remoteSessionId?: string;
++    /** Session event counters and bounded diagnostic evidence. Consumers must redact before logging. */
++    readonly readDiagnostics?: () => {
++        model: string | null;
++        messageChunks: number;
++        toolCalls: number;
++        toolFailures: number;
++        toolOutput: string;
++        errorCode: string | null;
++        errorSummary: string | null;
++        stderrSummary: string;
++    };
+     /**
+      * Cancel remaining work, reach child quiescence, and release resources.
+      * Idempotent.

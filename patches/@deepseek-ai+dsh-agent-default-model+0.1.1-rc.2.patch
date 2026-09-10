@@ -1,0 +1,13 @@
+diff --git a/node_modules/@deepseek-ai/dsh-agent-default-model/lib/index.js b/node_modules/@deepseek-ai/dsh-agent-default-model/lib/index.js
+--- a/node_modules/@deepseek-ai/dsh-agent-default-model/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-agent-default-model/lib/index.js
+@@ -57,7 +57,8 @@ var AgentDefaultModelConfig = class extends Service {
+ 	* @returns a detached provider, model, and optional reasoning selection.
+ 	*/
+ 	currentSelection() {
+-		return selection(this.source());
++		const current = selection(this.source());
++		return current.provider === "deepseek-official" ? { provider: "", model: "" } : current;
+ 	}
+ 	/**
+ 	* Save the complete default model selection. A deployment without a settings

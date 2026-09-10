@@ -1,7 +1,12 @@
 name: Build Windows package
-run-name: PANGEA Desktop ${{ inputs.channel }} ${{ inputs.version }}
+run-name: PANGEA Desktop ${{ inputs.channel || 'test' }} ${{ inputs.version || '1.0.3' }}
 
 on:
+  push:
+    branches:
+      - feat/module-analysis-five-stages
+    paths:
+      - .github/module-analysis-build-trigger
   workflow_dispatch:
     inputs:
       channel:
@@ -15,7 +20,7 @@ on:
       version:
         description: Base version for test builds or exact version for releases (SemVer)
         required: true
-        default: 0.1.3
+        default: 1.0.3
         type: string
       patch_from_version:
         description: Optional exact version to generate a patch from (must be the immediately previous release)
@@ -48,8 +53,8 @@ jobs:
         id: release_meta
         shell: pwsh
         env:
-          BUILD_CHANNEL: ${{ inputs.channel }}
-          REQUESTED_VERSION: ${{ inputs.version }}
+          BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
+          REQUESTED_VERSION: ${{ inputs.version || '1.0.3' }}
           PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
           UPDATE_PRIVATE_KEY_B64: ${{ secrets.PANGEA_UPDATE_PRIVATE_KEY_B64 }}
         run: |
@@ -111,8 +116,17 @@ jobs:
             -PackageDirectory ./dist/win-unpacked `
             -ExpectedVersion $env:RELEASE_VERSION
 
+      - name: Verify packaged Cordis analysis launch
+        shell: pwsh
+        run: |
+          $env:PANGEA_TEST_APP_ROOT = (Resolve-Path './dist/win-unpacked/resources/app').Path
+          $PackagedNode = Join-Path $env:PANGEA_TEST_APP_ROOT 'node_modules/node/bin/node.exe'
+          $IntegrationTest = Join-Path $env:PANGEA_TEST_APP_ROOT 'node_modules/dsh-pangea-companion/tests/cordis-launch.integration.mjs'
+          & $PackagedNode --test $IntegrationTest
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Cordis integration failed with exit code $LASTEXITCODE." }
+
       - name: Generate signed incremental patch
-        if: inputs.patch_from_version != ''
+        if: github.event_name == 'workflow_dispatch' && inputs.patch_from_version != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -165,7 +179,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          BUILD_CHANNEL: ${{ inputs.channel }}
+          BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
           PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
           RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
           RELEASE_TITLE: ${{ steps.release_meta.outputs.title }}

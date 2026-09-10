@@ -36,6 +36,7 @@ import {
 import { isDaemonLaunch, isUserInitiatedInstance } from './launchd-guard'
 import { secureWindow } from './security'
 import { ensureLaunchRoot } from './state/launch-root'
+import { resolveUserDataPath } from './state/user-data-path'
 import {
   listInstalledProfilePlugins,
   pruneMissingProfileBundles,
@@ -228,16 +229,19 @@ function applyWindowChromeTheme(window: BrowserWindow, isDark: boolean): void {
 function configureAppIdentity(): void {
   if (developmentBuild) {
     app.setName('PANGEA Desktop Dev')
-    app.setPath('userData', join(app.getPath('appData'), 'pangea-desktop-dev'))
-    return
+  } else {
+    app.setName('PANGEA Desktop')
   }
 
-  app.setName('PANGEA Desktop')
   // Keep the historical lowercase directory stable across product-name and
   // branding changes. Harness stores workspaces, sessions, credentials, and
   // custom presets below userData, so deriving this path from app.getName()
   // would make an ordinary upgrade look like a fresh installation.
-  app.setPath('userData', join(app.getPath('appData'), 'pangea-desktop'))
+  app.setPath('userData', resolveUserDataPath({
+    configuredPath: process.env.PANGEA_USER_DATA_DIR,
+    appDataPath: app.getPath('appData'),
+    developmentBuild
+  }))
 }
 
 async function configurePangeaProduct(): Promise<void> {
@@ -1436,12 +1440,14 @@ async function bootstrap(): Promise<void> {
     const purpose = options && typeof options === 'object' && 'purpose' in options
       ? (options as { purpose?: unknown }).purpose
       : undefined
+    const coveragePicker = purpose === 'coverage'
     const repositoryPicker = purpose === 'repository'
     const result = await dialog.showOpenDialog(mainWindow, {
       title: harnessLocale() === 'zh'
-        ? repositoryPicker ? '选择源码仓库目录' : '选择工作区目录'
-        : repositoryPicker ? 'Select Source Repository' : 'Select Workspace Directory',
-      properties: ['openDirectory']
+        ? coveragePicker ? '选择覆盖率文件' : repositoryPicker ? '选择源码仓库目录' : '选择工作区目录'
+        : coveragePicker ? 'Select Coverage File' : repositoryPicker ? 'Select Source Repository' : 'Select Workspace Directory',
+      properties: coveragePicker ? ['openFile'] : ['openDirectory'],
+      ...(coveragePicker ? { filters: [{ name: 'Coverage', extensions: ['json', 'csv', 'xlsx'] }] } : {})
     })
     return result.canceled ? null : result.filePaths[0] ?? null
   })

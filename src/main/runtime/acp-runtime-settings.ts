@@ -1,6 +1,12 @@
-import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import {
+  AgentCommandResolutionError,
+  resolveAgentCommandWithPowerShell,
+  type ResolvedAgentCommand
+} from '../../../packages/dsh-pangea-product/agent-command-probe.js'
+
+export { AgentCommandResolutionError, resolveAgentCommandWithPowerShell }
 
 export const ACP_RUNTIME_CONFIG_ENV = 'PANGEA_ACP_RUNTIME_CONFIG'
 
@@ -11,24 +17,7 @@ const PROVIDERS = [
   { id: 'pangea-claude-code', command: 'DSH Claude Code Provider', args: [], builtin: true }
 ] as const
 
-export interface ResolvedAgentCommand {
-  command: string
-  version?: string
-  versionError?: string
-}
-
 type CommandResolver = (command: string, environment: NodeJS.ProcessEnv) => ResolvedAgentCommand
-type PowerShellProbeRunner = (command: string, environment: NodeJS.ProcessEnv) => string
-
-class AgentCommandResolutionError extends Error {
-  constructor(
-    message: string,
-    readonly status: 'not_found' | 'probe_error'
-  ) {
-    super(message)
-    this.name = 'AgentCommandResolutionError'
-  }
-}
 
 function object(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -45,87 +34,6 @@ function configuredRuntime(dshHome: string): Record<string, unknown> {
     throw new Error('Agent Runtime 配置缺少 providers 对象')
   }
   return value
-}
-
-function runAgentCommandPowerShellProbe(
-  command: string,
-  environment: NodeJS.ProcessEnv
-): string {
-  return execFileSync(
-    'powershell.exe',
-    [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-OutputFormat',
-      'Text',
-      '-Command',
-      '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ' +
-        '$item=Get-Command -CommandType Application -Name $env:PANGEA_AGENT_COMMAND -ErrorAction SilentlyContinue | Select-Object -First 1; ' +
-        "if ($null -eq $item) { @{found=$false} | ConvertTo-Json -Compress; exit 0 }; " +
-        "$line=''; $versionError=''; " +
-        'try { ' +
-        '$versionOutput=& $item.Source --version 2>&1; $versionExitCode=$LASTEXITCODE; ' +
-        '$line=($versionOutput | Select-Object -First 1 | Out-String).Trim(); ' +
-        "if ($versionExitCode -ne 0) { $versionError='--version exited with code ' + $versionExitCode } " +
-        "} catch { $versionError=$_.Exception.Message }; " +
-        '@{found=$true;command=$item.Source;version=$line;version_error=$versionError} | ConvertTo-Json -Compress; exit 0'
-    ],
-    {
-      encoding: 'utf8',
-      timeout: 8_000,
-      windowsHide: true,
-      env: { ...environment, PANGEA_AGENT_COMMAND: command },
-      stdio: ['ignore', 'pipe', 'ignore']
-    }
-  )
-}
-
-export function resolveAgentCommandWithPowerShell(
-  command: string,
-  environment: NodeJS.ProcessEnv,
-  runProbe: PowerShellProbeRunner = runAgentCommandPowerShellProbe
-): ResolvedAgentCommand {
-  let output: string
-  try {
-    output = runProbe(command, environment)
-  } catch {
-    throw new AgentCommandResolutionError(
-      `PowerShell 无法完成启动命令“${command}”的探测。请确认 powershell.exe 可用，并在 Agent Runtime 中填写可执行文件或 .cmd 的绝对路径。`,
-      'probe_error'
-    )
-  }
-
-  let parsed: Record<string, unknown>
-  try {
-    parsed = object(JSON.parse(output.trim()))
-  } catch {
-    throw new AgentCommandResolutionError(
-      `PowerShell 没有返回启动命令“${command}”的有效探测结果。`,
-      'probe_error'
-    )
-  }
-  if (parsed.found === false) {
-    throw new AgentCommandResolutionError(
-      `未找到启动命令“${command}”。请确认它已安装并加入当前用户 PATH，或填写可执行文件或 .cmd 的绝对路径，然后重启 Harness。`,
-      'not_found'
-    )
-  }
-  if (typeof parsed.command !== 'string' || parsed.command.trim() === '') {
-    throw new AgentCommandResolutionError(
-      `PowerShell 没有返回启动命令“${command}”的可执行文件路径。`,
-      'probe_error'
-    )
-  }
-  return {
-    command: parsed.command.trim(),
-    ...(typeof parsed.version === 'string' && parsed.version.trim()
-      ? { version: parsed.version.trim() }
-      : {}),
-    ...(typeof parsed.version_error === 'string' && parsed.version_error.trim()
-      ? { versionError: parsed.version_error.trim() }
-      : {})
-  }
 }
 
 export function withAcpRuntimeEnvironment(
@@ -145,8 +53,8 @@ export function withAcpRuntimeEnvironment(
         ? override.command.trim()
         : defaults.command
     const args = Array.isArray(override.args) ? override.args : defaults.args
-    const models = Array.isArray(override.models) ? override.models : []
-    const base = { ...override, command, args, models }
+    const { models: _legacyModels, ...runtimeOverride } = override
+    const base = { ...runtimeOverride, command, args }
     if ('builtin' in defaults && defaults.builtin) {
       providers[defaults.id] = {
         ...base,
@@ -169,10 +77,12 @@ export function withAcpRuntimeEnvironment(
     }
     try {
       const resolved = resolveCommand(command, environment)
+      const launcherKind = /\.(?:cmd|bat)$/i.test(resolved.command) ? 'windows-batch' : 'direct'
       providers[defaults.id] = {
         ...base,
         available: true,
         resolved_command: resolved.command,
+        launcher_kind: launcherKind,
         resolution_status: 'resolved',
         ...(resolved.version ? { version: resolved.version } : {}),
         version_status: resolved.version ? 'resolved' : 'unavailable',
