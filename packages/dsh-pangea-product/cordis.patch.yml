@@ -8,5 +8,7 @@
       name: dsh-pangea
     - id: pangea-companion
       name: dsh-pangea-companion
+    - id: pangea-report-policy
+      name: dsh-pangea-companion/report-policy
     - id: pangea-asset-catalog
       name: dsh-pangea-asset-catalog

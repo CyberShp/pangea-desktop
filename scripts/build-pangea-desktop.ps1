@@ -205,6 +205,14 @@ New-Item (Join-Path $PythonRoot 'Lib/site-packages') -ItemType Directory -Force 
 foreach ($Directory in @('.agents', 'schemas', 'src')) {
   Copy-Item (Join-Path $PangeaAgent $Directory) (Join-Path $AgentRuntime $Directory) -Recurse -Force
 }
+$OpenCodeRuntime = Join-Path $AgentRuntime '.opencode'
+New-Item $OpenCodeRuntime -ItemType Directory -Force | Out-Null
+foreach ($Directory in @('agents', 'commands', 'plugins', 'skills')) {
+  Copy-Item (Join-Path $PangeaAgent ".opencode/$Directory") (Join-Path $OpenCodeRuntime $Directory) -Recurse -Force
+}
+foreach ($File in @('package.json', 'package-lock.json')) {
+  Copy-Item (Join-Path $PangeaAgent ".opencode/$File") $OpenCodeRuntime -Force
+}
 Copy-Item (Join-Path $PangeaAgent 'pyproject.toml') $AgentRuntime -Force
 
 $Python = Join-Path $PythonRoot 'python.exe'

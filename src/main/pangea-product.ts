@@ -7,6 +7,8 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const DATA_DIRECTORIES = ['repositories', 'inbox', 'coverage', 'assets', 'runs', '.pangea'] as const
 const MEANINGFUL_DATA_DIRECTORIES = ['repositories', 'inbox', 'coverage', 'assets', 'runs', 'methodologies', '.pangea'] as const
+const OPENCODE_RUNTIME_DIRECTORIES = ['agents', 'commands', 'plugins', 'skills'] as const
+const OPENCODE_RUNTIME_FILES = ['package.json', 'package-lock.json'] as const
 export const PANGEA_DESKTOP_MARKER = 'desktop-initialized.json'
 
 export interface PangeaWorkspaceOptions {
@@ -38,9 +40,20 @@ export async function ensurePangeaWorkspace(
   options: PangeaWorkspaceOptions = {}
 ): Promise<string> {
   const agentsSource = join(runtimeRoot, '.agents')
-  const marker = join(agentsSource, 'pangea', 'dsh.md')
-  await readFile(marker, 'utf8')
+  const openCodeSource = join(runtimeRoot, '.opencode')
+  await readFile(join(agentsSource, 'pangea', 'dsh.md'), 'utf8')
+  await readFile(join(openCodeSource, 'plugins', 'pangea.ts'), 'utf8')
   await cp(agentsSource, join(launchRoot, '.agents'), { recursive: true, force: true })
+  const openCodeTarget = join(launchRoot, '.opencode')
+  await mkdir(openCodeTarget, { recursive: true })
+  for (const directory of OPENCODE_RUNTIME_DIRECTORIES) {
+    const target = join(openCodeTarget, directory)
+    await rm(target, { recursive: true, force: true })
+    await cp(join(openCodeSource, directory), target, { recursive: true, force: true })
+  }
+  for (const file of OPENCODE_RUNTIME_FILES) {
+    await cp(join(openCodeSource, file), join(openCodeTarget, file), { force: true })
+  }
 
   const dataRoot = join(launchRoot, 'pangea-data')
   const hadExistingData = await hasMeaningfulPangeaData(dataRoot)
