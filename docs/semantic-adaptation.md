@@ -7,7 +7,7 @@
 | 组件 | 分支 | 固定提交 |
 |---|---|---|
 | pangea-agent | langgraph | 58398f10ef7663b23c24310f932a76d77254d0d2 |
-| dsh-pangea | langgraph | c1be876e68cda407ed39f099f453d338b36a58e5 |
+| dsh-pangea | langgraph | c86ea81c4701787ad26bf3beadc008918d6cd609 |
 
 Desktop 加载最新产品导航、companion 和 report-policy，打包 Agent 的 `.agents`、
 `.opencode`、Python 源码与 schemas。组装检查核对固定提交、source-first 接口及
