@@ -6,8 +6,8 @@
 
 | 组件 | 分支 | 固定提交 |
 |---|---|---|
-| pangea-agent | langgraph | 58398f10ef7663b23c24310f932a76d77254d0d2 |
-| dsh-pangea | langgraph | c86ea81c4701787ad26bf3beadc008918d6cd609 |
+| pangea-agent | langgraph | a92877f810ec93e8b5f79ffe16c86b1a0fba5e85 |
+| dsh-pangea | langgraph | 714c2de83eb3984075804d5e549de826e44be033 |
 
 Desktop 加载最新产品导航、companion 和 report-policy，打包 Agent 的 `.agents`、
 `.opencode`、Python 源码与 schemas。组装检查核对固定提交、source-first 接口及
@@ -51,3 +51,19 @@ API 模型实跑、完整资产语义提取仍待专项验证。两个跳过检�
 通过该目录的 `start.cjs` 启动，使用独立 appData 和日志目录，插件路径指向上述
 配套工作目录。本地组件提交尚未推送；GitHub 构建前需先推送固定 DSH 提交与
 Desktop 分支，再执行现有构建工作流。
+
+## a92877f 源码交接适配验收
+
+2026-09-12 同步 Agent `langgraph` 到 `a92877f`，DSH 增加冻结源码预读、
+`next_read` 分页续读和 `pangea_result_supersede` 局部 edits。CLI 集成覆盖
+101 行连续分页、原文历史保留、幂等重试、匹配失败不写入和两轮复核结算。
+Companion 210 项通过、1 项跳过；Desktop 15 项相关检查通过。
+
+独立 Desktop → OpenCode ACP → MiniMax M2.7 实跑 `sample-c-260912-01`：
+complete/PASS，宿主 execution_status=completed，reader_health=ok，正式报告
+可读；包含 1 条流程、1 条风险、3 条用例。当前加载的分析/复核规则和 OpenCode
+插件已核对与目标 Agent 文件一致。证据位于
+`.pangea-build/semantic-validation/a92877f/`。
+
+真实模型样例证明交接和复核链路；局部 edits 的成功、重试、失败保持原文由真实
+CLI 集成夹具验证。尚未执行 Windows 安装包或 DSH 内置模型的专项验收。
