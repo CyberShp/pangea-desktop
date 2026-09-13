@@ -52,6 +52,8 @@ it('records the actual Desktop entry fingerprint and leaves unavailable commit u
   await writeFile(join(root, 'out/main/index.js'), 'loaded-entry')
   const first = desktopRuntimeIdentity(root, '1.2.3')
   expect(first.version).toBe('1.2.3')
+  await writeFile(join(root, 'package.json'), JSON.stringify({ version: '0.4.0' }))
+  expect(desktopRuntimeIdentity(root, '43.4.0').version).toBe('0.4.0')
   expect(first.commit).toBeNull()
   expect(first.main_sha256).toMatch(/^[a-f0-9]{64}$/)
   await writeFile(join(root, 'out/main/index.js'), 'new-entry')

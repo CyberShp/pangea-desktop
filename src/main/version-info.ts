@@ -57,5 +57,6 @@ export function desktopRuntimeIdentity(appPath: string, version: string): Record
   } catch { /* Portable installations have a version and executable hash. */ }
   let mainSha256: string | null = null
   try { mainSha256 = createHash('sha256').update(readFileSync(join(appPath, 'out/main/index.js'))).digest('hex') } catch { /* Unbuilt development checkout. */ }
-  return { version, commit, dirty, main_sha256: mainSha256 }
+  const applicationVersion = validVersion(readPackageMetadata(join(appPath, 'package.json'))?.version) ?? version
+  return { version: applicationVersion, commit, dirty, main_sha256: mainSha256 }
 }
