@@ -10,6 +10,9 @@ const required = [
   '.pangea-build/runtime/pangea-runtime/src/pangea_agent/cli/main.py',
   '.pangea-build/runtime/pangea-runtime/src/pangea_agent/cli/adapter_api.py',
   '.pangea-build/runtime/pangea-runtime/.agents/pangea/dsh.md',
+  ...['planning', 'analysis', 'review'].flatMap(role => ['.agents/pangea', '.opencode/agents'].map(dir => `.pangea-build/runtime/pangea-runtime/${dir}/${role}-worker.md`)),
+  '.pangea-build/runtime/pangea-runtime/src/pangea_agent/graph/nodes/source_first.py',
+  '.pangea-build/runtime/pangea-runtime/src/pangea_agent/rubrics/builtin/behavior_test_generation.md',
   '.pangea-build/runtime/pangea-runtime/.opencode/agents/pangea-agent.md',
   '.pangea-build/runtime/pangea-runtime/.opencode/plugins/pangea.ts',
   '.pangea-build/runtime/pangea-runtime/.opencode/skills/product-blackbox-test-case/SKILL.md',
@@ -25,6 +28,12 @@ if (missing.length > 0) {
   for (const file of missing) console.error(`- ${file}`)
   console.error('Run scripts/build-pangea-desktop.ps1 to assemble the locked components.')
   process.exit(1)
+}
+
+const stagedRuntime = path.join(root, '.pangea-build/runtime/pangea-runtime')
+const sourceFirstGraph = readFileSync(path.join(stagedRuntime, 'src/pangea_agent/graph/nodes/source_first.py'), 'utf8')
+if (sourceFirstGraph.includes('behavior_test_review') && !existsSync(path.join(stagedRuntime, 'src/pangea_agent/rubrics/builtin/behavior_test_review.md'))) {
+  throw new Error('The staged Agent selects behavior_test_review but its frozen review rubric is missing.')
 }
 
 const staged = JSON.parse(
