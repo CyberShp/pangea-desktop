@@ -76,7 +76,7 @@ import {
 } from '../shared/desktop-menu'
 import { buildPluginRecoveryViewModel } from './plugin-recovery-view'
 import { buildSafeModeViewModel, shouldStartInSafeMode } from './safe-mode'
-import { aboutDetail, bundledHarnessVersion } from './version-info'
+import { aboutDetail, bundledHarnessVersion, desktopRuntimeIdentity } from './version-info'
 import { ensurePangeaWebProfile } from './state/pangea-profile'
 import {
   ensurePangeaWorkspace,
@@ -1378,6 +1378,7 @@ async function bootstrap(): Promise<void> {
   if (process.platform === 'darwin') app.dock?.setIcon(desktopIconPath())
   launchDirectory = await ensureLaunchRoot(app.getPath('userData'))
   await configurePangeaProduct()
+  process.env.PANGEA_DESKTOP_PROVENANCE = JSON.stringify(desktopRuntimeIdentity(app.getAppPath(), app.getVersion()))
   registerUpdateHandlers()
   nativeTheme.themeSource = harnessThemePreference()
   createWindow()

@@ -43,3 +43,17 @@ describe('desktop version information', () => {
     )
   })
 })
+
+it('records the actual Desktop entry fingerprint and leaves unavailable commit unrecorded', async () => {
+  const { desktopRuntimeIdentity } = await import('../src/main/version-info')
+  const root = await mkdtemp(join(tmpdir(), 'pangea-runtime-identity-'))
+  temporaryRoots.push(root)
+  await mkdir(join(root, 'out/main'), { recursive: true })
+  await writeFile(join(root, 'out/main/index.js'), 'loaded-entry')
+  const first = desktopRuntimeIdentity(root, '1.2.3')
+  expect(first.version).toBe('1.2.3')
+  expect(first.commit).toBeNull()
+  expect(first.main_sha256).toMatch(/^[a-f0-9]{64}$/)
+  await writeFile(join(root, 'out/main/index.js'), 'new-entry')
+  expect(desktopRuntimeIdentity(root, '1.2.3').main_sha256).not.toBe(first.main_sha256)
+})

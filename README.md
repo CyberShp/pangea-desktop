@@ -4,7 +4,9 @@ PANGEA Desktop is a portable Windows distribution of the PANGEA analysis product
 
 The three implementation repositories remain independent. [`pangea.components.json`](./pangea.components.json) records their source branches, exact approved commits and runtime downloads. A cloud release checks out those pinned commits into a temporary staging directory and records them in the package manifest. Updating a component is a separate reviewed operation from creating a new package version.
 
-This component set runs `codetalks-skill 1.2.0` with PANGEA Asset Management 2.0, derived from `codetalks-fused-v2.4`. Each Run freezes its own Skill copy, selected assets and enabled methodologies; the workbench displays the frozen version and active step IDs from persisted Run state. Lua and openUBMC Lua profiles are selected automatically from the verified source scope.
+The `langgraph` component set uses the Agent's `source-first-v1` workflow. The workbench reads typed records and complete original bodies from each Run, linking risks, cases and source evidence by analysis unit and record ID. The runtime advertises supported analysis settings and asset operations; this set supports module analysis in depth mode, with Coverage material supplied as an analysis asset.
+
+New Runs record component versions and file/rule fingerprints in the frozen task contract. The overview's technical details show this creation-time information; historical Runs with no record display “未记录”. The Desktop provides its loaded application version and entry fingerprint to DSH. Git commits are recorded when an actual checkout is available, while portable installations remain identifiable by version and file hashes.
 
 ## Build on Windows x64
 

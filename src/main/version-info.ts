@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
 interface PackageMetadata {
@@ -39,4 +41,21 @@ export function aboutDetail(
     return `PANGEA Desktop 版本：${desktopVersion}\n内置 Harness 版本：${harness}\n\nPANGEA Runtime 与 Desktop 一起发布。`
   }
   return `PANGEA Desktop version: ${desktopVersion}\nBundled Harness version: ${harness}\n\nPANGEA Runtime is released with Desktop.`
+}
+
+export function desktopRuntimeIdentity(appPath: string, version: string): Record<string, unknown> {
+  let commit: string | null = null
+  let dirty: boolean | null = null
+  try {
+    const git = (args: string[]): string => execFileSync('git', ['-C', appPath, ...args], {
+      encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore']
+    }).trim()
+    if (realpathSync(git(['rev-parse', '--show-toplevel'])) === realpathSync(appPath)) {
+      commit = git(['rev-parse', 'HEAD'])
+      dirty = Boolean(git(['status', '--porcelain', '--untracked-files=no']))
+    }
+  } catch { /* Portable installations have a version and executable hash. */ }
+  let mainSha256: string | null = null
+  try { mainSha256 = createHash('sha256').update(readFileSync(join(appPath, 'out/main/index.js'))).digest('hex') } catch { /* Unbuilt development checkout. */ }
+  return { version, commit, dirty, main_sha256: mainSha256 }
 }
