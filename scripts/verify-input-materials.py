@@ -30,7 +30,7 @@ class InputMaterialAcceptance(unittest.TestCase):
             copied = Path(loaded.source_path)
             self.assertTrue(copied.is_file())
             self.assertEqual(copied.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
-            self.assertEqual(copied.parent.parent.parent, root / "inbox")
+            self.assertEqual(copied.parent.parent, root / "inbox")
 
     def test_asset_type_file_constraints_are_enforced(self):
         with tempfile.TemporaryDirectory(prefix="pangea-input-materials-") as directory:
