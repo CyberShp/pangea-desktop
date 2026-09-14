@@ -10,6 +10,7 @@ const required = [
   '.pangea-build/runtime/pangea-runtime/src/pangea_agent/cli/main.py',
   '.pangea-build/runtime/pangea-runtime/src/pangea_agent/cli/adapter_api.py',
   '.pangea-build/runtime/pangea-runtime/.agents/pangea/dsh.md',
+  '.pangea-build/runtime/pangea-runtime/docs/source-first-cli-worker.md',
   ...['planning', 'analysis', 'review'].flatMap(role => ['.agents/pangea', '.opencode/agents'].map(dir => `.pangea-build/runtime/pangea-runtime/${dir}/${role}-worker.md`)),
   '.pangea-build/runtime/pangea-runtime/src/pangea_agent/graph/nodes/source_first.py',
   '.pangea-build/runtime/pangea-runtime/src/pangea_agent/rubrics/builtin/behavior_test_generation.md',

@@ -11,6 +11,8 @@ import {
 const temporaryRoots: string[] = []
 
 async function writeRuntimeContracts(runtime: string): Promise<void> {
+  await mkdir(join(runtime, 'docs'), { recursive: true })
+  await writeFile(join(runtime, 'docs', 'source-first-cli-worker.md'), 'PANGEA CLI worker contract')
   await mkdir(join(runtime, '.agents', 'pangea'), { recursive: true })
   await writeFile(join(runtime, '.agents', 'pangea', 'dsh.md'), 'PANGEA worker contract')
   for (const directory of ['agents', 'commands', 'plugins', 'skills']) {
@@ -44,6 +46,7 @@ describe('PANGEA product runtime', () => {
     await writeRuntimeContracts(runtime)
 
     const dataRoot = await ensurePangeaWorkspace(launch, runtime)
+    expect(await readFile(join(launch, 'docs', 'source-first-cli-worker.md'), 'utf8')).toBe('PANGEA CLI worker contract')
     expect(await readFile(join(launch, '.agents', 'pangea', 'dsh.md'), 'utf8')).toBe(
       'PANGEA worker contract'
     )

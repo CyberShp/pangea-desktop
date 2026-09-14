@@ -44,6 +44,8 @@ export async function ensurePangeaWorkspace(
   await readFile(join(agentsSource, 'pangea', 'dsh.md'), 'utf8')
   await readFile(join(openCodeSource, 'plugins', 'pangea.ts'), 'utf8')
   await cp(agentsSource, join(launchRoot, '.agents'), { recursive: true, force: true })
+  await mkdir(join(launchRoot, 'docs'), { recursive: true })
+  await cp(join(runtimeRoot, 'docs', 'source-first-cli-worker.md'), join(launchRoot, 'docs', 'source-first-cli-worker.md'), { force: true })
   const openCodeTarget = join(launchRoot, '.opencode')
   await mkdir(openCodeTarget, { recursive: true })
   for (const directory of OPENCODE_RUNTIME_DIRECTORIES) {
