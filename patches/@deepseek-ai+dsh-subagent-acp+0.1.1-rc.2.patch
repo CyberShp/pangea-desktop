@@ -54,10 +54,11 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  /**
  * Start and publish one ACP child after initialization and session creation.
  * Child failures resolve through the run result; startup failures reject after
-@@ -106,38 +152,75 @@
+@@ -105,39 +151,92 @@
+ */
  async function startAcpRun(request, spec) {
  	if (request.signal.aborted) throw new Error("subagent request was aborted before the ACP child started");
- 	const id = SessionId(randomUUID());
+-	const id = SessionId(randomUUID());
 -	const child = spec.spawn({
 -		argv: [spec.command, ...spec.args],
 -		cwd: spec.cwd,
@@ -69,6 +70,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 -		graceMs: spec.disposeGraceMs,
 -		env: spec.env
 -	});
++	const id = SessionId(request.resume?.taskId ?? randomUUID());
 +	let child;
 +	try {
 +		child = spec.spawn({
@@ -105,6 +107,13 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 +	const retain = (text) => spec.diagnosticOutputLimit ? text.slice(-spec.diagnosticOutputLimit) : text;
 +	const diagnostics = { model: null, messageChunks: 0, toolCalls: 0, toolFailures: 0, toolOutput: "", errorCode: null, errorSummary: null };
 +	let turnStartedAt = null;
++	const startedAt = Date.now();
++	const toolStarts = new Map();
++	const emitDiagnostic = (stage) => {
++		diagnostics.stage = stage;
++		try { request.onDiagnostic?.({ ...diagnostics, durationMs: Date.now() - startedAt, processId: child.pid }); } catch {}
++	};
++	emitDiagnostic("spawn_process");
 +	diagnostics.processExited = false;
 +	diagnostics.outputTruncated = false;
 +	child.done.then(outcome => Object.assign(diagnostics, { processExited: true, exitCode: outcome.exitCode, exitSignal: outcome.signal }), () => { diagnostics.processExited = true; });
@@ -124,6 +133,15 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 +			if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
 +				diagnostics.lastToolId = String(update.toolCallId ?? "").slice(0, 256);
 +				diagnostics.lastToolStatus = String(update.status ?? "unknown").slice(0, 64);
++				diagnostics.lastToolName = String(update.title ?? diagnostics.lastToolName ?? update.toolCallId ?? "").slice(0, 256);
++				if (update.sessionUpdate === "tool_call") toolStarts.set(update.toolCallId, Date.now());
++				diagnostics.lastToolStartedAt = toolStarts.get(update.toolCallId) ?? null;
++				if (["completed", "failed"].includes(update.status)) {
++					diagnostics.lastToolFinishedAt = Date.now();
++					diagnostics.lastToolDurationMs = diagnostics.lastToolStartedAt === null ? null : Date.now() - diagnostics.lastToolStartedAt;
++					toolStarts.delete(update.toolCallId);
++				} else { diagnostics.lastToolFinishedAt = null; diagnostics.lastToolDurationMs = null; }
++				emitDiagnostic("tool_event");
 +				for (const item of update.content ?? []) if (item.type === "content" && item.content?.type === "text") diagnostics.toolOutput = (diagnostics.toolOutput + item.content.text).slice(-8192);
 +			}
 +			if ((update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && update.status === "failed") diagnostics.toolFailures++;
@@ -144,7 +162,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  				const allow = params.options.find((o) => o.kind === "allow_once" || o.kind === "allow_always");
  				if (allow !== void 0) return Promise.resolve({ outcome: {
  					outcome: "selected",
-@@ -149,6 +232,7 @@
+@@ -149,6 +248,7 @@
  	});
  	const conn = new ClientSideConnection(makeClient, ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout)));
  	let sessionId;
@@ -152,7 +170,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  	let signalCancelSettled;
  	const cancelSettled = new Promise((resolve) => {
  		signalCancelSettled = resolve;
-@@ -164,14 +248,16 @@
+@@ -164,21 +264,35 @@
  		requestCancel();
  	};
  	request.signal.addEventListener("abort", onAbort, { once: true });
@@ -163,18 +181,33 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  		await Promise.race([
  			(async () => {
 -				await conn.initialize({
++				emitDiagnostic("acp_initialize");
 +				const initialized = await conn.initialize({
  					protocolVersion: PROTOCOL_VERSION,
  					clientCapabilities: {}
  				});
+-				const session = await conn.newSession({
+-					cwd: spec.cwd,
+-					mcpServers: []
+-				});
+-				const returnedSessionId = Reflect.get(session, "sessionId");
+-				if (typeof returnedSessionId !== "string") throw new Error("ACP child published without a session id");
+-				sessionId = returnedSessionId;
 +				diagnostics.agentVersion = typeof initialized.agentInfo?.version === "string" ? initialized.agentInfo.version.slice(0, 128) : null;
- 				const session = await conn.newSession({
- 					cwd: spec.cwd,
- 					mcpServers: []
-@@ -179,6 +265,10 @@
- 				const returnedSessionId = Reflect.get(session, "sessionId");
- 				if (typeof returnedSessionId !== "string") throw new Error("ACP child published without a session id");
- 				sessionId = returnedSessionId;
++				diagnostics.canLoadSession = initialized.agentCapabilities?.loadSession === true;
++				emitDiagnostic(request.resume ? "session_load" : "session_new");
++				let session;
++				if (request.resume) {
++					if (!diagnostics.canLoadSession) throw new Error("执行器未声明支持恢复原 ACP 会话；保留原任务，不创建替代会话");
++					session = await conn.loadSession({ sessionId: request.resume.remoteSessionId, cwd: spec.cwd, mcpServers: [] });
++					if (session.sessionId && session.sessionId !== request.resume.remoteSessionId) throw new Error("ACP 返回了其他会话，拒绝替换原绑定");
++					sessionId = request.resume.remoteSessionId;
++				} else {
++					session = await conn.newSession({ cwd: spec.cwd, mcpServers: [] });
++					sessionId = Reflect.get(session, "sessionId");
++					if (typeof sessionId !== "string") throw new Error("ACP child published without a session id");
++				}
++				emitDiagnostic("models_received");
 +				diagnostics.model = typeof session.models?.currentModelId === "string" ? session.models.currentModelId : null;
 +				observeModel(session.configOptions);
 +				modelCatalog = sessionModels(session);
@@ -182,12 +215,14 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -190,47 +280,80 @@
+@@ -189,48 +303,81 @@
+ 	} catch (error) {
  		request.signal.removeEventListener("abort", onAbort);
  		await disposeProcess();
- 		if (flags.cancelled) throw new Error("subagent request was aborted before the ACP child started");
+-		if (flags.cancelled) throw new Error("subagent request was aborted before the ACP child started");
 -		throw toError(error);
-+		throw launchError(error, { launchStage: "acp_initialize", stderrSummary: child.collected?.stderr?.readFrom(0).text });
++		const failure = flags.cancelled ? toError(request.signal.reason ?? error) : toError(error);
++		throw launchError(failure, { launchStage: diagnostics.stage, diagnostics: { ...diagnostics, durationMs: Date.now() - startedAt }, stderrSummary: child.collected?.stderr?.readFrom(0).text });
  	}
  	/* v8 ignore next */
  	if (sessionId === void 0) throw new Error("unreachable: ACP startup fulfilled without a session id");
@@ -196,7 +231,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 +	if (request.discoverOnly) {
 +		request.signal.removeEventListener("abort", onAbort);
 +		await disposeProcess();
-+		return modelCatalog;
++		return { ...modelCatalog, diagnostics: { ...diagnostics, durationMs: Date.now() - startedAt } };
 +	}
 +	const runPrompt = async (prompt) => {
 +		currentTurnOutput = "";
@@ -253,7 +288,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 -	})();
 +		} finally { diagnostics.turnDurationMs = Date.now() - turnStartedAt; }
 +	};
-+	let turn = runPrompt(request.prompt);
++	let turn = request.resume ? Promise.resolve({ output: [], stopReason: "completed" }) : runPrompt(request.prompt);
 +	const result = turn;
  	let disposal;
  	return {
@@ -277,7 +312,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  		localAgent: void 0,
  		result,
  		dispose() {
-@@ -257,10 +380,12 @@
+@@ -257,10 +404,12 @@
  const Config = z.object({
  	providerName: z.string().default("acp"),
  	command: z.string().required(),
@@ -290,7 +325,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
  	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
  });
-@@ -331,24 +456,59 @@
+@@ -331,24 +480,59 @@
  		this.ctx = ctx;
  		this.config = config;
  	}
@@ -346,8 +381,8 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 +			throw launchError(error, launch);
 +		}
 +	}
-+	async discoverModels({ cwd, signal }) {
-+		return this.start({ parent: { session: { header: { cwd } } }, signal, prompt: [], discoverOnly: true });
++	async discoverModels({ cwd, signal, onDiagnostic }) {
++		return this.start({ parent: { session: { header: { cwd } } }, signal, onDiagnostic, prompt: [], discoverOnly: true });
  	}
  };
  function apply(ctx, config) {

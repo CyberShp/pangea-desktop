@@ -59,3 +59,32 @@ it('records handshake, turn timing and process exit without retaining arbitrary 
     expect(run.readDiagnostics()).toMatchObject({ processExited: true, exitCode: 0 })
   })
 })
+
+for (const mode of ['resume', 'resume-missing', 'no-model']) {
+  it(`restores only the original ACP session (${mode})`, async () => {
+    const context = new Context()
+    let provider, run
+    const events = []
+    apply({ logger: { warn() {} }, subprocess: new LocalSubprocessRuntime(context), subagents: { registerProvider(value) { provider = value } } }, Config({
+      command: process.execPath, args: [path.resolve('scripts/fixtures/acp-diagnostic-agent.mjs')],
+      env: { PANGEA_FIXTURE_MODE: mode }, disposeEofGraceMs: 100, disposeGraceMs: 100,
+    }))
+    try {
+      const pending = provider.start({ prompt: [], resume: { taskId: 'original-local', remoteSessionId: 'original-remote' },
+        parent: { session: { header: { cwd: process.cwd() } } }, signal: new AbortController().signal,
+        onDiagnostic: value => events.push(value) })
+      if (mode !== 'resume') {
+        await expect(pending).rejects.toThrow(mode === 'resume-missing' ? /session not found/ : /未声明支持恢复/)
+        expect(events.some(value => value.stage === 'session_new')).toBe(false)
+        return
+      }
+      run = await pending
+      expect(run.id).toBe('original-local')
+      expect(run.remoteSessionId).toBe('original-remote')
+      expect((await run.result).output).toEqual([])
+      expect(run.readOutput()).toBe('')
+      expect((await run.continuePrompt([{ type: 'text', text: 'ping' }])).stopReason).toBe('completed')
+      expect(run.readOutput()).toContain('PANGEA_PING_OK')
+    } finally { await run?.dispose(); await context.fiber.dispose() }
+  })
+}

@@ -1,1 +1,1 @@
-2026-09-14 fix idle ACP session label spam and pending source-first result diagnostics
+2026-09-14: on-demand source indexing, explicit session recovery and scoped dispatch tools

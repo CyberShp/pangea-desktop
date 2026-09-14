@@ -82,5 +82,75 @@ class SourceFirstWorkflowAcceptance(unittest.TestCase):
         self.assertLessEqual(len(source_first._safe_key("x" * 200)), 80)
 
 
+class OnDemandPlanningAcceptance(unittest.TestCase):
+    def test_asset_restart_preserves_previous_attempt(self):
+        from pangea_agent.assets import import_asset, prepare_asset_extraction
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "requirements.txt"
+            source.write_text("TLS authentication requirement", encoding="utf-8")
+            asset = import_asset(temp, str(source), "requirement")
+            first = prepare_asset_extraction(temp, asset.asset_id)
+            result = Path(first["asset"]["result_path"])
+            result.write_text("original partial result", encoding="utf-8")
+            same = prepare_asset_extraction(temp, asset.asset_id)
+            self.assertEqual(same["action"]["action_id"], first["action"]["action_id"])
+            second = prepare_asset_extraction(temp, asset.asset_id, restart=True)
+            self.assertNotEqual(second["action"]["action_id"], first["action"]["action_id"])
+            self.assertNotEqual(second["asset"]["result_path"], str(result))
+            self.assertEqual(result.read_text(encoding="utf-8"), "original partial result")
+            self.assertTrue(Path(first["action"]["task_path"]).is_file())
+
+    def test_large_unrelated_tree_stays_lazy_and_resume_uses_real_cli(self):
+        import json, os, subprocess, sys, tempfile
+        from unittest.mock import patch
+        from pangea_agent.cli.run_module_analysis import run_module_analysis
+        from pangea_agent.cli.adapter_api import bind_action
+        from pangea_agent.cli.source_first_api import task_open, plan_write, work_finish
+        from pangea_agent.inventory.source_access import source_index, source_read
+        from pangea_agent.agent_io import write_json, read_json
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            data = root / "data"
+            repo = data / "repositories" / "sample"
+            (repo / "backend").mkdir(parents=True)
+            (repo / "tls.c").write_text("int tls_connect(void) { return 0; }\n")
+            for i in range(500):
+                (repo / "backend" / f"disk{i}.c").write_text(f"int disk{i}(void) {{ return 0; }}\n")
+            request = root / "request.json"
+            write_json(request, {"data_root": str(data), "run_id": "lazy-run", "repository": "sample",
+                "target": "TLS connect", "source_scope": ["."], "workflow_version": "source-first-v1"})
+            with patch("pangea_agent.inventory.source_scanner.parse_cpp_file", side_effect=AssertionError("eager parse")):
+                run_module_analysis(str(request))
+            run = data / "runs" / "lazy-run"
+            self.assertEqual(read_json(run / "inputs/source-index.json")["file_count"], 501)
+            self.assertFalse((run / "inputs/source-details").exists())
+            binding = (str(data), "lazy-run", "lazy-run:planning", "original-worker")
+            bind_action(*binding)
+            opened = task_open(*binding)
+            self.assertNotIn("allowed_paths", opened["task"])
+            self.assertLess(len(json.dumps(opened)), 12000)
+            self.assertEqual(opened["write_contract"]["revision"], 0)
+            page = source_index(*binding, repo_id="sample", path="backend", page_size=4)
+            self.assertEqual(len(page["files"]), 4)
+            self.assertFalse((run / "inputs/source-details").exists())
+            selected = source_index(*binding, repo_id="sample", path="tls.c")
+            self.assertTrue((run / "inputs/source-details/sample/tls.c.json").is_file())
+            self.assertEqual(len(list((run / "inputs/source-details").rglob("*.json"))), 1)
+            function = next(r for r in selected["files"][0]["regions"] if r["kind"] == "function")
+            self.assertIn("tls_connect", json.dumps(source_read(*binding, repo_id="sample", region_id=function["region_id"])))
+            saved = plan_write(*binding, expected_revision=0, unit={"title":"TLS", "purpose":"连接", "owned_files":[{"repo_id":"sample","path":"tls.c"}]})
+            work_finish(*binding, revision=saved["revision"])
+            before = (run / "agent-results/source-first/planning.json").read_bytes()
+            command = [sys.executable, "-m", "pangea_agent.cli.main", "runs", "resume", "--data-root", str(data), "--run-id", "lazy-run"]
+            result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONUTF8":"1"})
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            action = read_json(run / "progress.json")["actions"]["lazy-run:planning"]
+            self.assertEqual(action["task_id"], "original-worker")
+            self.assertEqual(action["action"], "continue_agent")
+            self.assertEqual(action["status"], "pending")
+            self.assertEqual((run / "agent-results/source-first/planning.json").read_bytes(), before)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -7,7 +7,13 @@ const update = value => send({ method: 'session/update', params: { sessionId: 'r
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line)
   const reply = result => send({ id: request.id, result })
-  if (request.method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: 'fixture', version: '1.0' } })
+  if (request.method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: { loadSession: mode.startsWith('resume') }, agentInfo: { name: 'fixture', version: '1.0' } })
+  if (request.method === 'session/new' && mode.startsWith('resume')) { process.stderr.write('UNEXPECTED_NEW_SESSION'); process.exit(4) }
+  if (request.method === 'session/load') {
+    if (mode === 'resume-missing') send({ id: request.id, error: { code: -32001, message: 'session not found' } })
+    else if (request.params.sessionId !== 'original-remote') send({ id: request.id, error: { code: -32001, message: 'wrong session' } })
+    else reply({})
+  }
   if (request.method === 'session/new') reply({ sessionId: 'remote-fixture', ...(mode === 'no-model' ? {} : { models: { currentModelId: 'fixture/model', availableModels: [{ modelId: 'fixture/model', name: 'Fixture' }] } }) })
   if (request.method !== 'session/prompt') return
   if (mode === 'hang') return
