@@ -28,7 +28,7 @@ class FrozenSourceAccessAcceptance(unittest.TestCase):
             self.assertTrue(callable(getattr(source_access, name, None)), name)
 
     def test_source_paths_are_normalized_without_leaving_repository(self):
-        self.assertEqual(source_access._normal_path(r"src\\driver.c"), "src/driver.c")
+        self.assertEqual(source_access._normal_path(r"src\driver.c"), "src/driver.c")
         self.assertEqual(source_access._normal_path("src/./driver.c"), "src/driver.c")
         for value in ("../driver.c", "src/../../driver.c", "/driver.c", ""):
             with self.subTest(value=value):
@@ -37,7 +37,7 @@ class FrozenSourceAccessAcceptance(unittest.TestCase):
 
     def test_run_identifiers_cannot_become_paths(self):
         self.assertEqual(source_access._safe_identifier("run-123", "run_id"), "run-123")
-        for value in ("", ".", "..", "runs/other", r"runs\\other"):
+        for value in ("", ".", "..", "runs/other", r"runs\other"):
             with self.subTest(value=value):
                 with self.assertRaises(source_access.SourceAccessError):
                     source_access._safe_identifier(value, "run_id")
