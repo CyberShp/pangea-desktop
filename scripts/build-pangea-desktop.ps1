@@ -209,7 +209,7 @@ if ($PathLines -notcontains '..\pangea-runtime\src') { $PathLines += '..\pangea-
 Set-Content $PathFile.FullName $PathLines -Encoding ASCII
 New-Item (Join-Path $PythonRoot 'Lib/site-packages') -ItemType Directory -Force | Out-Null
 
-foreach ($Directory in @('.agents', 'schemas', 'src')) {
+foreach ($Directory in @('.agents', 'schemas', 'src', 'docs')) {
   Copy-Item (Join-Path $PangeaAgent $Directory) (Join-Path $AgentRuntime $Directory) -Recurse -Force
 }
 $OpenCodeRuntime = Join-Path $AgentRuntime '.opencode'

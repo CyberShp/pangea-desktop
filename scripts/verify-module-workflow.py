@@ -16,9 +16,22 @@ from pangea_agent.models.source_first import NotesResult, NoteRecord, SourceBind
 
 from pangea_agent.graph.graph import graph
 from pangea_agent.graph.nodes import source_first
+from pangea_agent.inventory.scope_expander import budget_automatic_context
 
 
 class SourceFirstWorkflowAcceptance(unittest.TestCase):
+    def test_reference_budget_preserves_sources_and_records_omissions(self):
+        expansion = {"groups": [{"repo_id": "r", "code_paths": ["tcp.c"],
+            "context_paths": ["tcp.c", *[f"helpers/{i}.c" for i in range(100)], "public.h"]}],
+            "context_files": [{"repo_id": "r", "path": f"helpers/{i}.c", "reason": "direct_callee_definition:helper"} for i in range(100)]
+                + [{"repo_id": "r", "path": "public.h", "reason": "declared_definition:entry"}]}
+        budget_automatic_context(expansion)
+        self.assertEqual(expansion["groups"][0]["code_paths"], ["tcp.c"])
+        self.assertEqual(len(expansion["groups"][0]["context_paths"]), 64)
+        self.assertIn("public.h", expansion["groups"][0]["context_paths"])
+        self.assertEqual(expansion["context_budget"]["omitted_file_count"], 37)
+        self.assertNotIn("tcp.c", expansion["groups"][0]["context_paths"])
+
     def test_target_scope_can_select_tls_without_forcing_other_protocol_functions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
