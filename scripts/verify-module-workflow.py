@@ -24,8 +24,8 @@ class SourceFirstWorkflowAcceptance(unittest.TestCase):
             "groups": [
                 {
                     "repo_id": "repo-a",
-                    "code_paths": [r"src\\driver.c", "src/driver.c"],
-                    "context_paths": [r"include\\driver.h"],
+                    "code_paths": [r"src\driver.c", "src/driver.c"],
+                    "context_paths": [r"include\driver.h"],
                 }
             ]
         }
