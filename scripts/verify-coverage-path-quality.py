@@ -32,7 +32,7 @@ class CoveragePathAcceptance(unittest.TestCase):
             {
                 "coverage_type": "function",
                 "module": "tls",
-                "path": r"src\\tls.c",
+                "path": r"src\tls.c",
                 "function": "handshake",
                 "count": 0,
             },
