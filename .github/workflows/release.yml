@@ -5,8 +5,10 @@ on:
   push:
     branches:
       - feat/module-analysis-five-stages
+      - langgraph
     paths:
       - .github/module-analysis-build-trigger
+      - .github/langgraph-build-trigger
   workflow_dispatch:
     inputs:
       channel:
