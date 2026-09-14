@@ -8,12 +8,34 @@ that are actually shipped in pangea-agent.
 from __future__ import annotations
 
 import unittest
+import json
+import tempfile
+from pathlib import Path
+from pangea_agent.cli.source_first_api import _plan_diagnostics
+from pangea_agent.models.source_first import NotesResult, NoteRecord, SourceBinding
 
 from pangea_agent.graph.graph import graph
 from pangea_agent.graph.nodes import source_first
 
 
 class SourceFirstWorkflowAcceptance(unittest.TestCase):
+    def test_target_scope_can_select_tls_without_forcing_other_protocol_functions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "inputs").mkdir()
+            regions = [dict(region_id=name, repo_id="repo", path="tcp.c", kind="function") for name in ("tls", "crc")]
+            (root / "inputs" / "source-index.json").write_text(json.dumps({"files": [{"repo_id": "repo", "path": "tcp.c", "regions": regions}]}), encoding="utf-8")
+            result = NotesResult(binding=SourceBinding(data_root=directory, run_id="run", action_id="planning", task_id="worker"), revision=1,
+                records=[NoteRecord(record_id="p1", kind="unit_plan", created_revision=1, body={"unit_id": "tls", "owned_regions": ["tls"]})])
+            task = {"owned_scope_paths": [{"repo_id": "repo", "path": "tcp.c"}]}
+            self.assertFalse(_plan_diagnostics(root, task, result)["ready"])
+            task["scope_policy"] = "target-first-v1"
+            diagnostic = _plan_diagnostics(root, task, result)
+            self.assertTrue(diagnostic["ready"])
+            self.assertEqual(diagnostic["unassigned_owned_regions"], ["crc"])
+            result.records[0].body["owned_regions"] = ["unknown"]
+            self.assertFalse(_plan_diagnostics(root, task, result)["ready"])
+
     def test_graph_and_source_first_runtime_are_importable(self):
         self.assertIsNotNone(graph)
         for name in ("_safe_key", "_all_scope_paths", "_scope_paths"):
