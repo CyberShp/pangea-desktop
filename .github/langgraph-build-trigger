@@ -1,1 +1,1 @@
-2026-09-15: bounded three-worker correction, original-session continuation, executable cases and explicit partial delivery
+2026-09-16: fix packaged Cordis integration execution-event dependency
