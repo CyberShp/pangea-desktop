@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { copyFile, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -9,6 +8,7 @@ import { stagePortablePackage, type StagedPortablePackage } from './portable-pac
 import { isPortablePatchArchive, stagePortablePatch, type StagedPortablePatch } from './portable-patch-validator'
 import type { PortableUpdateConfig } from './portable-update'
 import { initialUpdateStatus, reduceUpdateStatus, type UpdateStateEvent } from './update-state'
+import { launchPortableHelper } from './launch-portable-helper'
 
 interface LoadedUpdateConfig {
   publicKeyPem: string
@@ -163,20 +163,7 @@ async function launchPortableUpdateHelper(imported: StagedImport): Promise<void>
     log_path: join(updateRoot, 'apply-update.log')
   }, null, 2), 'utf8')
 
-  const child = spawn('powershell.exe', [
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-Sta', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass',
-    '-File', helperPath, '-PlanPath', planPath
-  ], {
-    cwd: updateRoot,
-    detached: true,
-    windowsHide: true,
-    stdio: 'ignore'
-  })
-  await new Promise<void>((resolve, reject) => {
-    child.once('spawn', resolve)
-    child.once('error', reject)
-  })
-  child.unref()
+  await launchPortableHelper(helperPath, planPath)
 }
 
 function restoreLastUpdateFailure(): void {

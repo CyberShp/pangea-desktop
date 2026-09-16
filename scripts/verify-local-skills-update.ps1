@@ -5,9 +5,10 @@ $Tokens = $null
 $ParseErrors = $null
 $Ast = [System.Management.Automation.Language.Parser]::ParseFile($Updater, [ref]$Tokens, [ref]$ParseErrors)
 if ($ParseErrors.Count) { throw ($ParseErrors | Out-String) }
-$Function = $Ast.Find({ param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq 'Copy-LocalSkills' }, $true)
+$Function = $Ast.Find({ param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq 'Copy-PortableUserData' }, $true)
 if (-not $Function) { throw 'Migration helper missing' }
 Invoke-Expression $Function.Extent.Text
+function Write-UpdateLog { param([string]$Message) }
 $Root = Join-Path ([System.IO.Path]::GetTempPath()) ('pangea-skills-' + [guid]::NewGuid())
 try {
   $Old = Join-Path $Root 'old'
@@ -16,13 +17,13 @@ try {
   New-Item -ItemType Directory -Path $Private -Force | Out-Null
   New-Item -ItemType Directory -Path $Candidate -Force | Out-Null
   Set-Content -LiteralPath (Join-Path $Private 'coverage_query.py') -Value '# synthetic only'
-  Copy-LocalSkills $Old $Candidate
+  Copy-PortableUserData $Old $Candidate
   $Copied = Join-Path $Candidate 'local-skills\coverage-query\scripts\coverage_query.py'
   if (-not (Test-Path -LiteralPath $Copied)) { throw 'Full update lost private Skill' }
   if (-not (Test-Path -LiteralPath (Join-Path $Private 'coverage_query.py'))) { throw 'Rollback input was moved' }
   $Backup = Join-Path $Root 'backup'
   Move-Item -LiteralPath $Old -Destination $Backup
-  Copy-LocalSkills $Backup $Candidate
+  Copy-PortableUserData $Backup $Candidate
   if ((Get-Content -LiteralPath $Copied -Raw).Trim() -ne '# synthetic only') { throw 'Patch update changed private Skill' }
   Remove-Item -LiteralPath $Candidate -Recurse -Force
   Move-Item -LiteralPath $Backup -Destination $Old

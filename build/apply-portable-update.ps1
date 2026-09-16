@@ -4,7 +4,7 @@ param([Parameter(Mandatory = $true)][string]$PlanPath)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$Plan = Get-Content $PlanPath -Raw | ConvertFrom-Json
+$Plan = Get-Content -LiteralPath $PlanPath -Raw | ConvertFrom-Json
 if ($Plan.schema_version -notin @(1, 2)) { throw 'Unsupported portable update plan.' }
 
 $InstallRoot = [System.IO.Path]::GetFullPath([string]$Plan.install_root)
@@ -26,13 +26,16 @@ $UpdateForm = $null
 $UpdateLabel = $null
 $UpdateProgress = $null
 
-function Copy-LocalSkills([string]$PreviousRoot, [string]$CandidateRoot) {
-  # Copy rather than move: rollback still owns the original private Skill.
-  $LocalSkills = Join-Path $PreviousRoot 'local-skills'
-  if (Test-Path -LiteralPath $LocalSkills -PathType Container) {
-    $CandidateSkills = Join-Path $CandidateRoot 'local-skills'
-    if (Test-Path -LiteralPath $CandidateSkills) { Remove-Item -LiteralPath $CandidateSkills -Recurse -Force }
-    Copy-Item -LiteralPath $LocalSkills -Destination $CandidateSkills -Recurse -Force
+function Copy-PortableUserData([string]$PreviousRoot, [string]$CandidateRoot) {
+  # Keep the original intact until the new application reports healthy.
+  foreach ($Name in @('local-skills', 'launch-root')) {
+    $Source = Join-Path $PreviousRoot $Name
+    if (Test-Path -LiteralPath $Source -PathType Container) {
+      $Target = Join-Path $CandidateRoot $Name
+      if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force }
+      Copy-Item -LiteralPath $Source -Destination $Target -Recurse -Force
+      Write-UpdateLog "preserved user directory: $Name"
+    }
   }
 }
 
@@ -42,7 +45,7 @@ function Write-UpdateLog {
     $Directory = [System.IO.Path]::GetDirectoryName($LogPath)
     New-Item $Directory -ItemType Directory -Force | Out-Null
     $Line = "$(Get-Date -Format o) $Message"
-    Add-Content -Path $LogPath -Value $Line -Encoding UTF8
+    Add-Content -LiteralPath $LogPath -Value $Line -Encoding UTF8
   } catch {
     # Logging must never prevent the application from being restored.
   }
@@ -68,7 +71,7 @@ function Write-UpdateResult {
       $Json,
       (New-Object System.Text.UTF8Encoding($false))
     )
-    Move-Item $TemporaryPath $ResultPath -Force
+    Move-Item -LiteralPath $TemporaryPath $ResultPath -Force
   } catch {
     Write-UpdateLog "could not persist update result: $($_.Exception.Message)"
   }
@@ -89,7 +92,7 @@ function Open-UpdateWindow {
     $script:UpdateForm.ControlBox = $false
     $script:UpdateForm.BackColor = [System.Drawing.Color]::White
     $script:UpdateForm.TopMost = $true
-    if (Test-Path $InstalledExecutable -PathType Leaf) {
+    if (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf) {
       $script:UpdateForm.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($InstalledExecutable)
     }
 
@@ -127,6 +130,7 @@ function Open-UpdateWindow {
 
 function Set-UpdateStage {
   param([string]$Message, [int]$Percent)
+  Write-UpdateLog "$Percent% $Message"
   if ($null -eq $script:UpdateForm -or $script:UpdateForm.IsDisposed) { return }
   $script:UpdateLabel.Text = $Message
   $script:UpdateProgress.Value = [Math]::Max(0, [Math]::Min(100, $Percent))
@@ -211,10 +215,13 @@ function Apply-VerifiedPatch {
     if ([string]$TargetManifest.version -ne $ExpectedVersion) { throw 'Patch target manifest version is invalid.' }
     if ([string]$TargetManifest.channel -ne [string]$Plan.package_channel) { throw 'Patch target manifest channel is invalid.' }
 
+    Write-UpdateLog "indexing $($TargetManifest.files.Count) target files and $($Patch.files.Count) patch files"
+    $TargetFiles = @{}
+    foreach ($File in $TargetManifest.files) { $TargetFiles[([string]$File.path).ToLowerInvariant()] = $File }
     $Payload = @{}
     foreach ($File in $Patch.files) {
       $Payload[([string]$File.path).ToLowerInvariant()] = $File
-      $Target = @($TargetManifest.files | Where-Object { ([string]$_.path).ToLowerInvariant() -eq ([string]$File.path).ToLowerInvariant() })[0]
+      $Target = $TargetFiles[([string]$File.path).ToLowerInvariant()]
       if ($null -eq $Target -or [long]$Target.size -ne [long]$File.size -or ([string]$Target.sha256) -ne ([string]$File.sha256)) {
         throw "Patch file does not match target manifest: $($File.path)"
       }
@@ -223,6 +230,7 @@ function Apply-VerifiedPatch {
     }
 
     New-Item $Destination -ItemType Directory -Force | Out-Null
+    $Completed = 0
     foreach ($File in $TargetManifest.files) {
       $Relative = [string]$File.path
       $TargetPath = Join-Path $Destination ($Relative.Replace('/', '\'))
@@ -231,13 +239,17 @@ function Apply-VerifiedPatch {
         Extract-ZipEntry $Zip ("payload/" + $Relative) $TargetPath
       } else {
         $BasePath = Join-Path $BaseRoot ($Relative.Replace('/', '\'))
-        if (-not (Test-Path $BasePath -PathType Leaf)) { throw "Base package is missing unchanged file: $Relative" }
+        if (-not (Test-Path -LiteralPath $BasePath -PathType Leaf)) { throw "Base package is missing unchanged file: $Relative" }
         $Parent = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($TargetPath))
         New-Item $Parent -ItemType Directory -Force | Out-Null
-        Copy-Item $BasePath $TargetPath -Force
+        Copy-Item -LiteralPath $BasePath -Destination $TargetPath -Force
       }
-      if ((Get-Item $TargetPath).Length -ne [long]$File.size) { throw "Patched file size mismatch: $Relative" }
-      if ((Get-FileHash $TargetPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne ([string]$File.sha256)) { throw "Patched file hash mismatch: $Relative" }
+      if ((Get-Item -LiteralPath $TargetPath).Length -ne [long]$File.size) { throw "Patched file size mismatch: $Relative" }
+      if ((Get-FileHash -LiteralPath $TargetPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne ([string]$File.sha256)) { throw "Patched file hash mismatch: $Relative" }
+      $Completed++
+      if ($Completed % 500 -eq 0 -or $Completed -eq $TargetManifest.files.Count) {
+        Set-UpdateStage "Verified $Completed / $($TargetManifest.files.Count) files" (42 + [int](24 * $Completed / $TargetManifest.files.Count))
+      }
     }
     Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json' (Join-Path $Destination 'resources\update\pangea-package-manifest.json')
     Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json.sig' (Join-Path $Destination 'resources\update\pangea-package-manifest.json.sig')
@@ -254,6 +266,7 @@ $Swapped = $false
 $NewProcess = $null
 
 Open-UpdateWindow
+[System.IO.File]::WriteAllText("$PlanPath.ready", 'ready')
 
 try {
   Write-UpdateLog "waiting for PANGEA Desktop process $ParentPid"
@@ -267,13 +280,13 @@ try {
   if ([string]::IsNullOrWhiteSpace($InstallParent) -or $InstallRoot -eq [System.IO.Path]::GetPathRoot($InstallRoot)) {
     throw 'The portable application directory is unsafe to replace.'
   }
-  if (-not (Test-Path $PackagePath -PathType Leaf)) { throw 'The downloaded update package is missing.' }
-  if ($ExpectedSize -le 0 -or (Get-Item $PackagePath).Length -ne $ExpectedSize) {
+  if (-not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) { throw 'The downloaded update package is missing.' }
+  if ($ExpectedSize -le 0 -or (Get-Item -LiteralPath $PackagePath).Length -ne $ExpectedSize) {
     throw 'The downloaded update package size no longer matches the signed release.'
   }
   if ($ExpectedSha256 -notmatch '^[0-9a-f]{64}$') { throw 'The expected update hash is invalid.' }
   Set-UpdateStage 'Verifying the update package...' 18
-  $ActualSha256 = (Get-FileHash $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $ActualSha256 = (Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($ActualSha256 -ne $ExpectedSha256) {
     throw 'The downloaded update package no longer matches the signed release.'
   }
@@ -285,13 +298,13 @@ try {
   if ($PackageType -eq 'patch') {
     if ([string]::IsNullOrWhiteSpace($ExpectedBaseVersion)) { throw 'Patch base version is missing.' }
     $BaseManifestPath = Join-Path $InstallRoot 'resources\update\pangea-package-manifest.json'
-    if (-not (Test-Path $BaseManifestPath -PathType Leaf)) { throw 'Installed package manifest is missing.' }
-    $BaseManifest = Get-Content $BaseManifestPath -Raw | ConvertFrom-Json
+    if (-not (Test-Path -LiteralPath $BaseManifestPath -PathType Leaf)) { throw 'Installed package manifest is missing.' }
+    $BaseManifest = Get-Content -LiteralPath $BaseManifestPath -Raw | ConvertFrom-Json
     if ([string]$BaseManifest.version -ne $ExpectedBaseVersion) {
       throw "Installed version $($BaseManifest.version) does not match patch base $ExpectedBaseVersion."
     }
-    if (Test-Path $BackupRoot) { Remove-Item $BackupRoot -Recurse -Force }
-    Move-Item $InstallRoot $BackupRoot
+    if (Test-Path -LiteralPath $BackupRoot) { Remove-Item -LiteralPath $BackupRoot -Recurse -Force }
+    Move-Item -LiteralPath $InstallRoot $BackupRoot
     $OriginalMoved = $true
     Apply-VerifiedPatch $PackagePath $BackupRoot $CandidateRoot
   } elseif ($PackageType -eq 'full') {
@@ -301,31 +314,31 @@ try {
   }
   $CandidateExecutable = Join-Path $CandidateRoot $ExecutableName
   $CandidateManifest = Join-Path $CandidateRoot 'resources\pangea-manifest.json'
-  if (-not (Test-Path $CandidateExecutable -PathType Leaf)) {
+  if (-not (Test-Path -LiteralPath $CandidateExecutable -PathType Leaf)) {
     throw "Updated executable is missing: $ExecutableName"
   }
-  if (-not (Test-Path $CandidateManifest -PathType Leaf)) {
+  if (-not (Test-Path -LiteralPath $CandidateManifest -PathType Leaf)) {
     throw 'Updated component manifest is missing.'
   }
-  $Manifest = Get-Content $CandidateManifest -Raw | ConvertFrom-Json
+  $Manifest = Get-Content -LiteralPath $CandidateManifest -Raw | ConvertFrom-Json
   if ([string]$Manifest.product.version -ne $ExpectedVersion) {
     throw "Updated product version does not match $ExpectedVersion."
   }
 
   $PreviousRoot = if ($OriginalMoved) { $BackupRoot } else { $InstallRoot }
-  Copy-LocalSkills $PreviousRoot $CandidateRoot
+  Copy-PortableUserData $PreviousRoot $CandidateRoot
 
   Set-UpdateStage 'Replacing application files...' 68
   if (-not $OriginalMoved) {
-    if (Test-Path $BackupRoot) { Remove-Item $BackupRoot -Recurse -Force }
-    Move-Item $InstallRoot $BackupRoot
+    if (Test-Path -LiteralPath $BackupRoot) { Remove-Item -LiteralPath $BackupRoot -Recurse -Force }
+    Move-Item -LiteralPath $InstallRoot $BackupRoot
     $OriginalMoved = $true
   }
-  Move-Item $CandidateRoot $InstallRoot
+  Move-Item -LiteralPath $CandidateRoot $InstallRoot
   $Swapped = $true
 
   $UpdatedExecutable = Join-Path $InstallRoot $ExecutableName
-  Remove-Item $HealthMarker -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $HealthMarker -Force -ErrorAction SilentlyContinue
   $HealthArgument = "--pangea-update-health=`"$HealthMarker`""
   Set-UpdateStage 'Starting the new version...' 82
   $NewProcess = Start-Process -FilePath $UpdatedExecutable `
@@ -335,11 +348,11 @@ try {
   Set-UpdateStage 'Checking that the new version is ready...' 92
   $Deadline = (Get-Date).AddSeconds(150)
   while ((Get-Date) -lt $Deadline) {
-    if (Test-Path $HealthMarker -PathType Leaf) {
+    if (Test-Path -LiteralPath $HealthMarker -PathType Leaf) {
       Write-UpdateLog "PANGEA Desktop $ExpectedVersion reported healthy"
       Write-UpdateResult 'success' 'The update completed successfully.'
-      if (Test-Path $BackupRoot) {
-        Remove-Item $BackupRoot -Recurse -Force -ErrorAction SilentlyContinue
+      if (Test-Path -LiteralPath $BackupRoot) {
+        Remove-Item -LiteralPath $BackupRoot -Recurse -Force -ErrorAction SilentlyContinue
       }
       Set-UpdateStage 'Update complete. PANGEA Desktop has restarted.' 100
       Start-Sleep -Milliseconds 700
@@ -363,24 +376,24 @@ try {
     Start-Sleep -Milliseconds 500
   }
   if ($Swapped) {
-    if (Test-Path $InstallRoot) { Move-Item $InstallRoot $FailedRoot }
-    if (Test-Path $BackupRoot) {
-      Move-Item $BackupRoot $InstallRoot
+    if (Test-Path -LiteralPath $InstallRoot) { Move-Item -LiteralPath $InstallRoot $FailedRoot }
+    if (Test-Path -LiteralPath $BackupRoot) {
+      Move-Item -LiteralPath $BackupRoot $InstallRoot
       Write-UpdateLog 'previous PANGEA Desktop version restored'
     }
-  } elseif ($OriginalMoved -and -not (Test-Path $InstallRoot) -and (Test-Path $BackupRoot)) {
-    Move-Item $BackupRoot $InstallRoot
+  } elseif ($OriginalMoved -and -not (Test-Path -LiteralPath $InstallRoot) -and (Test-Path -LiteralPath $BackupRoot)) {
+    Move-Item -LiteralPath $BackupRoot $InstallRoot
     Write-UpdateLog 'previous PANGEA Desktop directory restored'
   }
-  if (Test-Path $CandidateRoot) {
-    Remove-Item $CandidateRoot -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $CandidateRoot) {
+    Remove-Item -LiteralPath $CandidateRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
-  if (Test-Path $FailedRoot) {
-    Remove-Item $FailedRoot -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $FailedRoot) {
+    Remove-Item -LiteralPath $FailedRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
 
   Write-UpdateResult 'failed' $FailureMessage
-  if (Test-Path $InstalledExecutable -PathType Leaf) {
+  if (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf) {
     Start-Process -FilePath $InstalledExecutable | Out-Null
     Write-UpdateLog 'working PANGEA Desktop version restarted'
   }

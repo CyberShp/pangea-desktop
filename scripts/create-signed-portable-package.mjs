@@ -82,7 +82,11 @@ await writeFile(signaturePath, `${signature}\n`, 'utf8')
 
 await mkdir(path.dirname(outputPath), { recursive: true })
 await rm(outputPath, { force: true })
-await createZip(appDirectory, outputPath)
+await createZip(appDirectory, outputPath, [
+  ...files.map((file) => file.path),
+  'resources/update/pangea-package-manifest.json',
+  'resources/update/pangea-package-manifest.json.sig'
+])
 console.log(`Signed portable package created at ${outputPath}`)
 
 async function listFiles(root) {
@@ -93,6 +97,8 @@ async function listFiles(root) {
     for await (const entry of handle) entries.push(entry)
     entries.sort((left, right) => left.name.localeCompare(right.name, 'en'))
     for (const entry of entries) {
+      // Python rewrites these caches on startup. Ship source, not mutable cache files.
+      if (entry.isDirectory() && entry.name === '__pycache__') continue
       const entryPath = path.join(directory, entry.name)
       if (entry.isDirectory()) await visit(entryPath)
       else if (entry.isFile()) files.push(entryPath)
@@ -103,7 +109,7 @@ async function listFiles(root) {
   return files
 }
 
-async function createZip(sourceDirectory, destination) {
+async function createZip(sourceDirectory, destination, relativePaths) {
   await new Promise((resolve, reject) => {
     const output = createWriteStream(destination, { flags: 'wx' })
     const archive = new ZipArchive({ zlib: { level: 9 } })
@@ -111,7 +117,9 @@ async function createZip(sourceDirectory, destination) {
     output.once('error', reject)
     archive.once('error', reject)
     archive.pipe(output)
-    archive.directory(sourceDirectory, false)
+    for (const relative of relativePaths) {
+      archive.file(path.join(sourceDirectory, ...relative.split('/')), { name: relative })
+    }
     void archive.finalize()
   })
 }

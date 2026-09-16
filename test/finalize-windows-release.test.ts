@@ -29,6 +29,9 @@ describe('signed portable Windows package', () => {
     const privateKeyPath = path.join(root, 'update-private.pem')
     const outputPath = path.join(root, `pangea-desktop-${packageVersion}-windows-x64-portable.zip`)
     await mkdir(updateDirectory, { recursive: true })
+    const cacheDirectory = path.join(appDirectory, 'resources', 'pangea-python', '__pycache__')
+    await mkdir(cacheDirectory, { recursive: true })
+    await writeFile(path.join(cacheDirectory, 'module.cpython-312.pyc'), 'mutable Python bytecode')
     await Promise.all([
       writeFile(path.join(appDirectory, 'PANGEA Desktop.exe'), 'desktop executable'),
       writeFile(path.join(appDirectory, 'resources', 'pangea-manifest.json'), JSON.stringify({
@@ -73,9 +76,11 @@ describe('signed portable Windows package', () => {
     expect(staged.manifest.components?.python).toEqual({ version: '3.12.10' })
     expect(staged.manifest.files.map((file) => file.path)).toContain('PANGEA Desktop.exe')
     expect(staged.manifest.files.some((file) => file.path.includes('update-private'))).toBe(false)
+    expect(staged.manifest.files.some((file) => file.path.includes('__pycache__/'))).toBe(false)
     expect(staged.packageSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(lastProgress).toBe(100)
 
+    await rm(cacheDirectory, { recursive: true, force: true })
     await writeFile(path.join(appDirectory, 'PANGEA Desktop.exe'), 'modified executable')
     const modifiedPackage = path.join(root, 'modified.zip')
     await zipDirectory(appDirectory, modifiedPackage)
@@ -95,8 +100,8 @@ describe('signed portable Windows package', () => {
     expect(manager).toContain('expected_size: imported.packageSize')
     expect(manager).toContain('expected_sha256: imported.packageSha256')
     expect(manager).toContain('result_path: resultPath')
-    expect(helper).toContain('Get-FileHash $PackagePath -Algorithm SHA256')
-    expect(helper).toContain('Move-Item $BackupRoot $InstallRoot')
+    expect(helper).toContain('Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256')
+    expect(helper).toContain('Move-Item -LiteralPath $BackupRoot $InstallRoot')
     expect(helper).toContain("Write-UpdateResult 'failed' $FailureMessage")
     expect(helper).toContain('Start-Process -FilePath $InstalledExecutable')
     expect(helper).toContain('New-Object System.Windows.Forms.ProgressBar')
