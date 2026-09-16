@@ -11,6 +11,10 @@ import { findBootFailureText } from './boot-failure'
 import { mountWindowsTitlebarLayout } from './windows-titlebar'
 import { createDesktopBridge } from './desktop-bridge'
 
+import { installHistoryNavigationGuard } from './history-navigation'
+
+installHistoryNavigationGuard(window)
+
 const ROOT_ID = 'dsh-desktop-update-root'
 const MOBILE_BUTTON_ID = 'dsh-desktop-mobile-button'
 const SAFE_MODE_BANNER_ID = 'dsh-desktop-safe-mode-banner'

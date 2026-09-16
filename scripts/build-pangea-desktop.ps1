@@ -227,6 +227,7 @@ $Requirements = Join-Path $ProjectRoot 'build/pangea-runtime-requirements.txt'
 $SitePackages = Join-Path $PythonRoot 'Lib/site-packages'
 $PipBootstrap = "import sys; sys.path.insert(0, sys.argv.pop(1)); from pip._internal.cli.main import main; raise SystemExit(main())"
 Invoke-Checked $Python @(
+  '-X', 'utf8',
   '-c', $PipBootstrap, $PipWheel, 'install', '--disable-pip-version-check', '--no-compile',
   '--only-binary=:all:', '--target', $SitePackages, '-r', $Requirements
 )
@@ -237,18 +238,23 @@ $PreviousPythonPath = $env:PYTHONPATH
 try {
   $env:PYTHONPATH = Join-Path $AgentRuntime 'src'
   Invoke-Checked $Python @(
+  '-X', 'utf8',
     '-m', 'pangea_agent.cli.main', 'system', 'capabilities', '--data-root', $SmokeData
   ) $AgentRuntime
   Invoke-Checked $Python @(
+  '-X', 'utf8',
     (Join-Path $ProjectRoot 'scripts/verify-source-snapshot.py')
   ) $AgentRuntime
   Invoke-Checked $Python @(
+  '-X', 'utf8',
     (Join-Path $ProjectRoot 'scripts/verify-module-workflow.py')
   ) $AgentRuntime
   Invoke-Checked $Python @(
+  '-X', 'utf8',
     (Join-Path $ProjectRoot 'scripts/verify-coverage-path-quality.py')
   ) $AgentRuntime
   Invoke-Checked $Python @(
+  '-X', 'utf8',
     (Join-Path $ProjectRoot 'scripts/verify-input-materials.py')
   ) $AgentRuntime
 } finally {

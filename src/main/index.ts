@@ -506,7 +506,9 @@ async function openHarness(
       if (snapshot.phase !== 'ready' || snapshot.url !== url) return
       throw error
     }
-    if (navigationVersion !== mainWindowNavigationVersion) return
+    if (navigationVersion !== mainWindowNavigationVersion || window.isDestroyed()) return
+    // Splash/recovery pages are bootstrap states, never valid history destinations.
+    window.webContents.navigationHistory.clear()
   }
   if (runtime.snapshot().url !== url || window.isDestroyed()) return
   await syncNativeTheme(window)
