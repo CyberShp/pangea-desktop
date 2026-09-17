@@ -253,10 +253,11 @@ function Resolve-UpdateDirectoryLocks {
     $Holders = @(Get-UpdateLockHolders $Root)
     $ServiceIds = @(Get-CimInstance Win32_Service -Filter "State='Running'" -ErrorAction Stop | ForEach-Object { [int]$_.ProcessId })
     Initialize-HandleInspector
+    $ManualHolders = @()
     foreach ($Holder in $Holders) {
       $Policy = Get-UpdateHolderPolicy $Holder $script:OwnedUpdateProcesses $ServiceIds $script:ProtectedUpdateProcesses
       Write-UpdateLog "directory handle: $($Holder.Name) pid=$($Holder.Id); policy=$Policy"
-      if ($Policy -eq 'protected') { continue }
+      if ($Policy -eq 'protected') { $ManualHolders += "$($Holder.Name) (PID $($Holder.Id))"; continue }
       if ($Policy -eq 'confirm' -and -not (Confirm-UpdateHolderStop $Holder)) { continue }
       # Re-scan before termination: it must still hold this installation, and
       # both PID and creation time must still match the original observation.
@@ -267,6 +268,10 @@ function Resolve-UpdateDirectoryLocks {
       if ((Get-UpdateHolderPolicy $Fresh $script:OwnedUpdateProcesses $FreshServices $script:ProtectedUpdateProcesses) -eq 'protected') { continue }
       $Stopped = [PangeaUpdateHandles]::Stop([int]$Fresh.Id, [long]$Fresh.Created)
       Write-UpdateLog "release directory handle: $($Fresh.Name) pid=$($Fresh.Id); stopped=$Stopped"
+    }
+    if ($ManualHolders.Count) {
+      Add-Type -AssemblyName System.Windows.Forms
+      [Windows.Forms.MessageBox]::Show(("These processes hold the installation directory and will not be terminated by the updater:`n" + ($ManualHolders -join "`n") + "`n`nClose other Desktop instances or user applications normally. System, security and unknown processes require local investigation. No information is uploaded."), 'PANGEA update - manual action needed', 'OK', 'Information') | Out-Null
     }
     if (-not $Holders.Count) { Write-UpdateLog 'No inspectable directory holders found; permissions or protected/inaccessible processes may prevent rename.' }
   } catch { Write-UpdateLog "local lock resolution: $($_.Exception.Message)" }

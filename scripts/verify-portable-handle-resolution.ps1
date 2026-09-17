@@ -60,6 +60,17 @@ try {
   $HolderProcess.Refresh()
   if (-not $HolderProcess.HasExited -or -not (Test-Path -LiteralPath $Destination)) { throw 'Confirmed holder cleanup did not release directory rename.' }
   Write-Output 'PASS: confirmed holder cleanup releases actual directory rename'
+  $HolderProcess.Dispose(); $HolderProcess=$null
+  Move-UpdateDirectory $Destination $Installation
+  $NodePath=(Get-Command node.exe).Source
+  $HolderProcess=Start-Process $NodePath -ArgumentList @('-e','"setTimeout(()=>{},120000)"') -WorkingDirectory $Installation -WindowStyle Hidden -PassThru
+  $script:OwnedUpdateProcesses=@(Get-OwnedUpdateProcesses $PID ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName))
+  if (-not @($script:OwnedUpdateProcesses | Where-Object { $_.Id -eq $HolderProcess.Id }).Count) { throw 'Live descendant ownership snapshot missed Node.' }
+  function Confirm-UpdateHolderStop { param($Holder) throw 'Owned idle descendant should not require external confirmation.' }
+  Move-UpdateDirectory $Installation $Destination -TimeoutSeconds 1 -ResolveLocks
+  $HolderProcess.Refresh()
+  if (-not $HolderProcess.HasExited -or -not (Test-Path -LiteralPath $Destination)) { throw 'Owned runtime cleanup failed.' }
+  Write-Output 'PASS: live ownership snapshot automatically releases this Desktop runtime descendant'
 } finally {
   if ($HolderProcess) { $HolderProcess.Refresh(); if (-not $HolderProcess.HasExited) { $HolderProcess.Kill(); $HolderProcess.WaitForExit() }; $HolderProcess.Dispose() }
   if (Test-Path -LiteralPath $LogPath) { Get-Content -LiteralPath $LogPath | Write-Output }
