@@ -5,6 +5,18 @@ import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { expect, it } from 'vitest'
 
+it.skipIf(process.platform !== 'win32')('retries real directory locks and preserves the installation on timeout', () => {
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    path.resolve('scripts/verify-portable-update-locks.ps1')], {
+    encoding: 'utf8', timeout: 45_000,
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'psmodulepath'))
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(result.stdout).toContain('PASS: persistent directory lock')
+  expect(result.stdout).toContain('PASS: transient directory lock')
+  expect(result.stdout).toContain('PASS: rollback rename')
+}, 50_000)
+
 it.skipIf(process.platform !== 'win32')('executes the Windows helper after its launching process exits', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'pangea-helper-'))
   try {

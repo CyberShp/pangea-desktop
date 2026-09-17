@@ -51,6 +51,49 @@ function Write-UpdateLog {
   }
 }
 
+function Write-InstallationProcesses {
+  param([string]$Root)
+  # These are possible holders, not proof of a file lock. Never kill them.
+  $Prefix = $Root.TrimEnd('\') + '\'
+  Get-Process | ForEach-Object {
+    try {
+      if ($_.Path -and $_.Path.StartsWith($Prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-UpdateLog "running installation process: $($_.ProcessName) pid=$($_.Id)"
+      }
+    } catch { }
+  }
+}
+
+function Move-UpdateDirectory {
+  param([string]$Source, [string]$Destination, [int]$TimeoutSeconds = 30)
+  Write-UpdateLog "renaming directory: $Source -> $Destination"
+  $Deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $Attempt = 0
+  while ($true) {
+    # Directory.Move is a rename, never Move-Item's move-inside-existing-directory.
+    if (Test-Path -LiteralPath $Destination) { throw "Rename destination already exists: $Destination" }
+    try {
+      [System.IO.Directory]::Move($Source, $Destination)
+      return
+    } catch {
+      $Reason = $_.Exception.GetBaseException().Message
+      if (-not (Test-Path -LiteralPath $Source -PathType Container)) { throw }
+      if ($Attempt % 10 -eq 0) {
+        Write-UpdateLog "directory rename blocked; waiting for handles to close: $Reason"
+        Write-InstallationProcesses $Source
+      }
+      if ((Get-Date) -ge $Deadline) {
+        throw "Cannot rename installation directory '$Source' to '$Destination'. Close applications and terminals using this directory, or check its permissions. No processes were terminated. Details: $Reason"
+      }
+      $Attempt++
+      Start-Sleep -Milliseconds 500
+      if ($null -ne $script:UpdateForm -and -not $script:UpdateForm.IsDisposed) {
+        [System.Windows.Forms.Application]::DoEvents()
+      }
+    }
+  }
+}
+
 function Write-UpdateResult {
   param(
     [ValidateSet('success', 'failed')][string]$Status,
@@ -259,7 +302,7 @@ function Apply-VerifiedPatch {
 $Leaf = [System.IO.Path]::GetFileName($InstallRoot.TrimEnd('\'))
 $Nonce = [Guid]::NewGuid().ToString('N')
 $CandidateRoot = Join-Path $InstallParent "$Leaf.update-$Nonce"
-$BackupRoot = Join-Path $InstallParent "$Leaf.previous"
+$BackupRoot = Join-Path $InstallParent "$Leaf.previous-$Nonce"
 $FailedRoot = Join-Path $InstallParent "$Leaf.failed-$Nonce"
 $OriginalMoved = $false
 $Swapped = $false
@@ -271,7 +314,7 @@ Open-UpdateWindow
 try {
   Write-UpdateLog "waiting for PANGEA Desktop process $ParentPid"
   Set-UpdateStage 'Closing the current version...' 12
-  try { Wait-Process -Id $ParentPid -Timeout 120 -ErrorAction Stop } catch {
+  try { if ($ParentPid -gt 0) { Wait-Process -Id $ParentPid -Timeout 120 -ErrorAction Stop } } catch {
     if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
       throw 'PANGEA Desktop did not exit before the update timeout.'
     }
@@ -303,10 +346,8 @@ try {
     if ([string]$BaseManifest.version -ne $ExpectedBaseVersion) {
       throw "Installed version $($BaseManifest.version) does not match patch base $ExpectedBaseVersion."
     }
-    if (Test-Path -LiteralPath $BackupRoot) { Remove-Item -LiteralPath $BackupRoot -Recurse -Force }
-    Move-Item -LiteralPath $InstallRoot $BackupRoot
-    $OriginalMoved = $true
-    Apply-VerifiedPatch $PackagePath $BackupRoot $CandidateRoot
+    # Build and verify beside the installed version; keep it intact on failure.
+    Apply-VerifiedPatch $PackagePath $InstallRoot $CandidateRoot
   } elseif ($PackageType -eq 'full') {
     Expand-VerifiedArchive $PackagePath $CandidateRoot
   } else {
@@ -325,16 +366,12 @@ try {
     throw "Updated product version does not match $ExpectedVersion."
   }
 
-  $PreviousRoot = if ($OriginalMoved) { $BackupRoot } else { $InstallRoot }
-  Copy-PortableUserData $PreviousRoot $CandidateRoot
+  Copy-PortableUserData $InstallRoot $CandidateRoot
 
   Set-UpdateStage 'Replacing application files...' 68
-  if (-not $OriginalMoved) {
-    if (Test-Path -LiteralPath $BackupRoot) { Remove-Item -LiteralPath $BackupRoot -Recurse -Force }
-    Move-Item -LiteralPath $InstallRoot $BackupRoot
-    $OriginalMoved = $true
-  }
-  Move-Item -LiteralPath $CandidateRoot $InstallRoot
+  Move-UpdateDirectory $InstallRoot $BackupRoot
+  $OriginalMoved = $true
+  Move-UpdateDirectory $CandidateRoot $InstallRoot
   $Swapped = $true
 
   $UpdatedExecutable = Join-Path $InstallRoot $ExecutableName
@@ -370,30 +407,39 @@ try {
 } catch {
   $FailureMessage = $_.Exception.Message
   Write-UpdateLog "update failed: $FailureMessage"
+  Write-UpdateLog "failed operation: $($_.InvocationInfo.PositionMessage)"
   Set-UpdateStage 'Update incomplete. Restoring the working version...' 35
   if ($NewProcess -and -not $NewProcess.HasExited) {
     Stop-Process -Id $NewProcess.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
   }
-  if ($Swapped) {
-    if (Test-Path -LiteralPath $InstallRoot) { Move-Item -LiteralPath $InstallRoot $FailedRoot }
+  $Restored = -not $OriginalMoved
+  try {
+   if ($Swapped) {
+    if (Test-Path -LiteralPath $InstallRoot) { Move-UpdateDirectory $InstallRoot $FailedRoot }
     if (Test-Path -LiteralPath $BackupRoot) {
-      Move-Item -LiteralPath $BackupRoot $InstallRoot
+      Move-UpdateDirectory $BackupRoot $InstallRoot
+      $Restored = $true
       Write-UpdateLog 'previous PANGEA Desktop version restored'
     }
-  } elseif ($OriginalMoved -and -not (Test-Path -LiteralPath $InstallRoot) -and (Test-Path -LiteralPath $BackupRoot)) {
-    Move-Item -LiteralPath $BackupRoot $InstallRoot
+   } elseif ($OriginalMoved -and -not (Test-Path -LiteralPath $InstallRoot) -and (Test-Path -LiteralPath $BackupRoot)) {
+    Move-UpdateDirectory $BackupRoot $InstallRoot
+    $Restored = $true
     Write-UpdateLog 'previous PANGEA Desktop directory restored'
+   }
+  } catch {
+    $FailureMessage += " Rollback could not complete: $($_.Exception.Message). Original installation retained at '$BackupRoot'."
+    Write-UpdateLog $FailureMessage
   }
-  if (Test-Path -LiteralPath $CandidateRoot) {
+  if ($Restored -and (Test-Path -LiteralPath $CandidateRoot)) {
     Remove-Item -LiteralPath $CandidateRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
-  if (Test-Path -LiteralPath $FailedRoot) {
+  if ($Restored -and (Test-Path -LiteralPath $FailedRoot)) {
     Remove-Item -LiteralPath $FailedRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
 
   Write-UpdateResult 'failed' $FailureMessage
-  if (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf) {
+  if ($Restored -and (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf)) {
     Start-Process -FilePath $InstalledExecutable | Out-Null
     Write-UpdateLog 'working PANGEA Desktop version restarted'
   }

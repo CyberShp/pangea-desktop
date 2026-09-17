@@ -1,0 +1,25 @@
+name: Windows portable updater regression
+on:
+  workflow_dispatch:
+  push:
+    branches: [langgraph]
+    paths:
+      - build/apply-portable-update.ps1
+      - scripts/resume-portable-update.ps1
+      - scripts/verify-portable-update-locks.ps1
+      - scripts/verify-portable-patch-apply.ps1
+      - .github/workflows/portable-updater-tests.yml
+permissions:
+  contents: read
+jobs:
+  updater:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Windows PowerShell 5.1 directory locks and rollback rename
+        shell: powershell
+        run: ./scripts/verify-portable-update-locks.ps1
+      - name: Verify patch reconstruction and user data preservation
+        shell: powershell
+        run: ./scripts/verify-portable-patch-apply.ps1
