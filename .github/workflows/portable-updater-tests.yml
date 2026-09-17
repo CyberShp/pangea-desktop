@@ -8,6 +8,7 @@ on:
       - scripts/resume-portable-update.ps1
       - scripts/verify-portable-update-locks.ps1
       - scripts/verify-portable-patch-apply.ps1
+      - scripts/verify-portable-user-data.ps1
       - .github/workflows/portable-updater-tests.yml
 permissions:
   contents: read
@@ -23,3 +24,6 @@ jobs:
       - name: Verify patch reconstruction and user data preservation
         shell: powershell
         run: ./scripts/verify-portable-patch-apply.ps1
+      - name: Verify long repository paths, links and copy failures
+        shell: powershell
+        run: ./scripts/verify-portable-user-data.ps1

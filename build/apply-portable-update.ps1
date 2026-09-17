@@ -32,11 +32,40 @@ function Copy-PortableUserData([string]$PreviousRoot, [string]$CandidateRoot) {
     $Source = Join-Path $PreviousRoot $Name
     if (Test-Path -LiteralPath $Source -PathType Container) {
       $Target = Join-Path $CandidateRoot $Name
-      if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force }
-      Copy-Item -LiteralPath $Source -Destination $Target -Recurse -Force
+      if (Test-Path -LiteralPath $Target) { Remove-PortableDirectory $Target }
+      $CopyLog = "$LogPath.copy-$Name.log"
+      Write-UpdateLog "copying user directory: $Name; details: $CopyLog"
+      # PowerShell 5.1 Copy-Item can fail when the longer candidate path exceeds
+      # MAX_PATH. Robocopy supports long paths and preserves links without
+      # recursively expanding their targets (including repository link cycles).
+      & "$env:SystemRoot\System32\robocopy.exe" $Source $Target /E /COPY:DAT /DCOPY:DAT /SL /SJ /R:1 /W:1 /NP /NFL /NDL "/UNILOG:$CopyLog" | Out-Null
+      $CopyExit = $LASTEXITCODE
+      if ($CopyExit -lt 0 -or $CopyExit -ge 8) {
+        throw "User directory copy failed: $Name (robocopy exit $CopyExit). Original data is unchanged. Details: $CopyLog"
+      }
       Write-UpdateLog "preserved user directory: $Name"
     }
   }
+}
+
+function Remove-PortableDirectory {
+  param([string]$Directory)
+  # Windows rd supports extended paths and unlinks junctions instead of walking
+  # their targets. Pass the path through the environment, not cmd interpolation.
+  $FullPath = [IO.Path]::GetFullPath($Directory).TrimEnd('\')
+  if ($FullPath -eq [IO.Path]::GetPathRoot($FullPath).TrimEnd('\')) { throw 'Refusing to remove a volume root.' }
+  $ExtendedPath = if ($FullPath.StartsWith('\\')) { '\\?\UNC\' + $FullPath.Substring(2) } else { '\\?\' + $FullPath }
+  $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $StartInfo.FileName = "$env:SystemRoot\System32\cmd.exe"
+  $StartInfo.Arguments = '/d /v:off /c rd /s /q "%PANGEA_UPDATE_CLEANUP_PATH%"'
+  $StartInfo.EnvironmentVariables['PANGEA_UPDATE_CLEANUP_PATH'] = $ExtendedPath
+  $StartInfo.UseShellExecute = $false
+  $StartInfo.CreateNoWindow = $true
+  $Cleanup = [Diagnostics.Process]::Start($StartInfo)
+  try {
+    $Cleanup.WaitForExit()
+    if ($Cleanup.ExitCode -ne 0) { throw "Could not remove temporary update directory: $Directory" }
+  } finally { $Cleanup.Dispose() }
 }
 
 function Write-UpdateLog {
@@ -389,7 +418,7 @@ try {
       Write-UpdateLog "PANGEA Desktop $ExpectedVersion reported healthy"
       Write-UpdateResult 'success' 'The update completed successfully.'
       if (Test-Path -LiteralPath $BackupRoot) {
-        Remove-Item -LiteralPath $BackupRoot -Recurse -Force -ErrorAction SilentlyContinue
+        try { Remove-PortableDirectory $BackupRoot } catch { Write-UpdateLog $_.Exception.Message }
       }
       Set-UpdateStage 'Update complete. PANGEA Desktop has restarted.' 100
       Start-Sleep -Milliseconds 700
@@ -432,10 +461,10 @@ try {
     Write-UpdateLog $FailureMessage
   }
   if ($Restored -and (Test-Path -LiteralPath $CandidateRoot)) {
-    Remove-Item -LiteralPath $CandidateRoot -Recurse -Force -ErrorAction SilentlyContinue
+    try { Remove-PortableDirectory $CandidateRoot } catch { Write-UpdateLog $_.Exception.Message }
   }
   if ($Restored -and (Test-Path -LiteralPath $FailedRoot)) {
-    Remove-Item -LiteralPath $FailedRoot -Recurse -Force -ErrorAction SilentlyContinue
+    try { Remove-PortableDirectory $FailedRoot } catch { Write-UpdateLog $_.Exception.Message }
   }
 
   Write-UpdateResult 'failed' $FailureMessage

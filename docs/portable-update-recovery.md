@@ -10,6 +10,7 @@
 - 目录改名最多重试 30 秒。记录源、目标、系统错误和仍在安装目录中运行的进程；不强制结束这些进程。
 - 使用精确目录改名，拒绝已存在的目标，避免意外嵌套移动。每次备份使用独立名称，不删除之前失败留下的备份。
 - 回滚失败也保存升级结果和备份位置；未恢复成功时保留候选目录及备份，不冒充恢复成功。
+- 用户目录改用 Robocopy 复制，支持深层源码仓库路径，保留目录链接而不展开链接目标。任何复制失败都会中止切换，并在 `apply-update.log.copy-launch-root.log` 或 `apply-update.log.copy-local-skills.log` 保存完整系统错误。临时目录清理使用支持长路径、不会递归删除目录链接目标的 Windows `rd`。
 
 ## 为 1.0.3 恢复已导入的 1.0.4 补丁
 
@@ -32,3 +33,5 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\Agent\pangea-update-
 ## 验证
 
 `scripts/verify-portable-update-locks.ps1` 在 Windows 上建立真实目录句柄，验证持续占用时原目录不变、短暂占用释放后成功、目标存在时拒绝覆盖，以及回滚改名保留文件内容。`verify-portable-patch-apply.ps1` 验证补丁重建及 Run/skill 保留。专用 Windows CI 运行两者，Linux 上的单元测试不能替代该验证。
+
+`scripts/verify-portable-user-data.ps1` 另外验证超过 300 字符的仓库文件路径、Unicode/方括号文件名、空目录、目录链接、链接目标清理安全，以及文件被独占时拒绝继续升级并保留原数据。

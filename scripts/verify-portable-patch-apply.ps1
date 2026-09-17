@@ -51,3 +51,4 @@ try {
   if (-not $ResolvedRoot.StartsWith([System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()), [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe cleanup root' }
   Remove-Item -LiteralPath $ResolvedRoot -Recurse -Force
 }
+$global:LASTEXITCODE = 0
