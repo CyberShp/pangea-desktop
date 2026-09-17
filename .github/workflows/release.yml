@@ -1,5 +1,5 @@
 name: Build Windows package
-run-name: PANGEA Desktop ${{ inputs.channel || 'test' }} ${{ inputs.version || '1.0.3' }}
+run-name: PANGEA Desktop ${{ inputs.channel || 'test' }} ${{ inputs.version || '1.0.4' }}
 
 on:
   push:
@@ -22,7 +22,7 @@ on:
       version:
         description: Base version for test builds or exact version for releases (SemVer)
         required: true
-        default: 1.0.3
+        default: 1.0.4
         type: string
       patch_from_version:
         description: Optional exact version to generate a patch from (must be the immediately previous release)
@@ -56,7 +56,7 @@ jobs:
         shell: pwsh
         env:
           BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
-          REQUESTED_VERSION: ${{ inputs.version || '1.0.3' }}
+          REQUESTED_VERSION: ${{ inputs.version || '1.0.4' }}
           PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
           UPDATE_PRIVATE_KEY_B64: ${{ secrets.PANGEA_UPDATE_PRIVATE_KEY_B64 }}
         run: |
@@ -158,6 +158,19 @@ jobs:
           $PatchPath = Resolve-Path "./dist/$PatchName"
           $PatchHash = (Get-FileHash $PatchPath -Algorithm SHA256).Hash.ToLowerInvariant()
           Set-Content "$PatchPath.sha256" "$PatchHash  $PatchName" -Encoding ASCII
+
+      - name: Verify real incremental patch and existing Run architecture
+        if: github.event_name == 'workflow_dispatch' && inputs.patch_from_version != ''
+        shell: pwsh
+        timeout-minutes: 12
+        env:
+          PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
+        run: |
+          $PatchName = "pangea-desktop-$env:RELEASE_VERSION-from-$env:PATCH_FROM_VERSION-windows-x64.patch.zip"
+          ./scripts/verify-release-patch.ps1 `
+            -BaseDirectory ./.pangea-base/unpacked `
+            -TargetDirectory ./dist/win-unpacked `
+            -PatchPath "./dist/$PatchName"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4

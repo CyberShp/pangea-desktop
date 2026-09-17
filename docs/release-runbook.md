@@ -16,8 +16,8 @@ Keep `update-private.pem` and its passphrase in the build secret store. The buil
 The `Build Windows package` workflow is started manually with a SemVer package version. It builds the exact approved commits in `pangea.components.json` and records them in the package manifest. Their source branches are:
 
 - `dsh-desktop`: `main`
-- `dsh-pangea`: `codetalks-skill`
-- `pangea-agent`: `codetalks-skill`
+- `dsh-pangea`: `langgraph`
+- `pangea-agent`: `langgraph`
 
 Creating a package does not advance these component commits. Component upgrades are a separate maintenance operation: select the desired source commits, update `pangea.components.json`, run compatibility checks, and merge the selected `dsh-desktop` baseline into the product when that component is upgraded. Every imported package must have a version greater than the currently running application, and every release must use the same package key.
 
@@ -51,3 +51,30 @@ The first build that introduces patch support must be installed as a complete ZI
 5. After verification, choose **Restart and update**.
 
 Users handle one file only. Keep prior versioned ZIPs in the shared location when rollback or manual reinstallation may be needed.
+
+## 1.0.4 Archify repair (base release 1.0.3)
+
+Dispatch `release.yml` on `langgraph` with `channel=release`, `version=1.0.4`,
+`patch_from_version=1.0.3`. A push-triggered test build alone does not produce
+this stable patch. Keep the existing signing key. Release only if 1.0.4 has not
+already been published; never replace an existing stable version with new bytes.
+
+This repair consumes the existing source-first records and source manifest.
+It requires neither `内部索引/工作台投影.json` nor rerunning historical analysis.
+The Agent workflow and Run schema remain unchanged. Only derived Archify views
+are written. Existing codetalks projection-backed views remain supported.
+
+The release workflow now applies the actual signed release patch to its exact
+base package before uploading assets. It compares reconstructed program files
+against the independently built target manifest, preserves a pre-existing
+source-first Run and local skill, loads the reconstructed companion, renders
+HTML/SVG with the bundled Archify, and starts Harness with a migrated profile.
+The fixed candidate checks rendering and packaging, not model reasoning. A real
+configured model session and the application import/restart UI still require
+end-to-end acceptance; do not report them as covered by the fixed-candidate test.
+
+The user imports the matching patch ZIP and selects Restart and update. The
+application becomes 1.0.4; this is a restart-required update, not a hot patch.
+Historical Run IDs remain unchanged. New Run allocation still uses the existing
+object/date prefix and first unused directory number. Viewing historical Runs
+and resuming an unfinished analysis are separate compatibility requirements.
