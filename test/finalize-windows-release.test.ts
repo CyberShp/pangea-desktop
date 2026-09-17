@@ -101,7 +101,9 @@ describe('signed portable Windows package', () => {
     expect(manager).toContain('expected_sha256: imported.packageSha256')
     expect(manager).toContain('result_path: resultPath')
     expect(helper).toContain('Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256')
-    expect(helper).toContain('Move-Item -LiteralPath $BackupRoot $InstallRoot')
+    // Rollback uses the same exact-directory rename and lock retry as installation.
+    // Real lock/rollback behavior is exercised by verify-portable-update-locks.ps1.
+    expect(helper).toContain('Move-UpdateDirectory $BackupRoot $InstallRoot')
     expect(helper).toContain("Write-UpdateResult 'failed' $FailureMessage")
     expect(helper).toContain('Start-Process -FilePath $InstalledExecutable')
     expect(helper).toContain('New-Object System.Windows.Forms.ProgressBar')
