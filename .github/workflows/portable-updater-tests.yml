@@ -10,6 +10,7 @@ on:
       - scripts/verify-portable-patch-apply.ps1
       - scripts/verify-portable-user-data.ps1
       - scripts/verify-portable-handle-resolution.ps1
+      - scripts/verify-explorer-recovery.ps1
       - .github/workflows/portable-updater-tests.yml
 permissions:
   contents: read
@@ -31,3 +32,6 @@ jobs:
       - name: Verify actual directory holders and safe process cleanup
         shell: powershell
         run: ./scripts/verify-portable-handle-resolution.ps1
+      - name: Verify Explorer policy and independent recovery guard
+        shell: powershell
+        run: ./scripts/verify-explorer-recovery.ps1

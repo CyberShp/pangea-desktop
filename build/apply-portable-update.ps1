@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$PlanPath, [switch]$ScanLocks, [string]$ScanRoot, [string]$ScanOutput)
+param([string]$PlanPath, [switch]$ScanLocks, [string]$ScanRoot, [string]$ScanOutput, [string]$WatchExplorer)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -230,7 +230,9 @@ function Get-UpdateLockHolders {
 function Get-UpdateHolderPolicy {
   param($Holder, $Owned, [int[]]$ServiceIds, [int[]]$ProtectedIds)
   if ($Holder.Critical -or -not $Holder.SameUser -or $Holder.Session -ne [Diagnostics.Process]::GetCurrentProcess().SessionId -or
-      $Holder.Id -in $ProtectedIds -or $Holder.Id -in $ServiceIds) { return 'protected' }
+      $Holder.Id -in $ServiceIds) { return 'protected' }
+  if ($Holder.Name -ieq 'explorer' -and $Holder.Executable -ieq (Join-Path $env:SystemRoot 'explorer.exe')) { return 'explorer' }
+  if ($Holder.Id -in $ProtectedIds) { return 'protected' }
   $RuntimeNames = @('node','python','pythonw','opencode','nga','codeagent','claude')
   $IsRuntime = $Holder.Name -in $RuntimeNames
   if ($IsRuntime -and @($Owned | Where-Object { $_.Id -eq $Holder.Id -and $_.Created -eq $Holder.Created -and $_.Executable -ieq $Holder.Executable }).Count) { return 'owned' }
@@ -247,6 +249,92 @@ function Confirm-UpdateHolderStop {
   return [Windows.Forms.MessageBox]::Show($Message, 'PANGEA update - directory in use', 'YesNo', 'Warning', 'Button2') -eq 'Yes'
 }
 
+function Confirm-ExplorerRestart {
+  Add-Type -AssemblyName System.Windows.Forms
+  return [Windows.Forms.MessageBox]::Show('The update needs to restart Windows Explorer. The desktop and taskbar may disappear briefly. Finish all file copy/move operations and save your work first. Continue with the update?', 'PANGEA update - restart Explorer', 'YesNo', 'Warning', 'Button2') -eq 'Yes'
+}
+
+function Close-InstallationExplorerWindows {
+  param([string]$Root)
+  $Shell = $null
+  try {
+    $Shell = New-Object -ComObject Shell.Application
+    foreach ($Window in @($Shell.Windows())) {
+      try {
+        if ([IO.Path]::GetFileName([string]$Window.FullName) -ine 'explorer.exe') { continue }
+        $Uri = [Uri]([string]$Window.LocationURL)
+        if (-not $Uri.IsFile) { continue }
+        $Folder = $Uri.LocalPath.TrimEnd('\')
+        if ($Folder -ieq $Root.TrimEnd('\') -or $Folder.StartsWith($Root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { $Window.Quit() }
+      } catch { }
+    }
+  } finally { if ($Shell) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($Shell) } }
+}
+
+function Restore-ExplorerShell {
+  # Shell detection is session-local. An automatically restarted shell wins;
+  # a remaining folder-only Explorer process is not proof that the shell exists.
+  if (-not ('PangeaExplorerShell' -as [type])) {
+    Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class PangeaExplorerShell { [DllImport("user32.dll")] public static extern IntPtr GetShellWindow(); }'
+  }
+  if ([PangeaExplorerShell]::GetShellWindow() -eq [IntPtr]::Zero) {
+    Start-Process -FilePath "$env:SystemRoot\explorer.exe" -WorkingDirectory $env:SystemRoot | Out-Null
+  }
+}
+
+function Watch-ExplorerRecovery {
+  param([string]$WatchFile)
+  $Watch = Get-Content -LiteralPath $WatchFile -Raw | ConvertFrom-Json
+  if ([int]$Watch.session -ne [Diagnostics.Process]::GetCurrentProcess().SessionId) { throw 'Explorer recovery session mismatch.' }
+  $Supervisor = $null
+  try {
+    try {
+      $Supervisor = Get-Process -Id ([int]$Watch.supervisor_pid) -ErrorAction Stop
+      $null = $Supervisor.Handle
+      if ($Supervisor.StartTime.ToUniversalTime().ToFileTimeUtc() -ne [long]$Watch.supervisor_created) { $Supervisor.Dispose(); $Supervisor=$null }
+    } catch { $Supervisor=$null }
+    [IO.File]::WriteAllText("$WatchFile.ready", 'ready')
+    while ($Supervisor -and -not $Supervisor.HasExited -and -not (Test-Path -LiteralPath "$WatchFile.done")) {
+      Start-Sleep -Milliseconds 300
+      $Supervisor.Refresh()
+    }
+    if (Test-Path -LiteralPath "$WatchFile.armed") { Restore-ExplorerShell }
+    [IO.File]::WriteAllText("$WatchFile.restored", 'checked')
+  } finally { if ($Supervisor) { $Supervisor.Dispose() } }
+}
+
+function Start-ExplorerRecovery {
+  $WatchFile = "$PlanPath.explorer-$([guid]::NewGuid().ToString('N')).json"
+  $Self = Get-Process -Id $PID
+  $Watch = @{ supervisor_pid=$PID; supervisor_created=$Self.StartTime.ToUniversalTime().ToFileTimeUtc(); session=$Self.SessionId }
+  [IO.File]::WriteAllText($WatchFile, ($Watch | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+  $Quote = { param($Value) "'" + $Value.Replace("'", "''") + "'" }
+  $Command = '& ' + (& $Quote $script:UpdaterScriptPath) + ' -WatchExplorer ' + (& $Quote $WatchFile)
+  $Encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Command))
+  # Start-Process supplies a separate console lifetime; the guard survives a
+  # crashed updater. Do not terminate Explorer until the guard acknowledges.
+  $Guard = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$Encoded) -WorkingDirectory $env:TEMP -WindowStyle Hidden -PassThru
+  try {
+    $Deadline=(Get-Date).AddSeconds(15)
+    while (-not (Test-Path -LiteralPath "$WatchFile.ready")) {
+      if ($Guard.HasExited -or (Get-Date) -ge $Deadline) { throw 'Explorer recovery guard did not start; Explorer will not be terminated.' }
+      Start-Sleep -Milliseconds 100
+      $Guard.Refresh()
+    }
+    $script:ExplorerWatchFile=$WatchFile
+    [IO.File]::WriteAllText("$WatchFile.armed", 'armed')
+  } catch {
+    [IO.File]::WriteAllText("$WatchFile.done", 'cancelled')
+    throw
+  } finally { $Guard.Dispose() }
+}
+
+function Complete-ExplorerRecovery {
+  if (Get-Variable -Name ExplorerWatchFile -Scope Script -ErrorAction SilentlyContinue) {
+    [IO.File]::WriteAllText("$script:ExplorerWatchFile.done", 'complete')
+  }
+}
+
 function Resolve-UpdateDirectoryLocks {
   param([string]$Root)
   try {
@@ -259,6 +347,17 @@ function Resolve-UpdateDirectoryLocks {
       Write-UpdateLog "directory handle: $($Holder.Name) pid=$($Holder.Id); policy=$Policy"
       if ($Policy -eq 'protected') { $ManualHolders += "$($Holder.Name) (PID $($Holder.Id))"; continue }
       if ($Policy -eq 'confirm' -and -not (Confirm-UpdateHolderStop $Holder)) { continue }
+      if ($Policy -eq 'explorer') {
+        if ((Get-Variable -Name ExplorerRestartAttempted -Scope Script -ErrorAction SilentlyContinue) -and $script:ExplorerRestartAttempted) {
+          Write-UpdateLog 'Explorer was already handled once; it will not be repeatedly terminated.'
+          continue
+        }
+        if (-not (Confirm-ExplorerRestart)) { continue }
+        $script:ExplorerRestartAttempted=$true
+        Start-ExplorerRecovery
+        Close-InstallationExplorerWindows $Root
+        Start-Sleep -Milliseconds 500
+      }
       # Re-scan before termination: it must still hold this installation, and
       # both PID and creation time must still match the original observation.
       $StillHolding = @(Get-UpdateLockHolders $Root | Where-Object { $_.Id -eq $Holder.Id -and $_.Created -eq $Holder.Created })
@@ -533,6 +632,7 @@ function Apply-VerifiedPatch {
 }
 
 $script:UpdaterScriptPath = $PSCommandPath
+if ($WatchExplorer) { Watch-ExplorerRecovery $WatchExplorer; exit 0 }
 if ($ScanLocks) {
   Initialize-HandleInspector
   $Holders = @([PangeaUpdateHandles]::Scan($ScanRoot))
@@ -665,6 +765,7 @@ try {
     if (Test-Path -LiteralPath $HealthMarker -PathType Leaf) {
       Write-UpdateLog "PANGEA Desktop $ExpectedVersion reported healthy"
       Write-UpdateResult 'success' 'The update completed successfully.'
+      Complete-ExplorerRecovery
       if (Test-Path -LiteralPath $BackupRoot) {
         try { Remove-PortableDirectory $BackupRoot } catch { Write-UpdateLog $_.Exception.Message }
       }
@@ -723,4 +824,6 @@ try {
   Start-Sleep -Milliseconds 500
   Close-UpdateWindow
   exit 1
+} finally {
+  Complete-ExplorerRecovery
 }
