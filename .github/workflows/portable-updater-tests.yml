@@ -9,6 +9,7 @@ on:
       - scripts/verify-portable-update-locks.ps1
       - scripts/verify-portable-patch-apply.ps1
       - scripts/verify-portable-user-data.ps1
+      - scripts/verify-portable-handle-resolution.ps1
       - .github/workflows/portable-updater-tests.yml
 permissions:
   contents: read
@@ -27,3 +28,6 @@ jobs:
       - name: Verify long repository paths, links and copy failures
         shell: powershell
         run: ./scripts/verify-portable-user-data.ps1
+      - name: Verify actual directory holders and safe process cleanup
+        shell: powershell
+        run: ./scripts/verify-portable-handle-resolution.ps1

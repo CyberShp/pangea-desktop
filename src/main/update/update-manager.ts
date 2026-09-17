@@ -150,6 +150,9 @@ async function launchPortableUpdateHelper(imported: StagedImport): Promise<void>
     schema_version: 2,
     package_type: patch ? 'patch' : 'full',
     parent_pid: process.pid,
+    // prepareToInstall has already rejected active analysis sessions. The helper
+    // snapshots descendants while this exact Desktop process is still alive.
+    allow_owned_process_cleanup: true,
     package_path: imported.packagePath,
     install_root: dirname(process.execPath),
     executable_name: basename(process.execPath),

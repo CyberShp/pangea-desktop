@@ -8,7 +8,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # Recovery for a package already imported and signature-verified by Desktop.
-# Never change the installed signed files or the package, and never kill a process.
+# Never change signed files or the package. Old plans cannot establish ownership;
+# any eligible external holder requires confirmation in the local updater UI.
 $InstallRoot = (Resolve-Path -LiteralPath $InstallRoot).Path.TrimEnd('\')
 $Prefix = $InstallRoot + '\'
 $UpdateRoot = Join-Path $env:APPDATA 'pangea-desktop\updates'
@@ -22,7 +23,7 @@ if ([IO.Path]::GetFullPath($Helper).StartsWith($Prefix, [StringComparison]::Ordi
 }
 $Running = @(Get-Process | ForEach-Object {
   try {
-    if ($_.Path -and $_.Path.StartsWith($Prefix, [StringComparison]::OrdinalIgnoreCase)) { $_ }
+    if ($_.Path -and $_.Path -ieq (Join-Path $InstallRoot 'PANGEA Desktop.exe')) { $_ }
   } catch { }
 })
 if ($Running.Count) {
@@ -56,6 +57,7 @@ if ([string]$BaseManifest.version -ne [string]$Plan.expected_base_version) { thr
 # Keep the original plan, including its verified package hash, for diagnosis.
 # The old PID may have been reused; do not wait for an unrelated process.
 $Plan.parent_pid = 0
+$Plan | Add-Member -NotePropertyName allow_owned_process_cleanup -NotePropertyValue $false -Force
 $ResumePlan = Join-Path (Split-Path -Parent $PlanPath) ('resume-plan-' + [guid]::NewGuid().ToString('N') + '.json')
 [IO.File]::WriteAllText($ResumePlan, ($Plan | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
 Write-Output "Resuming verified patch $($Plan.expected_base_version) -> $TargetVersion for $InstallRoot"
