@@ -79,7 +79,20 @@ try {
   Move-UpdateDirectory $Destination $Source -TimeoutSeconds 1
   if ((Get-FileHash -LiteralPath (Join-Path $Source 'run.json')).Hash -ne $ExpectedHash) { throw 'Rollback rename lost the Run.' }
   Write-Output 'PASS: rollback rename preserves data and rejects occupied destination'
+
+  # Exercise the real updater UI too: shell icon extraction may load the old
+  # executable into the helper, which itself lives outside the installation.
+  $InstalledExecutable = Join-Path $Source 'PANGEA Desktop.exe'
+  $ExpectedVersion = '1.0.4'
+  Copy-Item -LiteralPath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Destination $InstalledExecutable
+  Open-UpdateWindow
+  if ($null -eq $script:UpdateForm -or -not $script:UpdateForm.Visible) { throw 'Real updater progress window did not open.' }
+  Move-UpdateDirectory $Source $Destination -TimeoutSeconds 1
+  Move-UpdateDirectory $Destination $Source -TimeoutSeconds 1
+  Close-UpdateWindow
+  Write-Output 'PASS: real progress window does not hold the old installation directory'
 } finally {
+  Close-UpdateWindow
   if (Test-Path -LiteralPath $LogPath) { Get-Content -LiteralPath $LogPath | Write-Output }
   if ($Handle) { $Handle.Dispose() }
   if ($Job) { $Job | Stop-Job; $Job | Remove-Job -Force }
