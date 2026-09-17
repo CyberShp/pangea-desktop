@@ -30,7 +30,7 @@ if ($Running.Count) {
 }
 
 if (-not $PlanPath) {
-  $Matches = @(Get-ChildItem -LiteralPath $UpdateRoot -Directory | ForEach-Object {
+  $MatchingPlans = @(Get-ChildItem -LiteralPath $UpdateRoot -Directory | ForEach-Object {
     $Candidate = Join-Path $_.FullName 'update-plan.json'
     if (Test-Path -LiteralPath $Candidate -PathType Leaf) {
       $Saved = Get-Content -LiteralPath $Candidate -Raw | ConvertFrom-Json
@@ -38,8 +38,8 @@ if (-not $PlanPath) {
           [string]$Saved.expected_version -eq $TargetVersion) { Get-Item -LiteralPath $Candidate }
     }
   } | Sort-Object LastWriteTime -Descending)
-  if (-not $Matches.Count) { throw "No previously imported update to $TargetVersion found for $InstallRoot." }
-  $PlanPath = $Matches[0].FullName
+  if (-not $MatchingPlans.Count) { throw "No previously imported update to $TargetVersion found for $InstallRoot." }
+  $PlanPath = $MatchingPlans[0].FullName
 }
 $PlanPath = (Resolve-Path -LiteralPath $PlanPath).Path
 if (-not $PlanPath.StartsWith(([IO.Path]::GetFullPath($UpdateRoot).TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase)) {

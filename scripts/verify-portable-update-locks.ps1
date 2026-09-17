@@ -22,7 +22,7 @@ public static class DirectoryLockFixture {
   public static extern SafeFileHandle CreateFile(string path, uint access, uint share,
     IntPtr security, uint mode, uint flags, IntPtr template);
   public static SafeFileHandle Open(string path) {
-    var handle = CreateFile(path, 0, 3, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+    var handle = CreateFile(path, 0x80000000, 3, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
     if (handle.IsInvalid) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
     return handle;
   }
@@ -40,6 +40,7 @@ try {
   $Handle = [DirectoryLockFixture]::Open($Source)
   $Rejected = $false
   try { Move-UpdateDirectory $Source $Destination -TimeoutSeconds 1 } catch {
+    Write-Output "Observed rename failure: $($_.Exception.Message)"
     $Rejected = $_.Exception.Message -like '*Cannot rename installation directory*'
   }
   if (-not $Rejected -or (Test-Path -LiteralPath $Destination)) { throw 'A persistent lock must leave the installation in place.' }
@@ -79,6 +80,7 @@ try {
   if ((Get-FileHash -LiteralPath (Join-Path $Source 'run.json')).Hash -ne $ExpectedHash) { throw 'Rollback rename lost the Run.' }
   Write-Output 'PASS: rollback rename preserves data and rejects occupied destination'
 } finally {
+  if (Test-Path -LiteralPath $LogPath) { Get-Content -LiteralPath $LogPath | Write-Output }
   if ($Handle) { $Handle.Dispose() }
   if ($Job) { $Job | Stop-Job; $Job | Remove-Job -Force }
   Remove-Item -LiteralPath $Root -Recurse -Force
