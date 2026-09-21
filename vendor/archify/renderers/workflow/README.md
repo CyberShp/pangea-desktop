@@ -56,6 +56,11 @@ derived from lane count. A complete worked example lives at
 `archify/examples/agent-tool-call.workflow.json`; its `schema_version` selects
 the applicable contract.
 
+In the PANGEA build, omitted v2 node widths fit the label, sublabel, and tag at
+their preferred font sizes before solving column spacing. Explicit widths and
+the fixed v1 defaults keep their existing validation contract. Large content
+still has to pass the showcase desktop-readability checks.
+
 The schema lives at:
 
 ```text

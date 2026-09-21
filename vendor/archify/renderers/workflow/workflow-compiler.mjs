@@ -13,7 +13,7 @@ import {
   resolveLegend,
   renderLegend as renderResolvedLegend,
 } from '../shared/legend.mjs';
-import { availableNodeTextWidth, fittedNodeFontSize, minimumNodeTextWidth } from '../shared/text-fit.mjs';
+import { availableNodeTextWidth, fittedNodeFontSize, minimumNodeTextWidth, nodeTextFit as nodeTextGeometry } from '../shared/text-fit.mjs';
 import { brandLabelFitWidth, brandMetadataFor, brandTopRailProblem, renderBrandMark } from '../shared/brand-marks.mjs';
 import { translateMessage as i18nText } from '../shared/i18n.mjs';
 import {
@@ -103,8 +103,27 @@ function createLegacyLayout() {
   };
 }
 
+// Font sizes for this renderer's node text; the fitting geometry is shared.
+const nodeTextFit = {
+  labelPreferred: 11,
+  labelMinimum: 9,
+  sublabelPreferred: 8,
+  sublabelMinimum: 6,
+  tagPreferred: 7,
+  tagMinimum: 6,
+};
+
+// Readable v2 sizes unpinned nodes before solving columns and routes.
 function authoredNodeWidth(node) {
-  return Number.isFinite(node?.width) ? node.width : 92;
+  if (Number.isFinite(node?.width)) return node.width;
+  const padding = nodeTextGeometry.horizontalPadding;
+  const brandInset = 92 - brandLabelFitWidth(node, 92);
+  return Math.ceil(Math.max(92,
+    textUnits(node.label) * 6.8 - 6,
+    minimumNodeTextWidth(node.label, nodeTextFit.labelPreferred) + padding + brandInset,
+    minimumNodeTextWidth(node.sublabel, nodeTextFit.sublabelPreferred) + padding,
+    minimumNodeTextWidth(node.tag, nodeTextFit.tagPreferred) + padding,
+  ));
 }
 
 function nodeWidthContributor(node) {
@@ -939,7 +958,7 @@ function workflowLegendRects() {
 }
 
 function measureNode(node) {
-  const width = node.width || layout.nodeW;
+  const width = workflow.schema_version === 2 ? authoredNodeWidth(node) : node.width || layout.nodeW;
   const height = node.height || (node.tag ? 68 : layout.nodeH);
   const cx = layout.colXs[node.col];
   const groupHeaderH = laneGroupHeaderH(node.lane);
@@ -957,16 +976,6 @@ function measureNode(node) {
     cy: y + height / 2
   };
 }
-
-// Font sizes for this renderer's node text; the fitting geometry is shared.
-const nodeTextFit = {
-  labelPreferred: 11,
-  labelMinimum: 9,
-  sublabelPreferred: 8,
-  sublabelMinimum: 6,
-  tagPreferred: 7,
-  tagMinimum: 6,
-};
 
 const nodes = new Map(asArray(workflow.nodes).map((node) => [node.id, measureNode(node)]));
 
