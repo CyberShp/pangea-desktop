@@ -1,5 +1,6 @@
 """Exercise scene contracts through the real Graph; no model or user data needed."""
 import json
+from hashlib import sha256
 import tempfile
 import time
 import unittest
@@ -13,9 +14,34 @@ from pangea_agent.cli.adapter_api import bind_action, settle_action
 from pangea_agent.cli.run_module_analysis import run_module_analysis, resume_module_analysis
 from pangea_agent.cli.source_first_api import plan_write, result_write, work_finish, review_decide, task_open, input_read, comparison_finding_write, result_supersede
 from pangea_agent.models.contract import TaskContract
+from pangea_agent.methodology import freeze_enabled_methodologies
 
 
 class SceneAcceptance(unittest.TestCase):
+    def test_frozen_methodology_bytes_survive_windows_writes_and_resume(self):
+        original_open = Path.open
+
+        def windows_open(path, mode='r', buffering=-1, encoding=None, errors=None, newline=None):
+            if 'b' not in mode and 'w' in mode and newline is None:
+                newline = '\r\n'
+            return original_open(path, mode, buffering, encoding, errors, newline)
+
+        with tempfile.TemporaryDirectory() as temp, patch.object(Path, 'open', windows_open):
+            data, run, _ = self.fixture(temp)
+            manifest = freeze_enabled_methodologies(data, run, 'scene-run')
+            item = manifest.enabled_user_methodologies[0]
+            frozen_path = Path(item.path)
+            frozen_bytes = frozen_path.read_bytes()
+            self.assertIn('确认再次连接可恢复'.encode('utf-8'), frozen_bytes)
+            self.assertNotIn(b'\r\n', frozen_bytes)
+            self.assertEqual(sha256(frozen_bytes).hexdigest(), item.content_sha256)
+            write_json(data / 'methodologies/registry.json', {'methodologies': []})
+            self.assertEqual(freeze_enabled_methodologies(data, run, 'scene-run'), manifest)
+            self.assertEqual(frozen_path.read_bytes(), frozen_bytes)
+            frozen_path.write_bytes(frozen_bytes + b'tampered')
+            with self.assertRaisesRegex(ValueError, 'Run 冻结方法论内容校验失败'):
+                freeze_enabled_methodologies(data, run, 'scene-run')
+
     def fixture(self, directory, scene='branch-analysis', mode='speed', coverage=False, empty=False):
         root = Path(directory)
         data = root / 'data'
