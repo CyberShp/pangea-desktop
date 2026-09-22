@@ -7,12 +7,12 @@
   },
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
-    "branch": "langgraph",
+    "branch": "fix/run-return-null-assistant",
     "commit": "0eb9124d5d7c9f8973c6c691b4121d3e5887a591"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
-    "branch": "langgraph",
+    "branch": "fix/cli-error-call-locations",
     "commit": "8a7f1cc5aea95b0c1d67dfa5c843982da2a33072"
   },
   "python": {
