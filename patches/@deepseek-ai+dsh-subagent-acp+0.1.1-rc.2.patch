@@ -54,7 +54,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  /**
  * Start and publish one ACP child after initialization and session creation.
  * Child failures resolve through the run result; startup failures reject after
-@@ -105,39 +151,92 @@
+@@ -105,39 +151,97 @@
  */
  async function startAcpRun(request, spec) {
  	if (request.signal.aborted) throw new Error("subagent request was aborted before the ACP child started");
@@ -105,7 +105,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 +	let currentTurnOutput = "";
 +	let boundedOutput = "";
 +	const retain = (text) => spec.diagnosticOutputLimit ? text.slice(-spec.diagnosticOutputLimit) : text;
-+	const diagnostics = { model: null, messageChunks: 0, toolCalls: 0, toolFailures: 0, toolOutput: "", errorCode: null, errorSummary: null };
++	const diagnostics = { activeToolCount: 0, model: null, messageChunks: 0, toolCalls: 0, toolFailures: 0, toolOutput: "", errorCode: null, errorSummary: null };
 +	let turnStartedAt = null;
 +	const startedAt = Date.now();
 +	const toolStarts = new Map();
@@ -126,6 +126,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  		sessionUpdate(params) {
  			const update = params.update;
 -			if (update.sessionUpdate === "agent_message_chunk") fold.pushText(acpContentText(update.content));
++			diagnostics.lastActivityAt = Date.now();
 +			if (turnStartedAt !== null && diagnostics.firstEventMs === null) diagnostics.firstEventMs = Date.now() - turnStartedAt;
 +			if (update.sessionUpdate === "config_option_update") observeModel(update.configOptions);
 +			if (update.sessionUpdate === "current_model_update" && typeof update.currentModelId === "string") diagnostics.model = update.currentModelId;
@@ -140,7 +141,11 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 +					diagnostics.lastToolFinishedAt = Date.now();
 +					diagnostics.lastToolDurationMs = diagnostics.lastToolStartedAt === null ? null : Date.now() - diagnostics.lastToolStartedAt;
 +					toolStarts.delete(update.toolCallId);
-+				} else { diagnostics.lastToolFinishedAt = null; diagnostics.lastToolDurationMs = null; }
++				} else {
++					if (!toolStarts.has(update.toolCallId)) toolStarts.set(update.toolCallId, Date.now());
++					diagnostics.lastToolFinishedAt = null; diagnostics.lastToolDurationMs = null;
++				}
++				diagnostics.activeToolCount = toolStarts.size;
 +				emitDiagnostic("tool_event");
 +				for (const item of update.content ?? []) if (item.type === "content" && item.content?.type === "text") diagnostics.toolOutput = (diagnostics.toolOutput + item.content.text).slice(-8192);
 +			}
@@ -162,7 +167,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  				const allow = params.options.find((o) => o.kind === "allow_once" || o.kind === "allow_always");
  				if (allow !== void 0) return Promise.resolve({ outcome: {
  					outcome: "selected",
-@@ -149,6 +248,7 @@
+@@ -149,6 +253,7 @@
  	});
  	const conn = new ClientSideConnection(makeClient, ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout)));
  	let sessionId;
@@ -170,7 +175,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  	let signalCancelSettled;
  	const cancelSettled = new Promise((resolve) => {
  		signalCancelSettled = resolve;
-@@ -164,21 +264,35 @@
+@@ -164,21 +269,35 @@
  		requestCancel();
  	};
  	request.signal.addEventListener("abort", onAbort, { once: true });
@@ -215,7 +220,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -189,48 +303,81 @@
+@@ -189,48 +308,91 @@
  	} catch (error) {
  		request.signal.removeEventListener("abort", onAbort);
  		await disposeProcess();
@@ -234,6 +239,8 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 +		return { ...modelCatalog, diagnostics: { ...diagnostics, durationMs: Date.now() - startedAt } };
 +	}
 +	const runPrompt = async (prompt) => {
++		diagnostics.lastActivityAt = Date.now();
++		diagnostics.promptPending = true;
 +		currentTurnOutput = "";
 +		turnStartedAt = Date.now();
 +		diagnostics.firstEventMs = null;
@@ -286,7 +293,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 -			request.signal.removeEventListener("abort", onAbort);
 -		}
 -	})();
-+		} finally { diagnostics.turnDurationMs = Date.now() - turnStartedAt; }
++		} finally { diagnostics.promptPending = false; diagnostics.turnDurationMs = Date.now() - turnStartedAt; }
 +	};
 +	let turn = request.resume ? Promise.resolve({ output: [], stopReason: "completed" }) : runPrompt(request.prompt);
 +	const result = turn;
@@ -305,6 +312,14 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 +			pendingOutput = "";
 +			return output;
 +		},
++		async cancelTurn() {
++			// session/cancel is a notification, not proof of cancellation. Only the
++			// original prompt response can confirm that the turn has ended.
++			const pending = turn;
++			await conn.cancel({ sessionId: remoteSessionId });
++			const outcome = await pending;
++			return { confirmed: Boolean(outcome.protocolStopReason) && !flags.cancelled, outcome };
++		},
 +		continuePrompt(prompt) {
 +			turn = turn.then(() => flags.cancelled ? { output: collectOutput(), stopReason: "aborted" } : runPrompt(prompt));
 +			return turn;
@@ -312,7 +327,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  		localAgent: void 0,
  		result,
  		dispose() {
-@@ -257,10 +404,12 @@
+@@ -257,10 +419,12 @@
  const Config = z.object({
  	providerName: z.string().default("acp"),
  	command: z.string().required(),
@@ -325,7 +340,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
  	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
  });
-@@ -331,24 +480,59 @@
+@@ -331,24 +495,59 @@
  		this.ctx = ctx;
  		this.config = config;
  	}

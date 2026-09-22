@@ -64,3 +64,34 @@ it('cancels a stalled handshake and reaps the discovery child', async () => {
     finally { clearTimeout(timer) }
   })
 })
+
+
+it('waits for the actual cancelled prompt response and continues the same session', async () => {
+  await withProvider('cancel-confirmed', async (provider, requests) => {
+    const run = await provider.start({ parent: { session: { header: { cwd: process.cwd() } } },
+      signal: new AbortController().signal, prompt: [{ type: 'text', text: 'ready' }] })
+    try {
+      const cancelled = await run.cancelTurn()
+      expect(cancelled.confirmed).toBe(true)
+      expect(cancelled.outcome.protocolStopReason).toBe('cancelled')
+      expect(run.readDiagnostics().activeToolCount).toBe(0)
+      expect(run.readDiagnostics().lastActivityAt).toBeGreaterThan(0)
+      expect((await run.continuePrompt([{ type: 'text', text: 'continue' }])).stopReason).toBe('completed')
+      const calls = await requests()
+      expect(calls.filter(c => c.method === 'session/new')).toHaveLength(1)
+      expect(calls.filter(c => c.method === 'session/prompt')).toHaveLength(2)
+    } finally { await run.dispose() }
+  })
+})
+it('sending cancel without a prompt response does not confirm cancellation', async () => {
+  await withProvider('cancel-ignored', async provider => {
+    const run = await provider.start({ parent: { session: { header: { cwd: process.cwd() } } },
+      signal: new AbortController().signal, prompt: [{ type: 'text', text: 'ready' }] })
+    let confirmed = false
+    const cancellation = run.cancelTurn().then(value => { confirmed = value.confirmed }).catch(() => {})
+    try {
+      await new Promise(resolve => setTimeout(resolve, 60))
+      expect(confirmed).toBe(false)
+    } finally { await run.dispose(); await cancellation }
+  })
+})

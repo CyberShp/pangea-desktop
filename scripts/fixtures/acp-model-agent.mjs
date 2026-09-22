@@ -2,6 +2,7 @@ import { createInterface } from 'node:readline'
 import { appendFileSync } from 'node:fs'
 const mode = process.env.PANGEA_FIXTURE_MODE
 let model = 'fixture/default'
+let pendingPrompt, promptCount = 0
 const options = () => [{ id: 'llm', name: 'Model', category: 'model', type: 'select', currentValue: model,
   options: [{ group: 'fixture', name: 'Fixture', options: [
     { value: 'fixture/default', name: 'Default' }, { value: 'fixture/selected', name: 'Selected' },
@@ -21,7 +22,17 @@ createInterface({ input: process.stdin }).on('line', line => {
     if (mode !== 'ignored') model = request.params.value ?? request.params.modelId
     reply(request.method === 'session/set_model' ? {} : { configOptions: options() })
   }
+  if (request.method === 'session/cancel' && mode === 'cancel-confirmed' && pendingPrompt) {
+    send({ id: pendingPrompt.id, result: { stopReason: 'cancelled' } }); pendingPrompt = null
+  }
   if (request.method === 'session/prompt') {
+    if (['cancel-confirmed', 'cancel-ignored'].includes(mode) && promptCount++ === 0) {
+      pendingPrompt = request
+      send({ method: 'session/update', params: { sessionId: 'models-session', update: {
+        sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '就绪' },
+      } } })
+      return
+    }
     send({ method: 'session/update', params: { sessionId: 'models-session', update: {
       sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: model },
     } } })
