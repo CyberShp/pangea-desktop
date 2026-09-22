@@ -7,13 +7,13 @@
   },
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
-    "branch": "langgraph",
-    "commit": "3cf64ff782753ce4ae719b210eec6d2b1852ae7f"
+    "branch": "feat/analysis-scenes-v2",
+    "commit": "8d13a2565d15693f6498237a80ccdbb9aa3f738d"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
-    "branch": "langgraph",
-    "commit": "c87b94a22733e6bcce908375cb528b0f3b0dd2f5"
+    "branch": "feat/analysis-scenes-v2",
+    "commit": "1accc197a08a3f28ea3f00e944ba9b7441b43008"
   },
   "python": {
     "version": "3.12.10",
