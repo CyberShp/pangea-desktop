@@ -2,7 +2,7 @@ name: Windows portable updater regression
 on:
   workflow_dispatch:
   push:
-    branches: [langgraph]
+    branches: [langgraph, fix/desktop-recovery-delivery]
     paths:
       - build/apply-portable-update.ps1
       - scripts/resume-portable-update.ps1

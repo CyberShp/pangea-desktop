@@ -185,6 +185,19 @@ public static class PangeaUpdateHandles {
 '@
 }
 
+function Wait-UpdateDesktopExit {
+  param([int]$DesktopPid, $Identity, [int]$TimeoutSeconds = 15)
+  if ($DesktopPid -le 0) { return }
+  try { Wait-Process -Id $DesktopPid -Timeout $TimeoutSeconds -ErrorAction Stop } catch {
+    if (-not (Get-Process -Id $DesktopPid -ErrorAction SilentlyContinue)) { return }
+    if (-not $Identity -or $Identity.Id -ne $DesktopPid) { throw 'Desktop did not exit and its original process identity could not be verified.' }
+    Initialize-HandleInspector
+    $Stopped = [PangeaUpdateHandles]::Stop($Identity.Id, $Identity.Created)
+    Write-UpdateLog "Desktop exit timeout: pid=$DesktopPid; stopped=$Stopped"
+    if (-not $Stopped) { throw 'The verified Desktop process could not be stopped; installation is unchanged.' }
+  }
+}
+
 function Get-OwnedUpdateProcesses {
   param([int]$DesktopPid, [string]$DesktopExecutable)
   if ($DesktopPid -le 0) { return @() }
@@ -233,9 +246,11 @@ function Get-UpdateHolderPolicy {
       $Holder.Id -in $ServiceIds) { return 'protected' }
   if ($Holder.Name -ieq 'explorer' -and $Holder.Executable -ieq (Join-Path $env:SystemRoot 'explorer.exe')) { return 'explorer' }
   if ($Holder.Id -in $ProtectedIds) { return 'protected' }
+  # Exact descendant identity, not a short executable-name allowlist: Electron
+  # helpers and shell wrappers can also retain this installation's handles.
+  if (@($Owned | Where-Object { $_.Id -eq $Holder.Id -and $_.Created -eq $Holder.Created -and $_.Executable -ieq $Holder.Executable }).Count) { return 'owned' }
   $RuntimeNames = @('node','python','pythonw','opencode','nga','codeagent','claude')
   $IsRuntime = $Holder.Name -in $RuntimeNames
-  if ($IsRuntime -and @($Owned | Where-Object { $_.Id -eq $Holder.Id -and $_.Created -eq $Holder.Created -and $_.Executable -ieq $Holder.Executable }).Count) { return 'owned' }
   # Unknown programs, other Desktop instances, Explorer and security software
   # are display-only. Only familiar user applications can be selected locally.
   if ($IsRuntime -or $Holder.Name -in @('Code','notepad','notepad++','powershell','pwsh','cmd','WindowsTerminal')) { return 'confirm' }
@@ -352,7 +367,8 @@ function Resolve-UpdateDirectoryLocks {
           Write-UpdateLog 'Explorer was already handled once; it will not be repeatedly terminated.'
           continue
         }
-        if (-not (Confirm-ExplorerRestart)) { continue }
+        $Automatic = (Get-Variable -Name AutomaticUpdateCleanup -Scope Script -ErrorAction SilentlyContinue) -and $script:AutomaticUpdateCleanup
+        if (-not $Automatic -and -not (Confirm-ExplorerRestart)) { continue }
         $script:ExplorerRestartAttempted=$true
         Start-ExplorerRecovery
         Close-InstallationExplorerWindows $Root
@@ -659,6 +675,8 @@ $ParentPid = [int]$Plan.parent_pid
 $InstalledExecutable = Join-Path $InstallRoot $ExecutableName
 
 $script:OwnedUpdateProcesses = @()
+$script:AutomaticUpdateCleanup = $Plan.PSObject.Properties['allow_owned_process_cleanup'] -and $Plan.allow_owned_process_cleanup -eq $true
+$DesktopIdentity = $null
 $script:ProtectedUpdateProcesses = @($PID, $ParentPid)
 try {
   # Protect the helper's ancestors, including the user's recovery terminal.
@@ -672,7 +690,16 @@ try {
     $script:ProtectedUpdateProcesses += $AncestorId
   }
   if ($Plan.PSObject.Properties['allow_owned_process_cleanup'] -and $Plan.allow_owned_process_cleanup -eq $true) {
+    $Desktop = Get-Process -Id $ParentPid -ErrorAction Stop
+    if ($Desktop.Path -ine $InstalledExecutable) { throw 'Desktop executable identity does not match update plan.' }
+    $DesktopIdentity = [pscustomobject]@{ Id=$Desktop.Id; Created=$Desktop.StartTime.ToUniversalTime().ToFileTimeUtc() }
     $script:OwnedUpdateProcesses = @(Get-OwnedUpdateProcesses $ParentPid $InstalledExecutable)
+    # Snapshot only other instances of this exact installed executable, never
+    # all processes with the same name or another portable installation.
+    foreach ($Instance in @(Get-Process | Where-Object { try { $_.Id -ne $ParentPid -and $_.Path -ieq $InstalledExecutable } catch { $false } })) {
+      $script:OwnedUpdateProcesses += [pscustomobject]@{ Id=$Instance.Id; Created=$Instance.StartTime.ToUniversalTime().ToFileTimeUtc(); Executable=$Instance.Path }
+      $script:OwnedUpdateProcesses += @(Get-OwnedUpdateProcesses $Instance.Id $InstalledExecutable)
+    }
   }
 } catch { Write-UpdateLog "Process ownership snapshot unavailable; automatic cleanup disabled: $($_.Exception.Message)" }
 
@@ -691,11 +718,7 @@ Open-UpdateWindow
 try {
   Write-UpdateLog "waiting for PANGEA Desktop process $ParentPid"
   Set-UpdateStage 'Closing the current version...' 12
-  try { if ($ParentPid -gt 0) { Wait-Process -Id $ParentPid -Timeout 120 -ErrorAction Stop } } catch {
-    if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
-      throw 'PANGEA Desktop did not exit before the update timeout.'
-    }
-  }
+  Wait-UpdateDesktopExit $ParentPid $DesktopIdentity
 
   if ([string]::IsNullOrWhiteSpace($InstallParent) -or $InstallRoot -eq [System.IO.Path]::GetPathRoot($InstallRoot)) {
     throw 'The portable application directory is unsafe to replace.'

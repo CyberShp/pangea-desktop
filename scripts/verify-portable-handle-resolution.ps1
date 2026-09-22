@@ -46,6 +46,9 @@ try {
   $Fake.Name='node'
   $Owned=@([pscustomobject]@{Id=$Fake.Id; Created=$Fake.Created; Executable=$Fake.Executable})
   if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'owned') { throw 'Owned runtime not recognized.' }
+  $Fake.Name='PANGEA Desktop'
+  if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'owned') { throw 'Owned Electron helper not recognized.' }
+  $Fake.Name='node'
   $Owned[0].Created++
   if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'confirm') { throw 'Stale ownership authorized automatic cleanup.' }
   Write-Output 'PASS: ownership, services, ancestors and unknown processes classified safely'
@@ -71,6 +74,18 @@ try {
   $HolderProcess.Refresh()
   if (-not $HolderProcess.HasExited -or -not (Test-Path -LiteralPath $Destination)) { throw 'Owned runtime cleanup failed.' }
   Write-Output 'PASS: live ownership snapshot automatically releases this Desktop runtime descendant'
+  $HolderProcess.Dispose(); $HolderProcess=$null
+  $HolderProcess=Start-Process $NodePath -ArgumentList @('-e','"setTimeout(()=>{},120000)"') -WorkingDirectory $Root -WindowStyle Hidden -PassThru
+  $Identity=[pscustomobject]@{Id=$HolderProcess.Id; Created=$HolderProcess.StartTime.ToUniversalTime().ToFileTimeUtc()}
+  $Stale=[pscustomobject]@{Id=$Identity.Id; Created=([long]$Identity.Created + 1)}
+  $Rejected=$false
+  try { Wait-UpdateDesktopExit $HolderProcess.Id $Stale -TimeoutSeconds 1 } catch { $Rejected=$true }
+  $HolderProcess.Refresh()
+  if (-not $Rejected -or $HolderProcess.HasExited) { throw 'Desktop timeout bypassed original identity validation.' }
+  Wait-UpdateDesktopExit $HolderProcess.Id $Identity -TimeoutSeconds 1
+  $HolderProcess.Refresh()
+  if (-not $HolderProcess.HasExited) { throw 'Desktop timeout did not force the exact process to exit.' }
+  Write-Output 'PASS: Desktop exit timeout terminates only the original process identity'
 } finally {
   if ($HolderProcess) { $HolderProcess.Refresh(); if (-not $HolderProcess.HasExited) { $HolderProcess.Kill(); $HolderProcess.WaitForExit() }; $HolderProcess.Dispose() }
   if (Test-Path -LiteralPath $LogPath) { Get-Content -LiteralPath $LogPath | Write-Output }

@@ -18,6 +18,21 @@ if ((Get-UpdateHolderPolicy $Fake @() @() @()) -ne 'protected') { throw 'An unre
 Write-Output 'PASS: Explorer exception is restricted to Windows executable, current user and session'
 $Root=Join-Path ([IO.Path]::GetTempPath()) ('pangea-explorer-guard-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $Root -Force | Out-Null
+$LogPath=Join-Path $Root 'update.log'
+# Exercise automatic Explorer handling without touching the runner's shell.
+# The second scan reports that closing its folder window released the handle.
+$script:AutomaticUpdateCleanup=$true
+$script:OwnedUpdateProcesses=@()
+$script:ProtectedUpdateProcesses=@($PID)
+$script:ScanCalls=0; $script:RecoveryStarted=$false; $script:FoldersClosed=$false
+$Fake.Executable=Join-Path $env:SystemRoot 'explorer.exe'
+function Get-UpdateLockHolders { param($Root) $script:ScanCalls++; if ($script:ScanCalls -eq 1) { return @($Fake) }; return @() }
+function Confirm-ExplorerRestart { throw 'Automatic cleanup must not ask for Explorer confirmation.' }
+function Start-ExplorerRecovery { $script:RecoveryStarted=$true }
+function Close-InstallationExplorerWindows { param($Root) $script:FoldersClosed=$true }
+Resolve-UpdateDirectoryLocks $Root
+if (-not $script:RecoveryStarted -or -not $script:FoldersClosed -or $script:ScanCalls -ne 2) { throw 'Automatic Explorer cleanup did not guard recovery and recheck handles.' }
+Write-Output 'PASS: automatic Explorer cleanup starts recovery and rechecks handles without a confirmation dialog'
 $WorkerPath=Join-Path $Root 'guard-fixture.ps1'
 $WatchDefinition=($Definitions | Where-Object { $_.Name -eq 'Watch-ExplorerRecovery' }).Extent.Text
 # Use the real watchdog in an independent process, substituting only the shell
