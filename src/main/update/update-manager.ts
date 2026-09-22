@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
-import { copyFile, rm, writeFile } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import type { UpdateStatus } from '../../shared/contracts'
@@ -9,6 +9,7 @@ import { isPortablePatchArchive, stagePortablePatch, type StagedPortablePatch } 
 import type { PortableUpdateConfig } from './portable-update'
 import { initialUpdateStatus, reduceUpdateStatus, type UpdateStateEvent } from './update-state'
 import { launchPortableHelper } from './launch-portable-helper'
+import { stageUpdateHelper } from './stage-update-helper'
 
 interface LoadedUpdateConfig {
   publicKeyPem: string
@@ -138,13 +139,12 @@ async function launchPortableUpdateHelper(imported: StagedImport): Promise<void>
   const version = imported.kind === 'patch' ? imported.manifest.to_version : imported.manifest.version
   const baseVersion = imported.kind === 'patch' ? imported.manifest.from_version : undefined
   const updateRoot = dirname(imported.packagePath)
-  const helperPath = join(updateRoot, 'apply-portable-update.ps1')
+  const helperPath = join(updateRoot, `apply-portable-update-${randomUUID()}.ps1`)
   const planPath = join(updateRoot, 'update-plan.json')
   const healthMarker = join(updateRoot, `healthy-${randomUUID()}.json`)
   const resultPath = join(app.getPath('userData'), 'updates', LAST_UPDATE_RESULT)
   const helperSource = join(process.resourcesPath, 'update', 'apply-portable-update.ps1')
-  if (!existsSync(helperSource)) throw new Error('升级助手缺失。')
-  await copyFile(helperSource, helperPath)
+  await stageUpdateHelper(imported, helperSource, helperPath)
   await rm(resultPath, { force: true })
   await writeFile(planPath, JSON.stringify({
     schema_version: 2,
