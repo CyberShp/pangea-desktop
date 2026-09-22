@@ -14,6 +14,8 @@ const required = [
   ...['planning', 'analysis', 'review'].flatMap(role => ['.agents/pangea', '.opencode/agents'].map(dir => `.pangea-build/runtime/pangea-runtime/${dir}/${role}-worker.md`)),
   '.pangea-build/runtime/pangea-runtime/src/pangea_agent/graph/nodes/source_first.py',
   '.pangea-build/runtime/pangea-runtime/src/pangea_agent/rubrics/builtin/behavior_test_generation.md',
+  '.pangea-build/runtime/pangea-runtime/src/pangea_agent/analysis_scenarios.py',
+  ...['common_generation', 'common_review', 'flow', 'planning', 'module', 'risk', 'branch', 'coverage'].map(name => `.pangea-build/runtime/pangea-runtime/src/pangea_agent/rubrics/builtin/scene_${name}.md`),
   '.pangea-build/runtime/pangea-runtime/.opencode/agents/pangea-agent.md',
   '.pangea-build/runtime/pangea-runtime/.opencode/plugins/pangea.ts',
   '.pangea-build/runtime/pangea-runtime/.opencode/skills/product-blackbox-test-case/SKILL.md',
