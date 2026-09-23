@@ -42,7 +42,7 @@ describe('PANGEA product server runtime', () => {
         configuredCommand: 'opencode',
         args: ['acp', '--print-logs', '--log-level', 'ERROR'],
         permission: 'allow',
-        env: {}
+        env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: { 'pangea_*': 'deny' } }) }
       },
       {
         providerName: 'pangea-claude-code',
@@ -73,5 +73,21 @@ describe('PANGEA product server runtime', () => {
       configuredCommand: 'opencode-custom',
       args: ['acp', '--print-logs', '--log-level', 'ERROR']
     })
+  })
+
+  it('isolates OpenCode plugin tools without changing inherited models or other permissions', () => {
+    for (const permission of ['ask', { 'pangea_*': 'allow', bash: 'ask', pangea_task_open: 'allow' }]) {
+      const original = { model: 'provider/model', permission, tools: { webfetch: false } }
+      const env = { OPENCODE_CONFIG_CONTENT: JSON.stringify(original) }
+      const entries = product.configuredProviderPlugins(env)
+      const scoped = JSON.parse(entries.find(([, config]) => config.providerName === 'pangea-opencode')[1].env.OPENCODE_CONFIG_CONTENT)
+      expect(scoped.model).toBe(original.model)
+      expect(scoped.tools).toEqual(original.tools)
+      expect(scoped.permission['pangea_*']).toBe('deny')
+      expect(Object.keys(scoped.permission).at(-1)).toBe('pangea_*')
+      expect(scoped.permission[typeof permission === 'string' ? '*' : 'bash']).toBe('ask')
+      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT)).toEqual(original)
+      expect(entries.find(([, config]) => config.providerName === 'pangea-nga')[1].env).toEqual({})
+    }
   })
 })

@@ -628,6 +628,24 @@ function canonicalReadableWorkflow(workflow) {
     || left.col - right.col
     || stableCompare(left.id, right.id)
   ));
+  // Unpinned nodes at the same logical position need separate vertical slots.
+  // Keep authored lane/rank and all edges; explicit offsets remain constraints.
+  for (let start = 0; start < nodes.length;) {
+    let end = start + 1;
+    while (end < nodes.length && nodes[end].lane === nodes[start].lane && nodes[end].col === nodes[start].col) end++;
+    const group = nodes.slice(start, end);
+    if (group.length > 1 && group.every(node => node.yOffset === undefined)) {
+      const gap = 28;
+      const height = group.reduce((total, node) => total + authoredNodeHeight(node), 0) + gap * (group.length - 1);
+      let top = -height / 2;
+      for (let index = start; index < end; index++) {
+        const nodeHeight = authoredNodeHeight(nodes[index]);
+        nodes[index] = { ...nodes[index], yOffset: top + nodeHeight / 2 };
+        top += nodeHeight + gap;
+      }
+    }
+    start = end;
+  }
   const edges = [...asArray(workflow.edges)].sort((left, right) => (
     stableCompare(left.id, right.id)
     || stableCompare(left.from, right.from)
@@ -2198,6 +2216,18 @@ function validateReadablePinnedGeometry() {
 
 function validateWorkflow() {
   const problems = [];
+  const layoutProblems = [];
+  const layoutDiagnostics = [];
+  const textProblem = (node, field, message, requiredWidth, availableWidth) => layoutDiagnostics.push({
+    code: 'workflow/node-text-width', severity: 'error', message,
+    subject: { diagramType: 'workflow', node: node.id, field,
+      path: `/nodes/${inputWorkflow.nodes.findIndex((item) => item.id === node.id)}/${field}` },
+    evidence: { requiredWidth, availableWidth, nodeWidth: node.width },
+    supportedFixes: [
+      ...(inputWorkflow.schema_version === 2 ? [`remove the explicit width from node "${node.id}" and omit meta.viewBox so readable-v2 sizes the unchanged text and canvas automatically`] : []),
+      `increase node "${node.id}" width or move the full ${field} explanation to its card while preserving its meaning`,
+    ],
+  });
   if (workflow.schema_version !== 1 && workflow.schema_version !== 2) {
     problems.push('Workflow files must set "schema_version" to 1 or 2.');
   }
@@ -2267,7 +2297,7 @@ function validateWorkflow() {
     }
     const estLabelW = textUnits(node.label) * 6.8;
     if (estLabelW > node.width + 6) {
-      problems.push(`Label "${node.label}" (~${Math.round(estLabelW)}px) is wider than node "${node.id}" (${node.width}px) — shorten the label or increase node.width.`);
+      textProblem(node, 'label', `Label "${node.label}" (~${Math.round(estLabelW)}px) is wider than node "${node.id}" (${node.width}px) — shorten the label or increase node.width.`, estLabelW, node.width + 6);
     }
     const brandRailProblem = brandTopRailProblem(node, node.width, nodeTextFit.labelMinimum);
     if (brandRailProblem) problems.push(brandRailProblem);
@@ -2279,7 +2309,7 @@ function validateWorkflow() {
       if (!value) continue;
       const minimumW = minimumNodeTextWidth(value, minimum);
       if (minimumW > availableTextW) {
-        problems.push(`${field} "${value}" needs ~${Math.ceil(minimumW)}px at the ${minimum}px legible minimum, but node "${node.id}" provides ${availableTextW}px — shorten the ${field.toLowerCase()} or increase node.width.`);
+        textProblem(node, field.toLowerCase(), `${field} "${value}" needs ~${Math.ceil(minimumW)}px at the ${minimum}px legible minimum, but node "${node.id}" provides ${availableTextW}px — shorten the ${field.toLowerCase()} or increase node.width.`, minimumW, availableTextW);
       }
     }
 
@@ -2308,7 +2338,12 @@ function validateWorkflow() {
     const estLabelW = textUnits(phase.label) * 5.6;
     const width = phaseSpan(phase).width;
     if (estLabelW > width + 8) {
-      problems.push(`Phase label "${phase.label}" (~${Math.round(estLabelW)}px) is wider than its ${Math.round(width)}px span — shorten the label or widen the phase range.`);
+      layoutDiagnostics.push({ code: 'workflow/phase-text-width', severity: 'error',
+        message: `Phase label "${phase.label}" (~${Math.round(estLabelW)}px) is wider than its ${Math.round(width)}px span — shorten the label or widen the phase range.`,
+        subject: { diagramType: 'workflow', phase: phase.id, field: 'label', path: `/phases/${inputWorkflow.phases.findIndex((item) => item.id === phase.id)}/label` },
+        evidence: { requiredWidth: estLabelW, availableWidth: width + 8 },
+        supportedFixes: ['widen the phase range or use a concise label with the full explanation in a card'],
+      });
     }
   }
   phaseRanges.sort((a, b) => a.fromCol - b.fromCol || a.toCol - b.toCol);
@@ -2317,7 +2352,16 @@ function validateWorkflow() {
       const earlier = phaseRanges[i];
       const later = phaseRanges[j];
       if (later.fromCol > earlier.toCol) break;
-      problems.push(`Phase "${later.id}" (${later.fromCol}..${later.toCol}) overlaps phase "${earlier.id}" (${earlier.fromCol}..${earlier.toCol}) — start at col ${earlier.toCol + 1} or later, or end the earlier phase at col ${later.fromCol - 1}.`);
+      layoutDiagnostics.push({ code: 'workflow/phase-overlap', severity: 'error',
+        message: `Phase "${later.id}" (${later.fromCol}..${later.toCol}) overlaps phase "${earlier.id}" (${earlier.fromCol}..${earlier.toCol}) — start at col ${earlier.toCol + 1} or later, or end the earlier phase at col ${later.fromCol - 1}.`,
+        subject: { diagramType: 'workflow', phase: later.id, conflictingPhase: earlier.id,
+          path: `/phases/${inputWorkflow.phases.findIndex((item) => item.id === later.id)}/fromCol`,
+          conflictingPath: `/phases/${inputWorkflow.phases.findIndex((item) => item.id === earlier.id)}/toCol` },
+        evidence: { range: [later.fromCol, later.toCol], conflictingRange: [earlier.fromCol, earlier.toCol],
+          minimumFromCol: earlier.toCol + 1, maximumEarlierToCol: later.fromCol - 1 },
+        supportedFixes: [`set phase "${later.id}" fromCol to ${earlier.toCol + 1} or later within its valid range`,
+          `or set phase "${earlier.id}" toCol to ${later.fromCol - 1} or earlier within its valid range`],
+      });
     }
   }
 
@@ -2387,7 +2431,7 @@ function validateWorkflow() {
     obstacleKind: 'node',
     routeHint: 'adjust fromSide/toSide, set route/via or channel coordinates, or move the node to a clearer lane/column'
   }));
-  problems.push(...cleanCrossingProblems({
+  layoutProblems.push(...cleanCrossingProblems({
     relations: workflow.edges,
     endpointIds: new Set(nodes.keys()),
     pathFor,
@@ -2398,7 +2442,7 @@ function validateWorkflow() {
     mergeForwardCollinearWaypoints: workflow.schema_version === 2,
     routeHint: 'adjust route/via, bias, or channel coordinates so the edges use separate lane corridors'
   }));
-  problems.push(...cleanAmbiguousCorridorProblems({
+  layoutProblems.push(...cleanAmbiguousCorridorProblems({
     relations: workflow.edges,
     endpointIds: new Set(nodes.keys()),
     pathFor,
@@ -2408,7 +2452,7 @@ function validateWorkflow() {
     profileIsAuthoritative: true,
     routeHint: 'adjust route/via, bias, or channel coordinates so unrelated edges do not visually merge'
   }));
-  problems.push(...cleanBorderRunProblems({
+  layoutProblems.push(...cleanBorderRunProblems({
     relations: workflow.edges,
     endpointIds: new Set(nodes.keys()),
     frames: workflowCompositionFrames(),
@@ -2419,7 +2463,7 @@ function validateWorkflow() {
     profileIsAuthoritative: true,
     routeHint: 'adjust route/via, bias, or channel coordinates so the edge crosses the lane or group perpendicularly instead of following its border'
   }));
-  problems.push(...cleanRouteRhythmProblems({
+  layoutProblems.push(...cleanRouteRhythmProblems({
     relations: workflow.edges,
     endpointIds: new Set(nodes.keys()),
     pathFor,
@@ -2471,7 +2515,7 @@ function validateWorkflow() {
       }
     }
   }
-  problems.push(...cleanLabelRouteClearanceProblems({
+  layoutProblems.push(...cleanLabelRouteClearanceProblems({
     relations: workflow.edges,
     labels: labelRects,
     endpointIds: new Set(nodes.keys()),
@@ -2496,6 +2540,10 @@ function validateWorkflow() {
       subject: { diagramType: 'workflow' },
     });
   }
+  return [...layoutDiagnostics, ...layoutProblems.map((message) => ({
+    code: 'layout/constraint', severity: 'error', message,
+    subject: { diagramType: 'workflow' }, evidence: {}, supportedFixes: [],
+  }))];
 }
 
 function validateReadableInputsBeforeRouting() {
@@ -2961,8 +3009,8 @@ function routeClearsEndpointNodes(points, from, to) {
   const lastSegment = points.length - 2;
   for (let index = 0; index <= lastSegment; index += 1) {
     const segment = { start: points[index], end: points[index + 1] };
-    if (index > 0 && segmentIntersectsRect(segment, from)) return false;
-    if (index < lastSegment && segmentIntersectsRect(segment, to)) return false;
+    if (index > 0 && !(from.id === to.id && index === lastSegment) && segmentIntersectsRect(segment, from)) return false;
+    if (index < lastSegment && !(from.id === to.id && index === 0) && segmentIntersectsRect(segment, to)) return false;
   }
   return true;
 }
@@ -3103,6 +3151,7 @@ function routeFitsCanvasOrigin(edge, points) {
 
 function readableCandidateIsFeasible(edge, points, from, to, fromSide, toSide) {
   return points.length >= 2
+    && (from.id !== to.id || (fromSide !== toSide && points.length >= 4))
     && orthogonalRoute(points)
     && routeHonorsEndpointSides(points, fromSide, toSide)
     && routeMeetsHardRhythm(points)
@@ -3514,6 +3563,9 @@ function readablePresetVia(edge, from, to, start, end, fromSide, toSide) {
   const edgeIndex = workflow.edges.indexOf(edge);
   const edgeName = workflowEdgeName(edge);
   const supportedFixes = [];
+  if (edge.from === edge.to) {
+    supportedFixes.push(`remove route, fromSide, toSide, via, channelX and channelY from self-loop edge "${edgeName}" to let readable-v2 choose distinct automatic ports; keep the edge and revalidate the full diagram`);
+  }
   for (const candidatePreset of ['straight', 'drop', 'outside-right', 'return-left', 'bottom-channel', 'up-channel']) {
     if (candidatePreset === preset) continue;
     if (acceptsFix((document) => {
@@ -4289,9 +4341,13 @@ ${renderLegend()}
   try {
     validateReadableInputsBeforeRouting();
     validateReadablePinnedGeometry();
-    validateWorkflow();
+    const layoutDiagnostics = validateWorkflow();
     finalizeReadableViewBox();
     const svg = renderSvg();
+    if (layoutDiagnostics.length) {
+      return { ...compilerFailure(layout.contract, layoutDiagnostics,
+        `Workflow layout validation failed:\n- ${layoutDiagnostics.map((item) => item.message).join('\n- ')}`), svg };
+    }
     const receipt = {
       contract: layout.contract,
       viewBox: [...viewBox],

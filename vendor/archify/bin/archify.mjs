@@ -16,7 +16,7 @@ function usage() {
   return `Usage:
   archify render <type> <input.json> [output.html] [--quality standard|showcase] [--repo-root path (architecture only)]
   archify compare architecture <base.json> <head.json> [output.html] [--receipt path] [--json] [--quality standard|showcase] [--repo-root path]
-  archify deliver <type> <input.json> [output.html] [--json] [--open] [--quality standard|showcase] [--repo-root path (architecture only)]
+  archify deliver <type> <input.json> [output.html] [--draft-output draft.html] [--json] [--open] [--quality standard|showcase] [--repo-root path (architecture only)]
   archify preview <type> <input.json> [output.html] [--no-open] [--quality standard|showcase] [--repo-root path (architecture only)]
   archify validate <type> <input.json> [--json] [--layout-json] [--quality standard|showcase] [--repo-root path (architecture only)]
   archify migrate workflow <old.json> <new.json> --to-schema 2 [--json]
@@ -758,7 +758,7 @@ function commandRender(args) {
   if (result.status !== 0) exitFrom(result);
 }
 
-function reportArtifactFailure({ command, json, stage, type, input, output, error, diagnostics = [], status = 1, checker }) {
+function reportArtifactFailure({ command, json, stage, type, input, output, error, diagnostics = [], status = 1, checker, draft }) {
   const receipt = {
     schemaVersion: 1,
     ok: false,
@@ -770,6 +770,7 @@ function reportArtifactFailure({ command, json, stage, type, input, output, erro
     error,
     diagnostics,
     ...(checker ? { checker } : {}),
+    ...(draft ? { draft } : {}),
   };
   if (json) console.log(JSON.stringify(receipt, null, 2));
   else console.error(formatDiagnostics(error, diagnostics));
@@ -819,6 +820,17 @@ function engineeringProfileFromArtifact(artifact) {
 }
 
 async function commandDeliver(args) {
+  let requestedDraft;
+  args = args.filter((arg, index, all) => {
+    if (arg === '--draft-output') {
+      if (requestedDraft || !all[index + 1] || all[index + 1].startsWith('--')) {
+        rejectCliArgument('--draft-output requires one separate HTML output path.');
+      }
+      requestedDraft = all[index + 1];
+      return false;
+    }
+    return index === 0 || all[index - 1] !== '--draft-output';
+  });
   const qualityArgs = extractQualityArgs(args);
   const repoArgs = extractRepoRootArgs(qualityArgs.rest);
   const json = repoArgs.rest.includes('--json');
@@ -870,6 +882,8 @@ async function commandDeliver(args) {
       defaultOutput: `${type}.html`,
       inputPaths: [inputPath],
     }));
+    if (requestedDraft) resolveOutputPath({ requestedOutput: requestedDraft,
+      inputPaths: [inputPath], otherOutputPaths: [outputPath] });
   } catch (error) {
     const attemptedOutput = path.resolve(requestedOutput || authoredOutput || `${type}.html`);
     reportDeliveryFailure({
@@ -939,6 +953,41 @@ async function commandDeliver(args) {
   }
   const candidatePath = path.join(stagingDirectory, path.basename(outputPath));
   const specificationSnapshotPath = path.join(stagingDirectory, 'specification.snapshot.json');
+  const retainDraft = (diagnostics, checker) => {
+    if (!requestedDraft || !fs.existsSync(candidatePath)) return undefined;
+    try {
+      const checked = checker || JSON.parse(runNode([
+        path.join(skillRoot, 'scripts/check-render-output.mjs'), candidatePath,
+      ], { stdio: 'pipe' }).stdout);
+      // A complete finite SVG with valid orthogonal geometry is required even
+      // for a draft. Layout diagnostics remain errors; quality is never lowered.
+      if (!['single_svg', 'finite_svg', 'orthogonal_arrows'].every((name) => (
+        checked.checks?.some((check) => check.name === name && check.ok)
+      ))) return undefined;
+      const { outputPath: draftPath } = resolveOutputPath({ requestedOutput: requestedDraft,
+        inputPaths: [inputPath, specificationSnapshotPath], otherOutputPaths: [outputPath] });
+      let html = fs.readFileSync(candidatePath, 'utf8');
+      html = html.replace(/<title>/i, '<title>草稿 / DRAFT · ')
+        .replace(/<\/head>/i, '<style>body{padding-top:56px!important}.toolbar,.archify-toast{top:56px!important}</style></head>')
+        .replace(/<svg\b/i, '<svg data-delivery-status="draft"')
+        .replace(/<\/svg>/i, '<g data-draft-warning="true" pointer-events="none"><rect x="0" y="0" width="100%" height="30" fill="#fff3cd"/><text x="12" y="20" fill="#664d03" font-family="sans-serif" font-size="14">草稿 / DRAFT — 布局检查未通过</text></g></svg>')
+        .replace(/<body\b([^>]*)>/i, '<body$1><div role="alert" style="position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:8px 16px;background:#fff3cd;color:#664d03;font:14px sans-serif">草稿 / DRAFT — 布局检查未通过；导出仍为草稿</div>');
+      fs.mkdirSync(path.dirname(draftPath), { recursive: true });
+      const draftDirectory = fs.mkdtempSync(path.join(path.dirname(draftPath), '.archify-draft-'));
+      try {
+        const temporary = path.join(draftDirectory, 'draft.html');
+        fs.writeFileSync(temporary, html);
+        resolveOutputPath({ requestedOutput: requestedDraft, inputPaths: [inputPath, specificationSnapshotPath], otherOutputPaths: [outputPath] });
+        fs.renameSync(temporary, draftPath);
+      } finally { fs.rmSync(draftDirectory, { recursive: true, force: true }); }
+      const artifact = Buffer.from(html);
+      return { output: draftPath, sha256: createHash('sha256').update(artifact).digest('hex'), bytes: artifact.byteLength };
+    } catch (error) {
+      diagnostics.push(diagnostic({ code: 'delivery/draft-write', message: `Could not preserve draft: ${error.message}`,
+        subject: { output: path.resolve(requestedDraft) } }));
+      return undefined;
+    }
+  };
 
   try {
     try {
@@ -965,10 +1014,12 @@ async function commandDeliver(args) {
 
     const render = runNode([renderer, specificationSnapshotPath, candidatePath], {
       stdio: 'pipe',
-      env: rendererEnv(qualityArgs.quality, repoArgs.repoRoot, true),
+      env: { ...rendererEnv(qualityArgs.quality, repoArgs.repoRoot, true),
+        ...(requestedDraft ? { ARCHIFY_RETAIN_DRAFT: '1' } : {}) },
     });
     if (render.status !== 0) {
       const failure = rendererFailure(render);
+      const draft = retainDraft(failure.diagnostics);
       reportDeliveryFailure({
         json,
         stage: 'render',
@@ -977,6 +1028,7 @@ async function commandDeliver(args) {
         output: outputPath,
         error: failure.error,
         diagnostics: failure.diagnostics,
+        draft,
         status: render.status ?? 1,
       });
       return;
@@ -994,6 +1046,8 @@ async function commandDeliver(args) {
       } catch {
         checker = { ok: false, file: outputPath, diagnostic: check.stdout.trim() };
       }
+      const diagnostics = checkerDiagnostics(checker);
+      const draft = retainDraft(diagnostics, checker);
       reportDeliveryFailure({
         json,
         stage: 'check',
@@ -1001,7 +1055,8 @@ async function commandDeliver(args) {
         input: inputPath,
         output: outputPath,
         error: 'Final artifact check failed; the previous artifact was preserved.',
-        diagnostics: checkerDiagnostics(checker),
+        diagnostics,
+        draft,
         status: check.status ?? 1,
         checker,
       });

@@ -22,6 +22,10 @@ if (layoutJson) {
   process.stdout.write(`${JSON.stringify(compiled.receipt, null, 2)}\n`);
   if (!compiled.ok) process.exitCode = 1;
 } else if (!compiled.ok) {
+  if (compiled.svg && process.env.ARCHIFY_RETAIN_DRAFT === '1') {
+    writeDiagram({ outPath, template, diagramType: 'workflow', meta: workflow.meta,
+      svg: compiled.svg, cards: workflow.cards });
+  }
   throwDiagnosticError(compiled.error || 'Workflow compilation failed.', compiled.diagnostics);
 } else {
   writeDiagram({

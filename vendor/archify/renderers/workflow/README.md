@@ -3,6 +3,23 @@
 Render `diagram_type: "workflow"` JSON files into the standard Archify HTML
 template.
 
+## Failed-layout drafts
+
+`archify deliver workflow input.json diagram.html --quality showcase --draft-output draft.html --json`
+keeps strict delivery acceptance and preserves any previous `diagram.html` on
+failure. If the same compiler produced complete finite, orthogonal geometry,
+layout failures can retain a separate draft. The receipt remains `ok: false`
+and includes `draft: { output, sha256, bytes }`. HTML and its SVG exports carry
+a visible draft marker. Missing references, invalid input, and unresolved
+routes do not produce a draft. A file left from an older attempt is not evidence
+of a new draft; consumers must use the current receipt.
+
+`workflow/phase-overlap` identifies both phase IDs and exact field paths, the
+overlapping ranges, and permissible boundary changes. `workflow/node-text-width`
+identifies the node text field and required versus available width. These remain
+errors. `compileWorkflow` may attach `svg` to a failed layout result only after
+the full geometry is available; callers must still check `ok` for acceptance.
+
 ```bash
 node archify/renderers/workflow/render-workflow.mjs input.workflow.json output.html
 ```

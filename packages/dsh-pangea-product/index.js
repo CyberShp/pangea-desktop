@@ -39,6 +39,16 @@ export function configuredProviderPlugins(env = process.env, platform = process.
       if (!args.some(arg => arg === '--log-level' || arg.startsWith('--log-level='))) args.push('--log-level', 'ERROR')
     }
     const providerEnv = {}
+    if (defaults.providerName === 'pangea-opencode') {
+      // Desktop owns the Graph binding. OpenCode's PANGEA plugin tools use a
+      // different dispatcher and must not be exposed in these ACP sessions.
+      const inline = JSON.parse(env.OPENCODE_CONFIG_CONTENT || '{}')
+      const permission = typeof inline.permission === 'string'
+        ? { '*': inline.permission } : { ...inline.permission }
+      delete permission['pangea_*']
+      permission['pangea_*'] = 'deny'
+      providerEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify({ ...inline, permission })
+    }
     if (platform === 'win32' && defaults.providerName === 'pangea-codeagent') {
       const key = Object.keys(env).find(key => key.toUpperCase() === 'CODEAGENT3_WINDOWS_SHELL_TYPE') ?? 'CODEAGENT3_WINDOWS_SHELL_TYPE'
       providerEnv[key] = typeof env[key] === 'string' && env[key].trim() ? env[key] : 'powershell'
