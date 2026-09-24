@@ -1,2 +1,4 @@
-Build 1.0.5 test full package from current langgraph components.
-No incremental patch: stable 1.0.4 is not a test-channel base.
+Build 1.0.6 test full package with synchronized 2026-09-24 component locks.
+Companion: 29c26824a1faa9bed9f2913fffa4f9b0a2ac5d7e
+Agent: 14c3f6ce1799c818a8afeed9510651512511ba86
+No incremental patch, matching failed workflow run 35943846173.
