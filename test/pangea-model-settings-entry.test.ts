@@ -293,7 +293,7 @@ describe('PANGEA model settings entry', () => {
       react, jsx, 'create', 'directory', () => [], () => ({ type: 'editor' }), (row: any) => row.entry,
       (callback: () => void) => { scheduled = callback }, { dispatchEvent: (event: { options: { detail: unknown } }) => { dispatched = event } }, class { constructor(public type: string, public options: unknown) {} })
     expect(error.props.role).toBe('alert')
-    expect(find(error, node => node.props?.children === 'settings service unavailable')).toBeDefined()
+    expect(find(error, node => node.props?.title === 'settings service unavailable')).toBeDefined()
     find(error, node => node.type === 'button' && node.props.children === '重新打开').props.onClick()
     expect(onClose).toHaveBeenCalledOnce()
     scheduled?.()

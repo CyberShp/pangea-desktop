@@ -383,11 +383,13 @@ function installProductReadonlyTitle(source) {
   const advancedTitle = title.replace('productTarget?.providerId ? "模型接入"', 'productTarget?.providerId && advancedOpen ? "模型自定义设置" : productTarget?.providerId ? "模型接入"')
   const legacyTitle = title.replace('productTarget?.create && validationError ? "模型连接字段校验" : ', '')
   const previousTitle = title.replace('productTarget?.create && credentialRetry ? "连接已创建，凭据待保存" : ', '')
+  const bareTitle = legacyTitle.replace('productTarget?.create && credentialRetry ? "连接已创建，凭据待保存" : ', '')
   const previousAdvancedTitle = previousTitle.replace('productTarget?.providerId ? "模型接入"', 'productTarget?.providerId && advancedOpen ? "模型自定义设置" : productTarget?.providerId ? "模型接入"')
   const readOnlyTitle = `state.status === "ready" && state.writable === false ? "模型设置只读" : ${title}`
   const readOnlyAdvancedTitle = `state.status === "ready" && state.writable === false ? "模型设置只读" : ${advancedTitle}`
   const previousReadOnlyAdvancedTitle = `state.status === "ready" && state.writable === false ? "模型设置只读" : ${previousAdvancedTitle}`
   const legacyReadOnlyTitle = `state.status === "ready" && state.writable === false ? "模型设置只读" : ${legacyTitle}`
+  const bareReadOnlyTitle = `state.status === "ready" && state.writable === false ? "模型设置只读" : ${bareTitle}`
   body = body.split(previousReadOnlyAdvancedTitle).join(readOnlyAdvancedTitle)
   body = body.split(previousAdvancedTitle).join(readOnlyAdvancedTitle)
   const heading = `children: ${readOnlyTitle}`
@@ -395,6 +397,7 @@ function installProductReadonlyTitle(source) {
     if (body.includes(`children: ${legacyTitle}`)) body = replaceExactlyOnce(body, `children: ${legacyTitle}`, heading, 'model dialog title')
     else if (body.includes(`children: ${title}`)) body = replaceExactlyOnce(body, `children: ${title}`, heading, 'model dialog title')
     else if (body.includes(`children: ${advancedTitle}`)) body = replaceExactlyOnce(body, `children: ${advancedTitle}`, `children: ${readOnlyAdvancedTitle}`, 'model dialog title')
+    else if (body.includes(`children: ${bareTitle}`)) body = replaceExactlyOnce(body, `children: ${bareTitle}`, heading, 'model dialog title')
     else if (body.includes('children: "内部模型设置" }),')) body = replaceExactlyOnce(body,
       'children: "内部模型设置" }),', `children: ${readOnlyTitle} }),`, 'model dialog title')
     else throw new Error('PANGEA model settings patch: missing model dialog title anchor')
@@ -403,9 +406,11 @@ function installProductReadonlyTitle(source) {
   const advancedLabel = `"aria-label": ${readOnlyAdvancedTitle},`
   if (!body.includes(label) && !body.includes(advancedLabel)) {
     if (body.includes(legacyReadOnlyTitle)) body = replaceExactlyOnce(body, legacyReadOnlyTitle, readOnlyTitle, 'model dialog label')
+    else if (body.includes(bareReadOnlyTitle)) body = replaceExactlyOnce(body, bareReadOnlyTitle, readOnlyTitle, 'model dialog label')
     else if (body.includes(`"aria-label": ${legacyTitle},`)) body = body.replace(`"aria-label": ${legacyTitle},`, label)
     else if (body.includes(`"aria-label": ${title},`)) body = body.replace(`"aria-label": ${title},`, label)
     else if (body.includes(`"aria-label": ${advancedTitle},`)) body = body.replace(`"aria-label": ${advancedTitle},`, advancedLabel)
+    else if (body.includes(`"aria-label": ${bareTitle},`)) body = body.replace(`"aria-label": ${bareTitle},`, label)
     else if (body.includes('"aria-label": "内部模型设置",')) body = body.replace('"aria-label": "内部模型设置",', label)
     else throw new Error('PANGEA model settings patch: missing model dialog label anchor')
   }
@@ -437,6 +442,7 @@ function removeOfficialModelSetup(source) {
 }
 
 let source = await readFile(clientPath, 'utf8')
+if (source.includes('function pangeaModelProvider(entry)') && source.includes('pangea-model-conflict-state') && source.includes('pangea-model-advanced-provider-id')) process.exit(0)
 const before = source
 source = installOverlay(source)
 source = source.replace('inset: 0, zIndex: 900, display: "grid"', 'inset: 0, zIndex: 20000, display: "grid"')
@@ -460,14 +466,13 @@ source = installCustomProviderView(source)
 source = installCustomProviderRetryState(source)
 source = installProductModelCopy(source)
 source = installProductReadonlyTitle(source)
-source = source.replace('className: "pangea-model-overlay-notice", children: [(0, react_jsx_runtime.jsx)("strong", { children: "模型设置暂时不可用" }), (0, react_jsx_runtime.jsx)("p", { children: viewState.error ?? "读取内部模型配置失败，请关闭后重新打开。" })]', 'className: "pangea-model-overlay-notice", title: viewState.error, children: [(0, react_jsx_runtime.jsx)("strong", { children: "模型设置暂时不可用" }), (0, react_jsx_runtime.jsx)("p", { children: "读取内部模型配置失败，请关闭后重新打开。" })]')
-source = installProviderConflictReload(source)
+source = keepCustomCreateMountedDuringRefresh(source)
 source = installProviderReadonlyView(source)
 source = installModelCatalogView(source)
 source = installProviderAdvancedView(source)
-source = keepCustomCreateMountedDuringRefresh(source)
+source = installAdvancedProviderTitle(source)
 source = installCredentialRetryState(source)
+source = installProviderConflictReload(source)
 source = wrapNativeOnboardingRegistration(source)
 source = removeOfficialModelSetup(source)
-source = installAdvancedProviderTitle(source)
 if (source !== before) await writeFile(clientPath, source, 'utf8')

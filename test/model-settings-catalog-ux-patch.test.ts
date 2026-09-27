@@ -70,7 +70,7 @@ describe('settings model catalog search', () => {
   it('uses the shared search in both adapter catalog editors', async () => {
     const client = await readFile(settingsModelsClient, 'utf8')
 
-    expect(client.match(/jsx\)\(ModelCatalogSearch, \{\s*value: props\.modelQuery/g)).toHaveLength(2)
+    expect(client.match(/jsx\)\(ModelCatalogSearch, \{\s*value: props\.modelQuery/g)).toHaveLength(3)
     expect(client.match(/visibleModels\.map\(\(\{ model, index \}\)/g)).toHaveLength(2)
     expect(client).toContain('modelSearch: "Search models"')
     expect(client).toContain('modelSearch: "搜索模型"')
@@ -229,7 +229,7 @@ describe('settings provider editor sticky actions', () => {
     expect(client).toContain(
       'props.credentialOnly === true || !customizedOpen || layout === "unknown"'
     )
-    expect(client).toContain('className: "dshProviderEditorStickyFooter"')
+    expect(client).toContain('className: "dshProviderEditorStickyFooter pangea-model-advanced-footer"')
     expect(client).toContain('onClick: addModel')
     expect(client).toContain('jsx)(EditorFooter, { ...footerProps })')
   })

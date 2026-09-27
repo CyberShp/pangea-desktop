@@ -81,7 +81,7 @@ export function installCustomProviderRetryState(source) {
 }
 
 export function installProductModelCopy(source) {
-  if (source.includes('"环境凭据只读"') && source.includes('PangeaInternalModelSettings, { ...props, t: pangeaModelText')) return source;
+  if (source.includes('pangea-model-advanced-provider-id') && source.includes('pangea-model-conflict-state')) return source;
   const original = 'PangeaInternalModelSettings, { ...props, productTarget, onClose: close }';
   const localized = 'PangeaInternalModelSettings, { ...props, t: pangeaModelText, productTarget, onClose: close }';
   const validationLocalized = 'PangeaInternalModelSettings, { ...props, t: pangeaModelText, productTarget, onValidationState: setValidationError, onClose: close }';
@@ -758,7 +758,7 @@ export function installProviderAdvancedView(source) {
     body = body.slice(0, fieldAt) + `className: "${className}",` + body.slice(fieldAt + 'className: ModelsSection_module_css_default["field"],'.length);
   }
   const keyLabel = 'children: t("keyInput")';
-  const keyLabelAt = body.indexOf(keyLabel);
+  const keyLabelAt = body.lastIndexOf(keyLabel);
   const keyFieldAt = body.lastIndexOf('className: ModelsSection_module_css_default["field"],', keyLabelAt);
   if (keyLabelAt < 0 || keyFieldAt < 0) throw new Error('Missing advanced credential field');
   body = body.slice(0, keyFieldAt) + 'className: "pangea-model-advanced-field pangea-model-credential-field",' + body.slice(keyFieldAt + 'className: ModelsSection_module_css_default["field"],'.length);
@@ -831,7 +831,7 @@ export function installProviderConflictReload(source) {
     const viewAnchor = 'const viewState = state.status === "loading" && props.productTarget?.create && lastReadySnapshot.current ? lastReadySnapshot.current : state;';
     const view = `
       if (props.productConflictOpen === true) {
-        const row = state.rows.find(item => item.entry.provider === props.productTarget?.providerId);
+        const row = viewState.rows.find(item => item.entry.provider === props.productTarget?.providerId);
         return (0, react_jsx_runtime.jsxs)("div", { className: "pangea-model-overlay-state pangea-model-conflict-state", children: [
           (0, react_jsx_runtime.jsxs)("div", { className: "pangea-model-overlay-notice pangea-model-conflict-notice", role: "alert", children: [
             (0, react_jsx_runtime.jsx)("strong", { children: "ⓘ  配置已经发生变化" }),
