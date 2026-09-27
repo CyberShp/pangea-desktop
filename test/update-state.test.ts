@@ -35,6 +35,35 @@ describe('desktop update state', () => {
     expect(status.manual).toBe(true)
   })
 
+  it('keeps the selected ZIP name through validation and its result', () => {
+    const selected = reduceUpdateStatus(initialUpdateStatus('1.0.4'), {
+      type: 'check', manual: true, packageName: 'PANGEA-Desktop-1.0.5-win.zip'
+    })
+    const validating = reduceUpdateStatus(selected, { type: 'progress', percent: 43 })
+    const ready = reduceUpdateStatus(validating, { type: 'downloaded', version: '1.0.5', packageType: 'full' })
+    const failed = reduceUpdateStatus(validating, { type: 'error', message: 'signature invalid' })
+    expect([selected, validating, ready, failed].map(status => status.packageName)).toEqual(Array(4).fill('PANGEA-Desktop-1.0.5-win.zip'))
+    expect(reduceUpdateStatus(ready, { type: 'reset' }).packageName).toBeUndefined()
+  })
+
+  it('retains signed patch base and target details when the base does not match', () => {
+    const status = reduceUpdateStatus(initialUpdateStatus('1.0.4'), {
+      type: 'error',
+      message: '此补丁仅适用于 1.0.3，当前版本为 1.0.4。',
+      packageType: 'patch',
+      baseVersion: '1.0.3',
+      availableVersion: '1.0.5'
+    })
+
+    expect(status).toMatchObject({
+      phase: 'error',
+      currentVersion: '1.0.4',
+      packageType: 'patch',
+      baseVersion: '1.0.3',
+      availableVersion: '1.0.5'
+    })
+  })
+
   it('clamps invalid download percentages', () => {
     const status = {
       ...initialUpdateStatus('1.0.0'),

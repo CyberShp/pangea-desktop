@@ -70,6 +70,7 @@
     "dsh-desktop-market-installer": "file:packages/dsh-desktop-market-installer",
     "dsh-pangea-product": "file:packages/dsh-pangea-product",
     "node": "24.9.0",
+    "pdfjs-dist": "^5.4.624",
     "pnpm": "10.34.5",
     "qrcode": "^1.5.4",
     "react": "18.3.1",

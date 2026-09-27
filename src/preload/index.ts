@@ -8,7 +8,7 @@ import {
 } from './update-view'
 import { isPluginLoadError } from './plugin-error-view'
 import { findBootFailureText } from './boot-failure'
-import { mountWindowsTitlebarLayout } from './windows-titlebar'
+import { mountWindowsTheme } from './windows-titlebar'
 import { createDesktopBridge } from './desktop-bridge'
 
 import { installHistoryNavigationGuard } from './history-navigation'
@@ -218,7 +218,7 @@ async function refreshMobileStatus(): Promise<void> {
 
 function initializeUi(): void {
   if (process.platform === 'win32') {
-    mountWindowsTitlebarLayout({ document, ipcRenderer })
+    mountWindowsTheme({ document, ipcRenderer })
   }
   mount()
   mountMobileButton()
@@ -319,27 +319,41 @@ function render(): void {
   }
 
   host.style.display = 'block'
+  const productShell = document.body.hasAttribute('data-pangea-product-shell')
+  const updateLocale: UpdateLocale = productShell ? 'zh' : locale
+  host.classList.toggle('product', productShell)
+  host.style.right = productShell ? '28px' : '20px'
+  host.style.bottom = productShell ? '80px' : '20px'
   const status = currentStatus
   const card = element('aside', 'card')
   card.setAttribute('aria-live', 'polite')
-  card.setAttribute('aria-label', locale === 'zh' ? 'PANGEA Desktop 更新' : 'PANGEA Desktop update')
+  card.setAttribute('aria-label', updateLocale === 'zh' ? 'PANGEA Desktop 更新' : 'PANGEA Desktop update')
 
   const row = element('div', 'row')
-  const badge = element('span', status.phase === 'error' ? 'badge warning' : 'badge')
-  badge.setAttribute('aria-hidden', 'true')
-  if (isBusy(status)) badge.appendChild(element('span', 'spinner'))
-  else badge.innerHTML = updateIcon
-  row.appendChild(badge)
+  if (!productShell) {
+    const badge = element('span', status.phase === 'error' ? 'badge warning' : 'badge')
+    badge.setAttribute('aria-hidden', 'true')
+    if (isBusy(status)) badge.appendChild(element('span', 'spinner'))
+    else badge.innerHTML = updateIcon
+    row.appendChild(badge)
+  }
 
-  const headline = updateHeadline(status, locale)
+  const headline = updateHeadline(status, updateLocale)
   const body = element('div', 'body')
+  if (productShell) {
+    const kicker = element('p', 'kicker')
+    kicker.textContent = 'PANGEA DESKTOP'
+    body.appendChild(kicker)
+  }
   const title = element('p', 'title')
   title.textContent = headline.title
   body.appendChild(title)
 
   // The failure's own words beat ours, when it has any.
   const description = element('p', 'description')
-  description.textContent = status.message ?? headline.description
+  description.textContent = status.message ?? (productShell && status.phase === 'downloaded' && status.availableVersion
+    ? `${status.availableVersion} 已验证。完成当前分析后，可以重启升级。`
+    : headline.description)
   if (description.textContent) body.appendChild(description)
 
   if (status.phase === 'downloading') {
@@ -358,14 +372,15 @@ function render(): void {
     const actions = element('div', 'actions')
     const install = button(
       installing
-        ? locale === 'zh'
+        ? updateLocale === 'zh'
           ? '正在重启…'
           : 'Restarting…'
-        : locale === 'zh'
+        : updateLocale === 'zh'
           ? '重启并升级'
           : 'Restart and update',
       'primary'
     )
+    if (productShell) install.insertAdjacentHTML('afterbegin', updateIcon)
     install.disabled = installing
     install.addEventListener('click', () => {
       installing = true
@@ -383,7 +398,7 @@ function render(): void {
   row.appendChild(body)
 
   const close = button('×', 'close')
-  close.setAttribute('aria-label', locale === 'zh' ? '关闭' : 'Close')
+  close.setAttribute('aria-label', updateLocale === 'zh' ? '关闭' : 'Close')
   close.addEventListener('click', dismissCurrent)
   row.appendChild(close)
 
@@ -523,6 +538,17 @@ const styles = `
     line-height: 20px;
   }
   .close:hover { color: var(--dsw-alias-label-primary, #202124); background: rgba(127, 127, 127, 0.1); }
+  :host(.product) { width:min(380px,calc(100vw - 56px))!important; font-family:"Huawei Sans","HarmonyOS Sans SC","PingFang SC","Microsoft YaHei UI",sans-serif!important; }
+  :host(.product) .card { position:relative; min-height:174px; padding:21px 22px 20px; border-radius:12px; background:#fff; color:#202226; box-shadow:0 20px 44px rgba(24,28,36,.13); backdrop-filter:none; }
+  :host(.product) .row { display:block; }
+  :host(.product) .kicker { margin:0; color:#858b94; font-size:10px; line-height:15px; letter-spacing:1.2px; }
+  :host(.product) .title { margin-top:13px; font-size:14px; line-height:20px; letter-spacing:0; }
+  :host(.product) .description { margin-top:8px; color:#6f7580; font-size:12px; line-height:18px; }
+  :host(.product) .actions { margin-top:18px; }
+  :host(.product) .primary { min-height:36px; padding:7px 15px; border-radius:5px; background:#24272b; font-size:12px; }
+  :host(.product) .primary svg { width:14px; height:14px; margin-right:7px; vertical-align:-3px; }
+  :host(.product) .primary:hover:not(:disabled) { background:#3b3e43; }
+  :host(.product) .close { position:absolute; top:10px; right:10px; width:30px; height:30px; margin:0; border-radius:5px; background:#f4f4f4; color:#24272b; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-color-scheme: dark) {
     .card {

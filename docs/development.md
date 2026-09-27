@@ -10,6 +10,8 @@ Development validation uses the separate `pangea-desktop-analysis-test` project 
 
 The isolated launcher sets `PANGEA_USER_DATA_DIR` before starting the test executable. Desktop resolves this value to an absolute Electron `userData` path before acquiring the single-instance lock. Validation must confirm that the launched Harness child uses the isolated directory in its `--user-data-dir` argument; changing `APPDATA` or `LOCALAPPDATA` alone is not an isolation mechanism.
 
+Set `PANGEA_MOBILE_PORT=0` for an isolated instance running alongside the normal app. This assigns an available mobile-bridge port; the bridge reports its actual port in pairing URLs. Explicit ports from 1 to 65535 are also supported. Without this variable, packaged and development builds retain ports 43127 and 43128 respectively.
+
 ## Local checks
 
 ```bash

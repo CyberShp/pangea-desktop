@@ -14,6 +14,7 @@ function fakeIpc() {
         packageType: 'patch', baseVersion: '0.1.9', manual: true
       } satisfies UpdateStatus
     }
+    if (channel === 'updates:install') return { helperLaunched: true }
     return { ok: true }
   })
   return {
@@ -41,7 +42,7 @@ describe('PANGEA Desktop renderer bridge', () => {
     await expect(bridge.importUpdatePackage()).resolves.toMatchObject({
       phase: 'downloaded', packageType: 'patch', baseVersion: '0.1.9'
     })
-    await bridge.installUpdate()
+    await expect(bridge.installUpdate()).resolves.toEqual({ helperLaunched: true })
 
     expect(ipc.invoke.mock.calls.map(([channel]) => channel)).toEqual([
       'updates:status', 'updates:import', 'updates:install'

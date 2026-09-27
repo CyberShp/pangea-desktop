@@ -101,6 +101,14 @@ interface MobileQuestionAnswer {
   custom?: string
 }
 
+export function configuredMobilePort(value: string | undefined, defaultPort: number): number {
+  if (value === undefined) return defaultPort
+  if (!/^\d+$/.test(value) || Number(value) > 65535) {
+    throw new Error('PANGEA_MOBILE_PORT must be an integer from 0 to 65535')
+  }
+  return Number(value)
+}
+
 export class LanMobileBridge {
   private server?: ReturnType<typeof createServer>
   private port?: number

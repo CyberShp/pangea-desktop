@@ -28,7 +28,7 @@ import {
 } from './state/profile-install-marker'
 import { inspectProfileConsistency } from './state/profile-consistency'
 import { ensureStoreDirPinned, inspectStoreConsistency } from './state/profile-store'
-import { LanMobileBridge } from './mobile/lan-mobile-bridge'
+import { LanMobileBridge, configuredMobilePort } from './mobile/lan-mobile-bridge'
 import {
   detectPluginRecovery,
   PLUGIN_RECOVERY_EVIDENCE_TIMEOUT_MS
@@ -69,7 +69,6 @@ import type { RuntimeSnapshot } from '../shared/contracts'
 import { resolveHarnessLocale } from './application-locale'
 import { installContextMenu } from './context-menu'
 import {
-  WINDOWS_TITLEBAR_HEIGHT,
   isDesktopMenuCommand,
   isZoomMenuCommand,
   type DesktopMenuCommand
@@ -210,20 +209,9 @@ function isDevelopmentBuild(): boolean {
 
 const developmentBuild = isDevelopmentBuild()
 
-function windowsTitleBarOverlay(isDark: boolean): Electron.TitleBarOverlayOptions {
-  return {
-    color: '#00000000',
-    symbolColor: isDark ? '#f3f4f6' : '#202124',
-    height: WINDOWS_TITLEBAR_HEIGHT
-  }
-}
-
 function applyWindowChromeTheme(window: BrowserWindow, isDark: boolean): void {
   if (window.isDestroyed()) return
   window.setBackgroundColor(isDark ? '#141416' : '#ffffff')
-  if (process.platform === 'win32') {
-    window.setTitleBarOverlay(windowsTitleBarOverlay(isDark))
-  }
 }
 
 function configureAppIdentity(): void {
@@ -444,8 +432,6 @@ function createWindow(): BrowserWindow {
     frame: process.platform !== 'darwin',
     ...(isWindows
       ? {
-          titleBarStyle: 'hidden' as const,
-          titleBarOverlay: windowsTitleBarOverlay(nativeTheme.shouldUseDarkColors),
           autoHideMenuBar: true
         }
       : {}),
@@ -889,6 +875,7 @@ async function waitForPluginRecoveryAction(options: {
 
 function showUnexpectedError(error: unknown): void {
   const message = error instanceof Error ? error.stack ?? error.message : String(error)
+  console.error('[pangea-desktop] Unexpected error:', message)
   dialog.showErrorBox('PANGEA Desktop encountered an error', message)
 }
 
@@ -1424,7 +1411,7 @@ async function bootstrap(): Promise<void> {
     },
     appIconPath: desktopIconPath(),
     cloudflaredCacheDir: join(app.getPath('userData'), 'bin'),
-    port: developmentBuild ? 43128 : 43127,
+    port: configuredMobilePort(process.env.PANGEA_MOBILE_PORT, developmentBuild ? 43128 : 43127),
     onReconnectRequested: () => {
       void showMobilePairing().catch(showUnexpectedError)
     }

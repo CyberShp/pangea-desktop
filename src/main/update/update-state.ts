@@ -1,12 +1,12 @@
 import type { UpdateStatus } from '../../shared/contracts'
 
 export type UpdateStateEvent =
-  | { type: 'check'; manual: boolean }
+  | { type: 'check'; manual: boolean; packageName?: string }
   | { type: 'progress'; percent: number }
   | { type: 'downloaded'; version: string; packageType?: 'full' | 'patch'; baseVersion?: string }
   | { type: 'install-error'; message: string }
   | { type: 'restore-error'; version: string; message: string }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; packageType?: 'patch'; baseVersion?: string; availableVersion?: string }
   | { type: 'unsupported'; message: string }
   | { type: 'reset' }
 
@@ -22,13 +22,14 @@ export function reduceUpdateStatus(
 
   switch (event.type) {
     case 'check':
-      return { ...base, phase: 'checking', manual: event.manual }
+      return { ...base, phase: 'checking', manual: event.manual, ...(event.packageName ? { packageName: event.packageName } : {}) }
     case 'progress':
       return { ...current, phase: 'downloading', percent: clampPercent(event.percent) }
     case 'downloaded':
       return {
         ...base,
         phase: 'downloaded',
+        ...(current.packageName ? { packageName: current.packageName } : {}),
         availableVersion: event.version,
         ...(event.packageType ? { packageType: event.packageType } : {}),
         ...(event.baseVersion ? { baseVersion: event.baseVersion } : {})
@@ -44,7 +45,15 @@ export function reduceUpdateStatus(
         message: event.message
       }
     case 'error':
-      return { ...base, phase: 'error', message: event.message }
+      return {
+        ...base,
+        phase: 'error',
+        ...(current.packageName ? { packageName: current.packageName } : {}),
+        message: event.message,
+        ...(event.packageType ? { packageType: event.packageType } : {}),
+        ...(event.baseVersion ? { baseVersion: event.baseVersion } : {}),
+        ...(event.availableVersion ? { availableVersion: event.availableVersion } : {})
+      }
     case 'unsupported':
       return { ...base, phase: 'unsupported', message: event.message }
     case 'reset':

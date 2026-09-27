@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
-import { stagePortablePatch } from '../src/main/update/portable-patch-validator'
+import { PortablePatchBaseVersionMismatch, stagePortablePatch } from '../src/main/update/portable-patch-validator'
 
 const roots: string[] = []
 
@@ -63,6 +63,19 @@ describe('portable patch generation', () => {
     ])
     expect(staged.manifest.deletes).toEqual(['resources/app/old.js'])
     expect(staged.targetManifest.version).toBe('1.0.1')
+
+    await expect(stagePortablePatch({
+      sourcePath: output,
+      destinationPath: path.join(root, 'import', 'mismatched-patch.zip'),
+      publicKeyPem: publicKey,
+      currentVersion: '1.0.2'
+    })).rejects.toBeInstanceOf(PortablePatchBaseVersionMismatch)
+    await expect(stagePortablePatch({
+      sourcePath: output,
+      destinationPath: path.join(root, 'import', 'mismatched-patch-details.zip'),
+      publicKeyPem: publicKey,
+      currentVersion: '1.0.2'
+    })).rejects.toMatchObject({ baseVersion: '1.0.0', currentVersion: '1.0.2', availableVersion: '1.0.1' })
   })
 })
 

@@ -1,38 +1,31 @@
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import {
-  WINDOWS_TITLEBAR_HEIGHT,
   desktopMenuCommands,
   formatZoomPercentage,
   isDesktopMenuCommand
 } from '../src/shared/desktop-menu'
 
 describe('Windows titlebar and native fallback menu', () => {
-  it('uses a Windows-only overlay while preserving the macOS frame behavior', async () => {
+  it('uses native Windows chrome outside product content while preserving the macOS frame behavior', async () => {
     const main = await readFile('src/main/index.ts', 'utf8')
 
     expect(main).toContain("const isWindows = process.platform === 'win32'")
     expect(main).toContain("frame: process.platform !== 'darwin'")
-    expect(main).toContain("titleBarStyle: 'hidden' as const")
-    expect(main).toContain('titleBarOverlay: windowsTitleBarOverlay')
+    expect(main).not.toContain("titleBarStyle: 'hidden' as const")
+    expect(main).not.toContain('titleBarOverlay:')
     expect(main).toContain('autoHideMenuBar: true')
     expect(main).toContain('window.setMenuBarVisibility(false)')
     expect(main).toContain('Menu.setApplicationMenu(Menu.buildFromTemplate(template))')
   })
 
-  it('keeps the entire Windows app full-height with a draggable product header', async () => {
-    const main = await readFile('src/main/index.ts', 'utf8')
+  it('does not install overlay drag regions or reserve product content for captions', async () => {
     const preload = await readFile('src/preload/windows-titlebar.ts', 'utf8')
-
-    expect(WINDOWS_TITLEBAR_HEIGHT).toBe(36)
-    expect(main).toContain("color: '#00000000'")
-    expect(preload).toContain('padding-top: 0 !important')
-    expect(preload).toContain('trackSidebarLayout(document)')
-    expect(preload).toContain("dragRegion.id = DRAG_REGION_ID")
-    expect(preload).toContain('-webkit-app-region: drag')
-    expect(preload).toContain('right: var(${CAPTION_WIDTH_PROPERTY}, 140px)')
-    expect(preload).toContain('pointer-events: none')
-    expect(preload).toContain('-webkit-app-region: no-drag !important')
+    const entry = await readFile('src/preload/index.ts', 'utf8')
+    expect(entry).toContain('mountWindowsTheme({ document, ipcRenderer })')
+    expect(preload).not.toContain('titlebar-area-width')
+    expect(preload).not.toContain('installDragRegion')
+    expect(preload).not.toContain('document.createElement')
   })
 
   it('removes the non-interactive child-view arrow menu', async () => {
@@ -80,11 +73,12 @@ describe('Windows titlebar and native fallback menu', () => {
     expect(main).toContain('importPortableUpdatePackage()')
   })
 
-  it('synchronizes native caption controls with the Harness theme', async () => {
+  it('preserves window background theme synchronization without overlay calls', async () => {
     const main = await readFile('src/main/index.ts', 'utf8')
     const preload = await readFile('src/preload/windows-titlebar.ts', 'utf8')
 
-    expect(main).toContain('window.setTitleBarOverlay(windowsTitleBarOverlay(isDark))')
+    expect(main).not.toContain('setTitleBarOverlay')
+    expect(main).toContain("window.setBackgroundColor(isDark ? '#141416' : '#ffffff')")
     expect(main).toContain("ipcMain.handle('desktop-titlebar:set-theme'")
     expect(preload).toContain("attributeFilter: ['data-ds-dark-theme', 'class', 'style']")
     expect(preload).toContain("ipcRenderer.invoke('desktop-titlebar:set-theme', isDark)")

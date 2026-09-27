@@ -5,11 +5,20 @@ import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 import {
   isPrivateAddress,
+  configuredMobilePort,
   LanMobileBridge,
   normalizeRemoteAddress
 } from '../src/main/mobile/lan-mobile-bridge'
 
 const bridges: LanMobileBridge[] = []
+it('accepts an explicit isolated bridge port while retaining the default', () => {
+  expect(configuredMobilePort(undefined, 43127)).toBe(43127)
+  expect(configuredMobilePort('0', 43127)).toBe(0)
+  expect(configuredMobilePort('43129', 43127)).toBe(43129)
+  for (const invalid of ['', '-1', '65536', '1.5', 'NaN']) {
+    expect(() => configuredMobilePort(invalid, 43127)).toThrow('PANGEA_MOBILE_PORT')
+  }
+})
 const servers: ReturnType<typeof createServer>[] = []
 interface TestWebSocket {
   send(data: string): void

@@ -3,13 +3,14 @@ import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
-import type { UpdateStatus } from '../../shared/contracts'
+import type { UpdateInstallResult, UpdateStatus } from '../../shared/contracts'
 import { stagePortablePackage, type StagedPortablePackage } from './portable-package-validator'
-import { isPortablePatchArchive, stagePortablePatch, type StagedPortablePatch } from './portable-patch-validator'
+import { isPortablePatchArchive, PortablePatchBaseVersionMismatch, stagePortablePatch, type StagedPortablePatch } from './portable-patch-validator'
 import type { PortableUpdateConfig } from './portable-update'
 import { initialUpdateStatus, reduceUpdateStatus, type UpdateStateEvent } from './update-state'
 import { launchPortableHelper } from './launch-portable-helper'
 import { stageUpdateHelper } from './stage-update-helper'
+import { canImportPortableUpdate } from './update-capability'
 
 interface LoadedUpdateConfig {
   publicKeyPem: string
@@ -55,7 +56,7 @@ export function startUpdateManager(options: { prepareToInstall: () => Promise<vo
 
 export async function importPortableUpdatePackage(): Promise<UpdateStatus> {
   if (importing || installing) return getUpdateStatus()
-  if (!app.isPackaged || process.platform !== 'win32') {
+  if (!canImportPortableUpdate(app.isPackaged, process.platform)) {
     transition({ type: 'unsupported', message: 'ZIP 升级包只能在已打包的 Windows 版本中导入。' }, true)
     return getUpdateStatus()
   }
@@ -78,7 +79,7 @@ export async function importPortableUpdatePackage(): Promise<UpdateStatus> {
   if (result.canceled || !sourcePath) return getUpdateStatus()
 
   importing = true
-  transition({ type: 'check', manual: true })
+  transition({ type: 'check', manual: true, packageName: basename(sourcePath) })
   await clearStagedPackage()
   const root = join(app.getPath('userData'), 'updates', `import-${randomUUID()}`)
   const destination = join(root, 'pangea-desktop.zip')
@@ -113,24 +114,29 @@ export async function importPortableUpdatePackage(): Promise<UpdateStatus> {
     }
   } catch (error) {
     await clearStagedPackage()
-    transition({ type: 'error', message: errorMessage(error) }, true)
+    transition(error instanceof PortablePatchBaseVersionMismatch
+      ? { type: 'error', message: error.message, packageType: error.packageType, baseVersion: error.baseVersion, availableVersion: error.availableVersion }
+      : { type: 'error', message: errorMessage(error) }, true)
   } finally {
     importing = false
   }
   return getUpdateStatus()
 }
 
-export async function installImportedUpdate(): Promise<void> {
+export async function installImportedUpdate(): Promise<UpdateInstallResult> {
   const imported = stagedPackage
-  if (status.phase !== 'downloaded' || !imported || installing) return
+  if (status.phase !== 'downloaded' || !imported || installing) return { helperLaunched: false }
   installing = true
   try {
     await prepareToInstall?.()
     await launchPortableUpdateHelper(imported)
-    app.quit()
+    // Let the IPC reply render the confirmed handoff before Desktop exits.
+    setTimeout(() => app.quit(), 1000)
+    return { helperLaunched: true }
   } catch (error) {
     installing = false
     transition({ type: 'install-error', message: errorMessage(error) }, true)
+    return { helperLaunched: false }
   }
 }
 

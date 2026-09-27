@@ -95,7 +95,7 @@ describe('secure update card wiring', () => {
     expect(bridge).toContain("ipc.invoke('updates:install')")
     expect(bridge).toContain('getUpdateStatus: (): Promise<UpdateStatus>')
     expect(bridge).toContain('importUpdatePackage: (): Promise<UpdateStatus>')
-    expect(bridge).toContain('installUpdate: (): Promise<void>')
+    expect(bridge).toContain('installUpdate: (): Promise<UpdateInstallResult>')
     expect(bridge).toContain('subscribeUpdateStatus: (listener: (status: UpdateStatus) => void): number')
     expect(bridge).toContain('unsubscribeUpdateStatus: (subscriptionId: number): void')
     expect(preload).not.toContain('dsh-desktop-update-button')

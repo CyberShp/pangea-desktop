@@ -1,4 +1,4 @@
-import type { UpdateStatus } from '../shared/contracts'
+import type { UpdateInstallResult, UpdateStatus } from '../shared/contracts'
 
 interface DesktopBridgeIpc {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
@@ -12,7 +12,7 @@ export interface DshDesktopBridge {
   restartHarness(): Promise<{ ok: boolean }>
   getUpdateStatus(): Promise<UpdateStatus>
   importUpdatePackage(): Promise<UpdateStatus>
-  installUpdate(): Promise<void>
+  installUpdate(): Promise<UpdateInstallResult>
   subscribeUpdateStatus(listener: (status: UpdateStatus) => void): number
   unsubscribeUpdateStatus(subscriptionId: number): void
 }
@@ -32,7 +32,7 @@ export function createDesktopBridge(ipc: DesktopBridgeIpc): Readonly<DshDesktopB
       ipc.invoke('updates:status') as Promise<UpdateStatus>,
     importUpdatePackage: (): Promise<UpdateStatus> =>
       ipc.invoke('updates:import') as Promise<UpdateStatus>,
-    installUpdate: (): Promise<void> => ipc.invoke('updates:install') as Promise<void>,
+    installUpdate: (): Promise<UpdateInstallResult> => ipc.invoke('updates:install') as Promise<UpdateInstallResult>,
     subscribeUpdateStatus: (listener: (status: UpdateStatus) => void): number => {
       if (typeof listener !== 'function') throw new TypeError('Update status listener must be a function.')
       const subscriptionId = ++subscriptionSequence

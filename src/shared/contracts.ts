@@ -27,8 +27,13 @@ export interface UpdateStatus {
   currentVersion: string
   availableVersion?: string
   packageType?: 'full' | 'patch'
+  packageName?: string
   baseVersion?: string
   percent?: number
   message?: string
   manual: boolean
+}
+
+export interface UpdateInstallResult {
+  helperLaunched: boolean
 }

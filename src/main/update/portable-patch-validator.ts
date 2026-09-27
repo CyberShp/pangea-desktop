@@ -32,6 +32,19 @@ export interface StagedPortablePatch {
   packageSha256: string
 }
 
+export class PortablePatchBaseVersionMismatch extends Error {
+  readonly packageType = 'patch' as const
+
+  constructor(
+    readonly baseVersion: string,
+    readonly currentVersion: string,
+    readonly availableVersion: string
+  ) {
+    super(`此补丁仅适用于 ${baseVersion}，当前版本为 ${currentVersion}。`)
+    this.name = 'PortablePatchBaseVersionMismatch'
+  }
+}
+
 export async function isPortablePatchArchive(sourcePath: string): Promise<boolean> {
   const directory = await unzipper.Open.file(sourcePath)
   return directory.files.some((entry) => {
@@ -83,7 +96,7 @@ export async function stagePortablePatch(options: {
   const expectedChannel = portableUpdateChannelForVersion(options.currentVersion)
   const patch = verifyPortablePatchManifest(patchBytes, patchSignature, options.publicKeyPem, expectedChannel)
   if (patch.from_version !== options.currentVersion) {
-    throw new Error(`此补丁仅适用于 ${patch.from_version}，当前版本为 ${options.currentVersion}。`)
+    throw new PortablePatchBaseVersionMismatch(patch.from_version, options.currentVersion, patch.to_version)
   }
   if (!isNewerPortableVersion(patch.to_version, options.currentVersion, expectedChannel)) {
     throw new Error(`补丁目标版本 ${patch.to_version} 不高于当前版本 ${options.currentVersion}。`)
