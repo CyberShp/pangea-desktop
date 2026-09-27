@@ -1,5 +1,5 @@
 name: Build Windows package
-run-name: PANGEA Desktop ${{ inputs.channel || 'test' }} ${{ inputs.version || '1.0.5' }}
+run-name: PANGEA Desktop ${{ inputs.channel || 'test' }} ${{ inputs.version || '1.0.6' }}
 
 on:
   push:
@@ -22,7 +22,7 @@ on:
       version:
         description: Base version for test builds or exact version for releases (SemVer)
         required: true
-        default: 1.0.5
+        default: 1.0.6
         type: string
       patch_from_version:
         description: Optional exact base version in the same channel; leave empty for a full package only
@@ -56,7 +56,7 @@ jobs:
         shell: pwsh
         env:
           BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
-          REQUESTED_VERSION: ${{ inputs.version || '1.0.5' }}
+          REQUESTED_VERSION: ${{ inputs.version || '1.0.6' }}
           PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
           UPDATE_PRIVATE_KEY_B64: ${{ secrets.PANGEA_UPDATE_PRIVATE_KEY_B64 }}
         run: |
