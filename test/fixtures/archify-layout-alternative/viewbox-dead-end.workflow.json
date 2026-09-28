@@ -1,0 +1,172 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "cpuload 模块：CPU 使用率累加与统计生命周期",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1280,
+      320
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "主路径"
+    },
+    {
+      "id": "exception",
+      "label": "回退与异常分支",
+      "variant": "exception"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "n_entry",
+      "lane": "main",
+      "col": 0,
+      "type": "external",
+      "label": "调用方提供 cpuload 句柄",
+      "sublabel": "触发累加宏",
+      "width": 168
+    },
+    {
+      "id": "n_init",
+      "lane": "main",
+      "col": 1,
+      "type": "backend",
+      "label": "cpuload_init 初始化",
+      "sublabel": "init_tsc = start_tsc；work_tsc = 0",
+      "width": 168
+    },
+    {
+      "id": "n_add_zero",
+      "lane": "main",
+      "col": 2,
+      "type": "backend",
+      "label": "CPULOAD_ADD_TSC(work==0)",
+      "sublabel": "不污染 work_tsc；work 回写 0",
+      "width": 168
+    },
+    {
+      "id": "n_add_pos",
+      "lane": "main",
+      "col": 3,
+      "type": "backend",
+      "label": "CPULOAD_ADD_TSC(work!=0)",
+      "sublabel": "累加 now-prev；work 回写 0",
+      "width": 168
+    },
+    {
+      "id": "n_cal_zero",
+      "lane": "main",
+      "col": 4,
+      "type": "backend",
+      "label": "cal_cpusage 整数除法",
+      "sublabel": "work <= total → (work*100)/total",
+      "width": 168
+    },
+    {
+      "id": "n_cal_reset",
+      "lane": "main",
+      "col": 5,
+      "type": "backend",
+      "label": "复位三字段",
+      "sublabel": "三者对齐 now_tsc；work_tsc=0",
+      "width": 168
+    },
+    {
+      "id": "n_exit",
+      "lane": "main",
+      "col": 5,
+      "type": "external",
+      "label": "返回 0..100 并进入下一周期",
+      "sublabel": "调用方得到 usage",
+      "width": 168
+    },
+    {
+      "id": "n_cal_overflow",
+      "lane": "exception",
+      "col": 4,
+      "type": "security",
+      "label": "cal_cpusage 异常分支",
+      "sublabel": "work > total → usage = 100",
+      "width": 168
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_entry_init",
+      "from": "n_entry",
+      "to": "n_init",
+      "label": "首次统计前",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e_init_zero",
+      "from": "n_init",
+      "to": "n_add_zero",
+      "label": "work==0",
+      "variant": "default"
+    },
+    {
+      "id": "e_init_pos",
+      "from": "n_init",
+      "to": "n_add_pos",
+      "label": "work!=0",
+      "variant": "default"
+    },
+    {
+      "id": "e_zero_pos",
+      "from": "n_add_zero",
+      "to": "n_add_pos",
+      "label": "后续帧 work!=0",
+      "variant": "default"
+    },
+    {
+      "id": "e_pos_loop",
+      "from": "n_add_pos",
+      "to": "n_add_pos",
+      "label": "后续帧继续累加",
+      "variant": "default"
+    },
+    {
+      "id": "e_pos_calzero",
+      "from": "n_add_pos",
+      "to": "n_cal_zero",
+      "label": "work <= total",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e_pos_caloverflow",
+      "from": "n_add_pos",
+      "to": "n_cal_overflow",
+      "label": "work > total",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "id": "e_calzero_reset",
+      "from": "n_cal_zero",
+      "to": "n_cal_reset",
+      "label": "返回 0..100",
+      "variant": "default"
+    },
+    {
+      "id": "e_caloverflow_reset",
+      "from": "n_cal_overflow",
+      "to": "n_cal_reset",
+      "label": "避免负数 → 100",
+      "variant": "security"
+    },
+    {
+      "id": "e_reset_exit",
+      "from": "n_cal_reset",
+      "to": "n_exit",
+      "label": "本周期结束",
+      "variant": "emphasis",
+      "role": "return"
+    }
+  ]
+}

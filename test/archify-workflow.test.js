@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { compileWorkflow } from '../vendor/archify/renderers/workflow/workflow-compiler.mjs'
 
 function workflow() {
@@ -194,10 +194,105 @@ it('delivers normal function text while preserving the desktop readability gate 
     expect(preview.status).toBe(1)
     expect(JSON.parse(preview.stdout)).toMatchObject({ ok: false, stage: 'check', draft: { output: draft } })
     expect(await readFile(output, 'utf8')).toBe(good)
+    // Oversized text is not a layout problem: no column change passes the check.
+    expect(JSON.parse(preview.stdout).diagnostics.some(item => item.evidence?.verifiedLayoutAlternative)).toBe(false)
   } finally {
     await rm(folder, { recursive: true, force: true })
   }
-})
+}, 30000)
+
+// Real round-2/3 business candidates: the only offered fixes (route/via/channel,
+// "reduce the viewBox width", or none) could not converge, although a column
+// change with measured sizing delivers the same lanes, nodes, edges and labels.
+for (const [fixture, code] of [
+  ['crossing-column-move', 'composition/proper-crossing'],
+  ['viewbox-dead-end', 'workflow/viewbox-capacity'],
+]) {
+  it(`offers a render- and check-verified layout-only alternative for ${fixture}`, async () => {
+    const folder = await mkdtemp(path.join(tmpdir(), 'archify-layout-'))
+    try {
+      const candidate = JSON.parse(await readFile(new URL(`./fixtures/archify-layout-alternative/${fixture}.workflow.json`, import.meta.url), 'utf8'))
+      const input = path.join(folder, 'candidate.json'), output = path.join(folder, 'diagram.html')
+      const cli = fileURLToPath(new URL('../vendor/archify/bin/archify.mjs', import.meta.url))
+      const deliver = () => spawnSync(process.execPath, [cli, 'deliver', 'workflow', input, output, '--quality', 'showcase', '--json'], { encoding: 'utf8', timeout: 60000 })
+      await writeFile(input, JSON.stringify(candidate))
+      const failed = deliver(), receipt = JSON.parse(failed.stdout)
+      expect(failed.status).toBe(1)
+      const layout = receipt.diagnostics.find(item => item.code === code)
+      const alternative = layout?.evidence.verifiedLayoutAlternative
+      expect(alternative, failed.stdout).toBeDefined()
+      expect(layout.supportedFixes[0]).toMatch(/^verified layout alternative: .*this exact candidate passed render and the final check\)$/)
+      await expect(readFile(output)).rejects.toMatchObject({ code: 'ENOENT' })
+
+      const target = new Map(alternative.moves.map(move => [move.node, move.toCol]))
+      const { viewBox, ...meta } = candidate.meta
+      const repaired = {
+        ...candidate,
+        meta: alternative.omitViewBox ? meta : candidate.meta,
+        nodes: candidate.nodes.map(({ width, ...node }) => ({
+          ...node,
+          ...(width !== undefined && !alternative.removeWidth?.includes(node.id) ? { width } : {}),
+          col: target.get(node.id) ?? node.col,
+        })),
+      }
+      const semantic = document => JSON.stringify({ ...document, meta: { ...document.meta, viewBox: undefined },
+        nodes: document.nodes.map(({ col, width, ...node }) => node) })
+      expect(semantic(repaired)).toBe(semantic(candidate))
+      await writeFile(input, JSON.stringify(repaired))
+      const delivered = deliver()
+      expect(delivered.status, delivered.stdout).toBe(0)
+      expect(JSON.parse(delivered.stdout).ok).toBe(true)
+    } finally {
+      await rm(folder, { recursive: true, force: true })
+    }
+  }, 120000)
+}
+
+for (const mode of ['count', 'timeout']) it(`bounds layout alternative ${mode} without publishing an unaccepted candidate`, async () => {
+  const folder = await mkdtemp(path.join(tmpdir(), 'archify-search-budget-'))
+  try {
+    const input = path.join(folder, 'candidate.json'), output = path.join(folder, 'diagram.html')
+    const log = path.join(folder, 'probes.jsonl'), preload = path.join(folder, 'observe.mjs')
+    const fixture = mode === 'count' ? 'viewbox-dead-end' : 'crossing-column-move'
+    await writeFile(input, await readFile(new URL(`./fixtures/archify-layout-alternative/${fixture}.workflow.json`, import.meta.url)))
+    // Exercise the real CLI and compiler. Only the external alternative renderer
+    // is made unsuccessful or slow, so this tests its process/count boundary.
+    await writeFile(preload, `
+      import cp from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      import { appendFileSync } from 'node:fs';
+      const original = cp.spawnSync;
+      cp.spawnSync = (executable, args, options) => {
+        if(args[1]?.endsWith('layout-alternative.json')) {
+          appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, timeout: options.timeout })+'\\n');
+          if(${JSON.stringify(mode)}==='timeout') return original(executable,['-e','setTimeout(()=>{},60000)'],options);
+          return {status:1,stdout:'',stderr:'test renderer rejection'};
+        }
+        return original(executable,args,options);
+      };
+      syncBuiltinESMExports();
+    `)
+    const cli = fileURLToPath(new URL('../vendor/archify/bin/archify.mjs', import.meta.url))
+    const started = Date.now()
+    const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, cli, 'deliver', 'workflow', input, output, '--quality', 'showcase', '--json'], { encoding: 'utf8', timeout: 15000 })
+    expect(result.error, result.stderr).toBeUndefined()
+    expect(result.status).toBe(1)
+    expect(result.stdout, result.stderr).not.toBe('')
+    const receipt = JSON.parse(result.stdout)
+    expect(receipt.ok).toBe(false)
+    expect(receipt.diagnostics.some(item => item.evidence?.verifiedLayoutAlternative)).toBe(false)
+    const probes = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse)
+    expect(probes).toHaveLength(mode === 'count' ? 3 : 1)
+    if(mode === 'timeout') {
+      expect(probes[0].timeout).toBeGreaterThan(0)
+      expect(probes[0].timeout).toBeLessThanOrEqual(10000)
+      expect(Date.now()-started).toBeLessThan(14000)
+    }
+    await expect(readFile(output)).rejects.toMatchObject({ code: 'ENOENT' })
+  } finally {
+    await rm(folder, { recursive: true, force: true })
+  }
+}, 20000)
 
 for (const example of ['agent-tool-call', 'incident-response', 'release-delivery']) {
   it(`preserves compilation of the bundled ${example} workflow`, async () => {

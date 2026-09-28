@@ -69,6 +69,8 @@ function runNode(args, options = {}) {
     encoding: 'utf8',
     stdio: options.stdio || 'inherit',
     env: options.env ? { ...process.env, ...options.env } : process.env,
+    ...(options.timeout ? { timeout: options.timeout } : {}),
+    windowsHide: true,
   });
 }
 
@@ -263,6 +265,109 @@ function checkerDiagnostics(checker) {
     subject: { check: 'unknown' },
     evidence: {},
   })];
+}
+
+// The greedy router and the readable width budget can fail a v2 workflow whose
+// routes/sides are already exhausted, while a column change delivers it: move
+// one node to another column, or fold column c into c-1 so the nodes stack.
+// Authored node widths and meta.viewBox may also be handed back to the
+// compiler's measured sizing. Lanes, nodes, edges and labels are never
+// changed. A candidate is reported only after the same renderer and final
+// check accept it.
+const LAYOUT_ALTERNATIVE_CODES = new Set([
+  'composition/proper-crossing',
+  'composition/ambiguous-corridor',
+  'composition/desktop-readability',
+  'workflow/viewbox-capacity',
+]);
+const MAX_LAYOUT_ALTERNATIVE_RENDERS = 3;
+const MAX_LAYOUT_ALTERNATIVE_MS = 10000;
+
+function layoutAlternativeCandidates(workflow) {
+  const nodes = workflow.nodes;
+  const maxCol = Math.max(...nodes.map((node) => node.col));
+  const folds = Array.from({ length: maxCol }, (_, index) => index + 1).map((col) => (
+    nodes.filter((node) => node.col >= col).map((node) => ({ node: node.id, fromCol: node.col, toCol: node.col - 1 }))
+  ));
+  const moves = [1, 2].flatMap((distance) => nodes.flatMap((node) => [node.col - distance, node.col + distance]
+    .filter((toCol) => toCol >= 0 && toCol <= maxCol)
+    .map((toCol) => [{ node: node.id, fromCol: node.col, toCol }])));
+  const columns = [...folds, ...moves].map((columnMoves) => ({ moves: columnMoves }));
+  const removeWidth = nodes.filter((node) => node.width !== undefined).map((node) => node.id);
+  const omitViewBox = workflow.meta?.viewBox !== undefined;
+  if (!removeWidth.length && !omitViewBox) return columns;
+  const measured = { ...(removeWidth.length ? { removeWidth } : {}), ...(omitViewBox ? { omitViewBox } : {}) };
+  return [...columns, { moves: [], ...measured }, ...columns.map((alternative) => ({ ...alternative, ...measured }))];
+}
+
+function withLayoutAlternativeApplied(workflow, { moves, removeWidth = [], omitViewBox = false }) {
+  const target = new Map(moves.map((move) => [move.node, move.toCol]));
+  const { viewBox, ...meta } = workflow.meta || {};
+  return {
+    ...workflow,
+    ...(omitViewBox ? { meta } : {}),
+    nodes: workflow.nodes.map((node) => {
+      const { width, ...measuredNode } = node;
+      const next = removeWidth.includes(node.id) ? measuredNode : node;
+      return target.has(node.id) ? { ...next, col: target.get(node.id) } : next;
+    }),
+  };
+}
+
+async function verifiedLayoutAlternative({ type, diagram, diagnostics, renderer, quality, repoRoot, directory }) {
+  if (type !== 'workflow' || diagram?.schema_version !== 2 || !Array.isArray(diagram.nodes) || !diagram.nodes.length
+    || !diagram.nodes.every((node) => Number.isInteger(node?.col) && node.col >= 0)
+    || !diagnostics.some((entry) => LAYOUT_ALTERNATIVE_CODES.has(entry.code) && !(entry.code === 'workflow/viewbox-capacity' && entry.supportedFixes?.length))) return null;
+  const { compileWorkflow } = await import('../renderers/workflow/workflow-compiler.mjs');
+  const deadline = Date.now() + MAX_LAYOUT_ALTERNATIVE_MS;
+  const candidatePath = path.join(directory, 'layout-alternative.json');
+  const htmlPath = path.join(directory, 'layout-alternative.html');
+  const compiledSvg = (candidate) => {
+    try {
+      const compiled = compileWorkflow({ workflow: structuredClone(candidate), qualityProfile: quality || candidate.meta?.quality_profile });
+      return compiled.ok ? compiled.svg : null;
+    } catch {
+      return null;
+    }
+  };
+  // A candidate that compiles to the rejected input's SVG, or to one already
+  // rendered, cannot change the verdict.
+  const seen = new Set([compiledSvg(diagram)]);
+  let renders = 0;
+  for (const alternative of layoutAlternativeCandidates(diagram)) {
+    if (renders >= MAX_LAYOUT_ALTERNATIVE_RENDERS || Date.now() >= deadline) break;
+    const candidate = withLayoutAlternativeApplied(diagram, alternative);
+    // In-process compile rejects most candidates cheaply; delivery is still
+    // decided by the renderer and final check below.
+    const svg = compiledSvg(candidate);
+    if (!svg || seen.has(svg)) continue;
+    seen.add(svg);
+    if (Date.now() >= deadline) break;
+    renders += 1;
+    fs.writeFileSync(candidatePath, JSON.stringify(candidate));
+    const render = runNode([renderer, candidatePath, htmlPath], { stdio: 'pipe', env: rendererEnv(quality, repoRoot, true), timeout: Math.max(1, deadline - Date.now()) });
+    if (render.status !== 0) continue;
+    if (Date.now() >= deadline) break;
+    const check = runNode([path.join(skillRoot, 'scripts/check-render-output.mjs'), htmlPath], { stdio: 'pipe', timeout: Math.max(1, deadline - Date.now()) });
+    if (check.status === 0 && Date.now() <= deadline) return alternative;
+  }
+  return null;
+}
+
+function withLayoutAlternative(diagnostics, alternative) {
+  if (!alternative) return diagnostics;
+  const steps = [
+    ...alternative.moves.map(({ node, fromCol, toCol }) => `set node "${node}" col ${fromCol} -> ${toCol}`),
+    ...(alternative.removeWidth ? [`remove width from ${alternative.removeWidth.map((id) => `"${id}"`).join(', ')}`] : []),
+    ...(alternative.omitViewBox ? ['omit meta.viewBox'] : []),
+  ];
+  const fix = `verified layout alternative: ${steps.join(', ')}`
+    + ' (lanes, nodes, edges and labels unchanged; this exact candidate passed render and the final check)';
+  return diagnostics.map((entry) => (LAYOUT_ALTERNATIVE_CODES.has(entry.code) ? {
+    ...entry,
+    evidence: { ...entry.evidence, verifiedLayoutAlternative: alternative },
+    supportedFixes: [fix, ...(entry.supportedFixes || [])],
+  } : entry));
 }
 
 function formatDiagnostics(error, diagnostics = []) {
@@ -1020,6 +1125,9 @@ async function commandDeliver(args) {
     if (render.status !== 0) {
       const failure = rendererFailure(render);
       const draft = retainDraft(failure.diagnostics);
+      const diagnostics = withLayoutAlternative(failure.diagnostics, await verifiedLayoutAlternative({
+        type, diagram, diagnostics: failure.diagnostics, renderer, quality: qualityArgs.quality, repoRoot: repoArgs.repoRoot, directory: stagingDirectory,
+      }));
       reportDeliveryFailure({
         json,
         stage: 'render',
@@ -1027,7 +1135,7 @@ async function commandDeliver(args) {
         input: inputPath,
         output: outputPath,
         error: failure.error,
-        diagnostics: failure.diagnostics,
+        diagnostics,
         draft,
         status: render.status ?? 1,
       });
@@ -1046,8 +1154,11 @@ async function commandDeliver(args) {
       } catch {
         checker = { ok: false, file: outputPath, diagnostic: check.stdout.trim() };
       }
-      const diagnostics = checkerDiagnostics(checker);
-      const draft = retainDraft(diagnostics, checker);
+      const checkDiagnostics = checkerDiagnostics(checker);
+      const draft = retainDraft(checkDiagnostics, checker);
+      const diagnostics = withLayoutAlternative(checkDiagnostics, await verifiedLayoutAlternative({
+        type, diagram, diagnostics: checkDiagnostics, renderer, quality: qualityArgs.quality, repoRoot: repoArgs.repoRoot, directory: stagingDirectory,
+      }));
       reportDeliveryFailure({
         json,
         stage: 'check',

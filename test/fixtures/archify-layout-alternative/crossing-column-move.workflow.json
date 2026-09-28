@@ -1,0 +1,219 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "cpuload 模块 CPU 使用率统计生命周期",
+    "locale": "zh-CN",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "caller",
+      "label": "调用方持有 struct cpuload"
+    },
+    {
+      "id": "add_macro",
+      "label": "CPULOAD_ADD_TSC 宏"
+    },
+    {
+      "id": "cal",
+      "label": "cpuload_cal_cpusage 计算"
+    },
+    {
+      "id": "failure",
+      "label": "未定义行为",
+      "variant": "exception"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "n_entry",
+      "lane": "caller",
+      "col": 0,
+      "type": "external",
+      "label": "调用方持有 struct cpuload",
+      "sublabel": "模块不感知线程与全局状态"
+    },
+    {
+      "id": "n_init",
+      "lane": "caller",
+      "col": 1,
+      "type": "backend",
+      "label": "cpuload_init",
+      "sublabel": "init_tsc=start_tsc=rte_rdtsc()，work_tsc=0"
+    },
+    {
+      "id": "n_add_acc",
+      "lane": "add_macro",
+      "col": 2,
+      "type": "backend",
+      "label": "CPULOAD_ADD_TSC：累加 work_tsc",
+      "sublabel": "work==1 时 work_tsc += now_tsc - start_tsc",
+      "tag": "回写 start_tsc=now_tsc，work=0"
+    },
+    {
+      "id": "n_add_skip",
+      "lane": "add_macro",
+      "col": 2,
+      "type": "backend",
+      "label": "CPULOAD_ADD_TSC：跳过累加",
+      "sublabel": "work==0 时不累加，只前进 start_tsc",
+      "tag": "宏对 work 左值回写 0"
+    },
+    {
+      "id": "n_cal_normal",
+      "lane": "cal",
+      "col": 3,
+      "type": "backend",
+      "label": "cal_cpusage：work<=total 按比例",
+      "sublabel": "usage = (work_tsc/128)*100 / (total/128)",
+      "tag": "随后 init_tsc=start_tsc=now_tsc，work_tsc=0"
+    },
+    {
+      "id": "n_cal_clamp",
+      "lane": "cal",
+      "col": 3,
+      "type": "backend",
+      "label": "cal_cpusage：work>total 钳到 100",
+      "sublabel": "不做减法直接钳 100，避免无符号下溢",
+      "tag": "随后同样重置三字段"
+    },
+    {
+      "id": "n_cal_zero",
+      "lane": "failure",
+      "col": 3,
+      "type": "security",
+      "label": "cal_cpusage：total==0 且 work_tsc==0 触发除零",
+      "sublabel": "work<=total 成立；0*100/0 整数除零",
+      "tag": "minGW Zig cc 子进程表现为 panic"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_entry_init",
+      "from": "n_entry",
+      "to": "n_init",
+      "label": "首次使用 cpuload 前"
+    },
+    {
+      "id": "e_init_acc",
+      "from": "n_init",
+      "to": "n_add_acc",
+      "label": "工作片段入口 work==1"
+    },
+    {
+      "id": "e_init_skip",
+      "from": "n_init",
+      "to": "n_add_skip",
+      "label": "工作片段入口 work==0"
+    },
+    {
+      "id": "e_acc_acc",
+      "from": "n_add_acc",
+      "to": "n_add_acc",
+      "label": "1 秒窗口内继续累加"
+    },
+    {
+      "id": "e_acc_skip",
+      "from": "n_add_acc",
+      "to": "n_add_skip",
+      "label": "窗口内下一片段 work==0"
+    },
+    {
+      "id": "e_skip_acc",
+      "from": "n_add_skip",
+      "to": "n_add_acc",
+      "label": "窗口内下一片段 work==1"
+    },
+    {
+      "id": "e_acc_normal",
+      "from": "n_add_acc",
+      "to": "n_cal_normal",
+      "label": "窗口到期 work<=total",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e_skip_normal",
+      "from": "n_add_skip",
+      "to": "n_cal_normal",
+      "label": "窗口到期 work<=total",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e_acc_clamp",
+      "from": "n_add_acc",
+      "to": "n_cal_clamp",
+      "label": "窗口到期 work>total",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e_skip_clamp",
+      "from": "n_add_skip",
+      "to": "n_cal_clamp",
+      "label": "窗口到期 work>total",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e_normal_zero",
+      "from": "n_cal_normal",
+      "to": "n_cal_zero",
+      "label": "now_tsc==init_tsc 且 work_tsc==0",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e_normal_acc",
+      "from": "n_cal_normal",
+      "to": "n_add_acc",
+      "label": "下一窗口重新累加",
+      "role": "return"
+    },
+    {
+      "id": "e_normal_skip",
+      "from": "n_cal_normal",
+      "to": "n_add_skip",
+      "label": "下一窗口重新累加",
+      "role": "return"
+    },
+    {
+      "id": "e_clamp_acc",
+      "from": "n_cal_clamp",
+      "to": "n_add_acc",
+      "label": "下一窗口重新累加",
+      "role": "return"
+    },
+    {
+      "id": "e_clamp_skip",
+      "from": "n_cal_clamp",
+      "to": "n_add_skip",
+      "label": "下一窗口重新累加",
+      "role": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "当前分析视图",
+      "items": [
+        "来源：dperf-cpuload-test116:src/cpuload.c:28-49、51-56 与 src/cpuload.h:34-40、42-43",
+        "本图只描述模块内部状态机与宏语义，不绘制外部调度或调用方线程"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "状态重置次序",
+      "items": [
+        "cal_cpusage 先产出 usage，再把 init_tsc/start_tsc 重置为 now_tsc、work_tsc=0",
+        "返回节点位于重置之后；下一窗口按新 init_tsc 起算"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "未定义行为分支",
+      "items": [
+        "n_cal_zero 来自 n_cal_normal：在 now_tsc==init_tsc 且 work_tsc==0 时进入 work<=total 分支，触发 0*100/0 整数除零",
+        "局部 minGW Zig cc 子进程执行观察为 panic（exit code 3），不构成真实产品覆盖率证据"
+      ]
+    }
+  ]
+}
