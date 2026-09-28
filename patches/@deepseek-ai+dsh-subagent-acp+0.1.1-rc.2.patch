@@ -1,10 +1,89 @@
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
+index b89ccf2..7959fde 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
-@@ -94,6 +94,52 @@
+@@ -1,5 +1,6 @@
+ import { accessSync, constants, statSync } from "node:fs";
+-import { isAbsolute, resolve } from "node:path";
++import { lstat, mkdir, realpath } from "node:fs/promises";
++import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+ import z from "@deepseek-ai/schemastery";
+ import { MAX_TIMER_DELAY_MS } from "@deepseek-ai/dsh-timeout";
+ import { randomUUID } from "node:crypto";
+@@ -94,6 +95,122 @@ function toError(value) {
  	/* v8 ignore next */
  	return value instanceof Error ? value : new Error(String(value));
  }
++// ACP locations describe native file operations, not writes performed by shell commands.
++async function isScratchLocation(scratch, location) {
++	if (typeof location !== "string" || !isAbsolute(location)) return false;
++	let existing = location;
++	const missing = [];
++	for (;;) {
++		try {
++			const target = resolve(await realpath(existing), ...missing);
++			const inside = relative(await realpath(scratch), target);
++			return inside !== "" && inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
++		} catch (error) {
++			if (error.code !== "ENOENT") return false;
++			// A dangling link is not a new file underneath its lexical parent.
++			try { if ((await lstat(existing)).isSymbolicLink()) return false; } catch (statError) {
++				if (statError.code !== "ENOENT") return false;
++			}
++			const parent = dirname(existing);
++			if (parent === existing) return false;
++			missing.unshift(basename(existing));
++			existing = parent;
++		}
++	}
++}
++function scratchEditPermission(env) {
++	const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT ?? "{}");
++	const objectRule = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
++	const permissionObject = (value) => {
++		if (["allow", "ask", "deny"].includes(value)) return { "*": value };
++		if (objectRule(value)) return value;
++		throw new Error("subagent-acp: OpenCode permission must be allow, ask, deny, or an object");
++	};
++	const configuredPermissions = permissionObject(config.permission ?? {});
++	const permissions = permissionObject(JSON.parse(env.OPENCODE_PERMISSION ?? process.env.OPENCODE_PERMISSION ?? "{}"));
++	const effective = { ...configuredPermissions };
++	for (const [key, rule] of Object.entries(permissions)) {
++		effective[key] = objectRule(effective[key]) && objectRule(rule) ? { ...effective[key], ...rule } : rule;
++	}
++	let sawEdit = false;
++	for (const [key, rule] of Object.entries(effective)) {
++		// OpenCode v1.18.28 Wildcard.match also applies to permission names.
++		let pattern = key.replaceAll("\\", "/").replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
++		if (pattern.endsWith(" .*")) pattern = pattern.slice(0, -3) + "( .*)?";
++		if (key !== "*" && key !== "edit" && new RegExp(`^${pattern}$`, process.platform === "win32" ? "si" : "s").test("edit")) {
++			throw new Error(`subagent-acp: OpenCode permission name "${key}" matches edit; scratch constraints require explicit edit rules so existing permissions are preserved`);
++		}
++		if (sawEdit && key === "*" && (objectRule(rule) ? Object.values(rule) : [rule]).includes("allow")) {
++			throw new Error("subagent-acp: OpenCode permission '*' allows operations after edit rules; scratch constraints cannot preserve this order and require per-edit approval");
++		}
++		if (key === "edit") sawEdit = true;
++	}
++	// Global defaults and edit exceptions are ordered rules; an edit object inherits
++	// unmatched global denials. Moving repeated patterns keeps last-match precedence.
++	const edit = { "*": "ask" };
++	for (const [key, rule] of Object.entries(effective)) {
++		if (key !== "*" && key !== "edit") continue;
++		for (const [pattern, action] of Object.entries(objectRule(rule) ? rule : { "*": rule })) {
++			if (!["allow", "ask", "deny"].includes(action)) throw new Error("subagent-acp: OpenCode edit permission must contain only allow, ask, or deny");
++			delete edit[pattern];
++			edit[pattern] = action === "deny" ? "deny" : "ask";
++		}
++	}
++	const restricted = Object.keys(edit).length === 1 ? edit["*"] : edit;
++	if (objectRule(configuredPermissions.edit) && objectRule(restricted)) {
++		const mergedOrder = Object.keys({ ...configuredPermissions.edit, ...restricted });
++		if (JSON.stringify(mergedOrder) !== JSON.stringify(Object.keys(restricted))) {
++			throw new Error("subagent-acp: OpenCode inline edit pattern order would change during permission merge; scratch constraints require an explicit '*' default before edit exceptions");
++		}
++	}
++	return JSON.stringify({ ...permissions, edit: restricted });
++}
 +function launchError(value, details) {
 +	const error = toError(value);
 +	for (const [key, detail] of Object.entries(details)) {
@@ -54,7 +133,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  /**
  * Start and publish one ACP child after initialization and session creation.
  * Child failures resolve through the run result; startup failures reject after
-@@ -105,39 +151,97 @@
+@@ -105,40 +222,108 @@ function toError(value) {
  */
  async function startAcpRun(request, spec) {
  	if (request.signal.aborted) throw new Error("subagent request was aborted before the ACP child started");
@@ -161,13 +240,26 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 +			}
  			return Promise.resolve();
  		},
- 		requestPermission(params) {
+-		requestPermission(params) {
 -			if (spec.permission === "allow") {
+-				const allow = params.options.find((o) => o.kind === "allow_once" || o.kind === "allow_always");
++		async requestPermission(params) {
 +			if (!request.discoverOnly && spec.permission === "allow") {
- 				const allow = params.options.find((o) => o.kind === "allow_once" || o.kind === "allow_always");
++				const constrained = request.scratchDirectory !== void 0 && ["edit", "delete", "move"].includes(params.toolCall.kind);
++				if (constrained) {
++					const locations = params.toolCall.locations;
++					const allowed = params.options.some((o) => o.kind === "allow_once") && Array.isArray(locations) && locations.length > 0 && (await Promise.all(locations.map((location) => isScratchLocation(request.scratchDirectory, location?.path)))).every(Boolean);
++					diagnostics.lastPermissionKind = params.toolCall.kind;
++					diagnostics.lastPermissionPaths = locations?.map((location) => location?.path) ?? [];
++					diagnostics.lastPermissionDecision = allowed ? "allow_once" : "reject";
++					emitDiagnostic("file_permission");
++					if (!allowed) return { outcome: { outcome: "cancelled" } };
++				}
++				const allow = params.options.find((o) => o.kind === "allow_once" || (!constrained && o.kind === "allow_always"));
  				if (allow !== void 0) return Promise.resolve({ outcome: {
  					outcome: "selected",
-@@ -149,6 +253,7 @@
+ 					optionId: allow.optionId
+@@ -149,6 +334,7 @@ async function startAcpRun(request, spec) {
  	});
  	const conn = new ClientSideConnection(makeClient, ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout)));
  	let sessionId;
@@ -175,7 +267,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  	let signalCancelSettled;
  	const cancelSettled = new Promise((resolve) => {
  		signalCancelSettled = resolve;
-@@ -164,21 +269,35 @@
+@@ -164,21 +350,35 @@ async function startAcpRun(request, spec) {
  		requestCancel();
  	};
  	request.signal.addEventListener("abort", onAbort, { once: true });
@@ -220,7 +312,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -189,48 +308,91 @@
+@@ -189,48 +389,91 @@ async function startAcpRun(request, spec) {
  	} catch (error) {
  		request.signal.removeEventListener("abort", onAbort);
  		await disposeProcess();
@@ -327,7 +419,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  		localAgent: void 0,
  		result,
  		dispose() {
-@@ -257,10 +419,12 @@
+@@ -257,10 +500,12 @@ const inject = ["subagents", "subprocess"];
  const Config = z.object({
  	providerName: z.string().default("acp"),
  	command: z.string().required(),
@@ -340,7 +432,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
  	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
  });
-@@ -331,24 +495,59 @@
+@@ -331,24 +576,71 @@ var AcpProvider = class {
  		this.ctx = ctx;
  		this.config = config;
  	}
@@ -349,11 +441,23 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 -			command: this.config.command,
 +	async start(request) {
 +		const cwd = resolveCwd(this.config.cwd, request);
++		const env = { ...this.config.env };
++		if (request.scratchDirectory !== void 0) {
++			const scratch = request.scratchDirectory;
++			if (typeof scratch !== "string" || !isAbsolute(scratch)) throw new Error("subagent-acp: scratchDirectory must be an absolute path");
++			await mkdir(scratch, { recursive: true });
++			// This scopes conventional temporary files; it does not sandbox the child.
++			if (process.platform === "win32") for (const key of Object.keys(env)) {
++				if (["TEMP", "TMP", "TMPDIR", "PANGEA_WORKER_SCRATCH"].includes(key.toUpperCase())) delete env[key];
++			}
++			Object.assign(env, { TEMP: scratch, TMP: scratch, TMPDIR: scratch, PANGEA_WORKER_SCRATCH: scratch });
++			if (this.name === "pangea-opencode") env.OPENCODE_PERMISSION = scratchEditPermission(env);
++		}
 +		const configuredCommand = this.config.configuredCommand ?? this.config.command;
 +		let command;
 +		try {
 +			command = process.platform === "win32"
-+				? await this.ctx.subprocess.resolveExecutable(this.config.command, this.config.env, request.signal)
++				? await this.ctx.subprocess.resolveExecutable(this.config.command, env, request.signal)
 +				: this.config.command;
 +		} catch (error) {
 +			throw launchError(error, {
@@ -379,8 +483,9 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 -			cwd: resolveCwd(this.config.cwd, request),
 +			cwd,
  			permission: this.config.permission,
+-			env: this.config.env,
 +			diagnosticOutputLimit: this.config.diagnosticOutputLimit,
- 			env: this.config.env,
++			env,
  			disposeEofGraceMs: this.config.disposeEofGraceMs,
  			disposeGraceMs: this.config.disposeGraceMs,
 +			windowsBatch,
@@ -407,9 +512,23 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  	assertPositiveFinite("disposeGraceMs", resolved.disposeGraceMs);
  	if (resolved.cwd === "") throw new Error("subagent-acp: config cwd must not be empty — omit the key to inherit the parent session cwd");
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
+index 76b04b9..157335b 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
-@@ -17,6 +17,8 @@
+@@ -9,6 +9,12 @@
+ import type { Context } from '@deepseek-ai/cordis';
+ import z from '@deepseek-ai/schemastery';
+ import { type PermissionPolicy } from './run.ts';
++declare module '@deepseek-ai/dsh-subagent' {
++    interface SubagentStartRequest {
++        /** Host-owned absolute temporary directory for this worker, preserved on resume. Not a filesystem sandbox. */
++        readonly scratchDirectory?: string;
++    }
++}
+ export declare const name = "subagent-acp";
+ export declare const inject: string[];
+ /** Config: how to spawn and drive the child ACP agent process. */
+@@ -17,6 +23,8 @@ export interface Config {
      providerName: string;
      /** The executable to spawn for each run (the child ACP agent). */
      command: string;
@@ -418,7 +537,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts b/n
      /** Arguments passed to {@link command}. */
      args: string[];
      /**
-@@ -40,6 +42,8 @@
+@@ -40,6 +48,8 @@ export interface Config {
       * ambient secrets do not leak implicitly.
       */
      env: Record<string, string>;
@@ -428,9 +547,10 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts b/n
       * Grace period (ms) for the child's EOF-driven quiesce on dispose — its
       * window to flush persistence and tear down its own nested subprocesses
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
+index 764ff1d..6c4b6c8 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
-@@ -19,6 +19,16 @@
+@@ -19,6 +19,16 @@ export interface AcpRunSpec {
      command: string;
      /** Arguments passed to {@link command}. */
      args: string[];

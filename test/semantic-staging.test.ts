@@ -30,6 +30,14 @@ it('accepts matching staging metadata and rejects a stale Agent lock or missing 
     await write(runtime + 'src/pangea_agent/cli/adapter_api.py', '# source-first-v1 next_actions fixture\n')
     await write(runtime + '.agents/pangea/dsh.md', '# source-first-v1 fixture\n')
     for (const file of [
+      runtime + 'docs/source-first-cli-worker.md',
+      ...['planning', 'analysis', 'review'].flatMap(role =>
+        ['.agents/pangea', '.opencode/agents'].map(directory => `${runtime}${directory}/${role}-worker.md`)),
+      runtime + 'src/pangea_agent/graph/nodes/source_first.py',
+      runtime + 'src/pangea_agent/rubrics/builtin/behavior_test_generation.md',
+      runtime + 'src/pangea_agent/analysis_scenarios.py',
+      ...['common_generation', 'common_review', 'flow', 'planning', 'module', 'risk', 'branch', 'coverage'].map(name =>
+        `${runtime}src/pangea_agent/rubrics/builtin/scene_${name}.md`),
       runtime + '.opencode/agents/pangea-agent.md',
       runtime + '.opencode/plugins/pangea.ts',
       runtime + '.opencode/skills/product-blackbox-test-case/SKILL.md',
