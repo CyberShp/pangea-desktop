@@ -133,7 +133,7 @@ index b89ccf2..7959fde 100644
  /**
  * Start and publish one ACP child after initialization and session creation.
  * Child failures resolve through the run result; startup failures reject after
-@@ -105,40 +222,108 @@ function toError(value) {
+@@ -105,40 +222,112 @@ function toError(value) {
  */
  async function startAcpRun(request, spec) {
  	if (request.signal.aborted) throw new Error("subagent request was aborted before the ACP child started");
@@ -188,6 +188,7 @@ index b89ccf2..7959fde 100644
 +	let turnStartedAt = null;
 +	const startedAt = Date.now();
 +	const toolStarts = new Map();
++	const toolKinds = new Map();
 +	const emitDiagnostic = (stage) => {
 +		diagnostics.stage = stage;
 +		try { request.onDiagnostic?.({ ...diagnostics, durationMs: Date.now() - startedAt, processId: child.pid }); } catch {}
@@ -211,6 +212,8 @@ index b89ccf2..7959fde 100644
 +			if (update.sessionUpdate === "current_model_update" && typeof update.currentModelId === "string") diagnostics.model = update.currentModelId;
 +			if (update.sessionUpdate === "tool_call") diagnostics.toolCalls++;
 +			if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
++				if (typeof update.kind === "string") toolKinds.set(update.toolCallId, update.kind.slice(0, 64));
++				diagnostics.lastToolKind = toolKinds.get(update.toolCallId) ?? null;
 +				diagnostics.lastToolId = String(update.toolCallId ?? "").slice(0, 256);
 +				diagnostics.lastToolStatus = String(update.status ?? "unknown").slice(0, 64);
 +				diagnostics.lastToolName = String(update.title ?? diagnostics.lastToolName ?? update.toolCallId ?? "").slice(0, 256);
@@ -220,6 +223,7 @@ index b89ccf2..7959fde 100644
 +					diagnostics.lastToolFinishedAt = Date.now();
 +					diagnostics.lastToolDurationMs = diagnostics.lastToolStartedAt === null ? null : Date.now() - diagnostics.lastToolStartedAt;
 +					toolStarts.delete(update.toolCallId);
++					toolKinds.delete(update.toolCallId);
 +				} else {
 +					if (!toolStarts.has(update.toolCallId)) toolStarts.set(update.toolCallId, Date.now());
 +					diagnostics.lastToolFinishedAt = null; diagnostics.lastToolDurationMs = null;
@@ -259,7 +263,7 @@ index b89ccf2..7959fde 100644
  				if (allow !== void 0) return Promise.resolve({ outcome: {
  					outcome: "selected",
  					optionId: allow.optionId
-@@ -149,6 +334,7 @@ async function startAcpRun(request, spec) {
+@@ -149,6 +338,7 @@ async function startAcpRun(request, spec) {
  	});
  	const conn = new ClientSideConnection(makeClient, ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout)));
  	let sessionId;
@@ -267,7 +271,7 @@ index b89ccf2..7959fde 100644
  	let signalCancelSettled;
  	const cancelSettled = new Promise((resolve) => {
  		signalCancelSettled = resolve;
-@@ -164,21 +350,35 @@ async function startAcpRun(request, spec) {
+@@ -164,21 +354,35 @@ async function startAcpRun(request, spec) {
  		requestCancel();
  	};
  	request.signal.addEventListener("abort", onAbort, { once: true });
@@ -312,7 +316,7 @@ index b89ccf2..7959fde 100644
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -189,48 +389,91 @@ async function startAcpRun(request, spec) {
+@@ -189,48 +393,99 @@ async function startAcpRun(request, spec) {
  	} catch (error) {
  		request.signal.removeEventListener("abort", onAbort);
  		await disposeProcess();
@@ -337,6 +341,14 @@ index b89ccf2..7959fde 100644
 +		turnStartedAt = Date.now();
 +		diagnostics.firstEventMs = null;
 +		diagnostics.turnDurationMs = null;
++		toolStarts.clear();
++		toolKinds.clear();
++		diagnostics.activeToolCount = 0;
++		diagnostics.lastToolKind = null;
++		diagnostics.lastToolName = null;
++		diagnostics.lastToolStartedAt = null;
++		diagnostics.lastToolFinishedAt = null;
++		diagnostics.lastToolDurationMs = null;
 +		diagnostics.lastToolId = null;
 +		diagnostics.lastToolStatus = null;
 +		diagnostics.toolOutput = "";
@@ -419,7 +431,7 @@ index b89ccf2..7959fde 100644
  		localAgent: void 0,
  		result,
  		dispose() {
-@@ -257,10 +500,12 @@ const inject = ["subagents", "subprocess"];
+@@ -257,10 +512,12 @@ const inject = ["subagents", "subprocess"];
  const Config = z.object({
  	providerName: z.string().default("acp"),
  	command: z.string().required(),
@@ -432,7 +444,7 @@ index b89ccf2..7959fde 100644
  	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
  	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
  });
-@@ -331,24 +576,71 @@ var AcpProvider = class {
+@@ -331,24 +588,71 @@ var AcpProvider = class {
  		this.ctx = ctx;
  		this.config = config;
  	}
