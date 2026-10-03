@@ -255,6 +255,10 @@ try {
   ) $AgentRuntime
   Invoke-Checked $Python @(
   '-X', 'utf8',
+    (Join-Path $PangeaAgent 'verification/incremental_smoke.py')
+  ) $AgentRuntime
+  Invoke-Checked $Python @(
+  '-X', 'utf8',
     (Join-Path $ProjectRoot 'scripts/verify-coverage-path-quality.py')
   ) $AgentRuntime
   Invoke-Checked $Python @(
