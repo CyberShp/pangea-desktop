@@ -145,10 +145,16 @@ class OnDemandPlanningAcceptance(unittest.TestCase):
             command = [sys.executable, "-m", "pangea_agent.cli.main", "runs", "resume", "--data-root", str(data), "--run-id", "lazy-run"]
             result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONUTF8":"1"})
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertTrue(json.loads(result.stdout)["result"]["requires_host_quiescence"])
+            self.assertEqual(read_json(run / "progress.json")["actions"]["lazy-run:planning"]["status"], "dispatched")
+            # This fixture has no live worker process. After the host confirms
+            # quiescence, consume the saved completion instead of prompting it again.
+            result = subprocess.run([*command, "--host-quiescent"], capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONUTF8":"1"})
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             action = read_json(run / "progress.json")["actions"]["lazy-run:planning"]
             self.assertEqual(action["task_id"], "original-worker")
-            self.assertEqual(action["action"], "continue_agent")
-            self.assertEqual(action["status"], "pending")
+            self.assertEqual(action["status"], "accepted")
+            self.assertNotIn("lazy-run:planning", [item["action_id"] for item in json.loads(result.stdout)["result"].get("agent_actions", [])])
             self.assertEqual((run / "agent-results/source-first/planning.json").read_bytes(), before)
 
 

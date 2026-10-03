@@ -7,13 +7,13 @@
   },
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
-    "branch": "langgraph",
-    "commit": "6e6979010414154df68c1f34f283c0279062558d"
+    "branch": "feat/run-observability-recovery",
+    "commit": "091f5c30fad1824800ece44e98c52862451994d1"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
-    "branch": "langgraph",
-    "commit": "cbc047f516af5072a0bc5f130384e3c2a94235f3"
+    "branch": "feat/run-observability-recovery",
+    "commit": "72dbecf4ed42d79b641f6b3f5039d6285880c17d"
   },
   "python": {
     "version": "3.12.10",
