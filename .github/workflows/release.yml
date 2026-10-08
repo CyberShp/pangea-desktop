@@ -1,5 +1,5 @@
 name: Build Windows package
-run-name: PANGEA Desktop ${{ inputs.channel || 'test' }} ${{ inputs.version || '1.0.6' }}
+run-name: PANGEA Desktop ${{ inputs.channel || 'test' }} ${{ inputs.version || '2.0.1' }}
 
 on:
   push:
@@ -20,9 +20,9 @@ on:
           - test
           - release
       version:
-        description: Base version for test builds or exact version for releases (SemVer)
+        description: Base version for test builds or unused exact version for releases (SemVer)
         required: true
-        default: 1.0.6
+        default: 2.0.1
         type: string
       patch_from_version:
         description: Optional exact base version in the same channel; leave empty for a full package only
@@ -51,12 +51,28 @@ jobs:
           node-version: 24.9.0
           cache: npm
 
+      - name: Test release version preflight
+        shell: pwsh
+        run: |
+          node --test test/release-version-check.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Release version preflight tests failed.' }
+
+      - name: Reject occupied release version before building
+        if: inputs.channel == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version || '2.0.1' }}
+        run: |
+          node scripts/assert-release-version-available.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Release preflight failed before building. See the version or API error above.' }
+
       - name: Prepare release secrets and version
         id: release_meta
         shell: pwsh
         env:
           BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
-          REQUESTED_VERSION: ${{ inputs.version || '1.0.6' }}
+          REQUESTED_VERSION: ${{ inputs.version || '2.0.1' }}
           PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
           UPDATE_PRIVATE_KEY_B64: ${{ secrets.PANGEA_UPDATE_PRIVATE_KEY_B64 }}
         run: |
@@ -198,7 +214,12 @@ jobs:
           PATCH_FROM_VERSION: ${{ inputs.patch_from_version }}
           RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
           RELEASE_TITLE: ${{ steps.release_meta.outputs.title }}
+          REQUESTED_VERSION: ${{ steps.release_meta.outputs.version }}
         run: |
+          if ($env:BUILD_CHANNEL -eq 'release') {
+            node scripts/assert-release-version-available.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Release availability changed during the build. Existing releases will not be overwritten.' }
+          }
           $PackageName = "pangea-desktop-$env:RELEASE_VERSION-windows-x64-portable.zip"
           $PackagePath = (Resolve-Path "dist/$PackageName").Path
           $HashPath = (Resolve-Path "dist/$PackageName.sha256").Path
