@@ -1,1 +1,1 @@
-2026-10-08: verify release version preflight (7f30dbe); 22 standalone Node checks passed locally. Build the test channel with base 2.0.1; keep the published v2.0.0 and its assets unchanged.
+2026-10-12: verify the component-lock repair for release run 38194040681; pin dsh-pangea 3252a05 and pangea-agent 1349128 together. Build the test channel with base 2.0.1 and run the complete Windows package checks.

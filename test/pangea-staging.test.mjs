@@ -22,6 +22,7 @@ test('staging requires the selected review rubric and all worker instructions', 
     await put(`${runtime}/src/pangea_agent/cli/adapter_api.py`, 'source-first-v1 next_actions')
     for (const role of ['planning', 'analysis', 'review']) for (const dir of ['.agents/pangea', '.opencode/agents']) await put(`${runtime}/${dir}/${role}-worker.md`, 'worker instructions')
     for (const file of ['.opencode/agents/pangea-agent.md', '.opencode/plugins/pangea.ts', '.opencode/skills/product-blackbox-test-case/SKILL.md', 'src/pangea_agent/rubrics/builtin/behavior_test_generation.md']) await put(`${runtime}/${file}`, 'content')
+    for (const file of ['docs/source-first-cli-worker.md', 'src/pangea_agent/analysis_scenarios.py', ...['common_generation', 'common_review', 'flow', 'planning', 'module', 'risk', 'branch', 'coverage'].map(name => `src/pangea_agent/rubrics/builtin/scene_${name}.md`)]) await put(`${runtime}/${file}`, 'content')
     for (const file of ['.pangea-build/runtime/python/python.exe', '.pangea-build/update/pangea-update.json', 'build/apply-portable-update.ps1', 'node_modules/dsh-pangea-product/cordis.patch.yml']) await put(file)
     const run = () => spawnSync(process.execPath, [path.join(root, 'scripts/verify-pangea-staging.mjs')], { encoding: 'utf8' })
     const graph = `${runtime}/src/pangea_agent/graph/nodes/source_first.py`
