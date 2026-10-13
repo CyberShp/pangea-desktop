@@ -16,9 +16,36 @@ $script:UpdateForm=$null
 $script:OwnedUpdateProcesses=@()
 $script:ProtectedUpdateProcesses=@($PID)
 $HolderProcess=$null
+$SecondHolderProcess=$null
+
+function Assert-ScalarHolderRecords {
+  param([object[]]$Holders, [int[]]$ExpectedIds)
+  if ($Holders.Count -ne $ExpectedIds.Count) {
+    throw "Expected $($ExpectedIds.Count) scalar holder records, received $($Holders.Count). JSON arrays must be enumerated before returning from Get-UpdateLockHolders."
+  }
+  foreach ($Holder in $Holders) {
+    if ($Holder -is [Array] -or $Holder.Id -is [Array] -or $Holder.Name -is [Array]) {
+      throw 'Get-UpdateLockHolders returned a nested array instead of a single process record.'
+    }
+    if (($Holder.Id -isnot [int] -and $Holder.Id -isnot [long]) -or $Holder.Id -notin $ExpectedIds -or
+        $Holder.Name -isnot [string] -or [string]::IsNullOrWhiteSpace($Holder.Name) -or
+        $Holder.Critical -isnot [bool] -or $Holder.SameUser -isnot [bool]) {
+      throw 'Holder PID, name and security flags must retain their scalar JSON types.'
+    }
+  }
+  foreach ($ExpectedId in $ExpectedIds) {
+    if (@($Holders | Where-Object { $_.Id -eq $ExpectedId }).Count -ne 1) {
+      throw "Holder PID $ExpectedId was missing or duplicated."
+    }
+  }
+}
+
 New-Item -ItemType Directory -Path $Installation -Force | Out-Null
 try {
   Initialize-HandleInspector
+  $Holders=@(Get-UpdateLockHolders $Installation)
+  Assert-ScalarHolderRecords $Holders @()
+  Write-Output 'PASS: zero holders return an empty pipeline, not a nested empty JSON array'
   # This PowerShell executable is outside the installation, but its native CWD
   # holds the installation directory open, reproducing a terminal lock.
   $Code="[IO.File]::WriteAllText('$($Ready.Replace("'","''"))','ready'); Start-Sleep -Seconds 120"
@@ -30,6 +57,29 @@ try {
     Start-Sleep -Milliseconds 50
   }
   $Holders=@(Get-UpdateLockHolders $Installation)
+  Assert-ScalarHolderRecords $Holders @($HolderProcess.Id)
+  Write-Output 'PASS: one holder returns one scalar process record'
+
+  # A single JSON result cannot catch PowerShell 5.1 treating a JSON array as
+  # one pipeline item. Two real CWD holders must be returned and classified
+  # individually; an aggregated Critical bool[] is truthy even when all false.
+  $SecondReady=Join-Path $Root 'second-holder.ready'
+  $Code="[IO.File]::WriteAllText('$($SecondReady.Replace("'","''"))','ready'); Start-Sleep -Seconds 120"
+  $Encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Code))
+  $SecondHolderProcess=Start-Process "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-EncodedCommand',$Encoded) -WorkingDirectory $Installation -WindowStyle Hidden -PassThru
+  $Deadline=(Get-Date).AddSeconds(10)
+  while (-not (Test-Path -LiteralPath $SecondReady)) {
+    if ((Get-Date) -ge $Deadline) { throw 'Second holder did not start.' }
+    Start-Sleep -Milliseconds 50
+  }
+  $Holders=@(Get-UpdateLockHolders $Installation)
+  Assert-ScalarHolderRecords $Holders @($HolderProcess.Id, $SecondHolderProcess.Id)
+  foreach ($Record in $Holders) {
+    if ((Get-UpdateHolderPolicy $Record @() @() @($PID)) -ne 'confirm') {
+      throw "External CWD holder $($Record.Id) must be individually classified for confirmation."
+    }
+  }
+  Write-Output 'PASS: multiple actual CWD holders retain scalar PID, name and security flags'
   $Holder=$Holders | Where-Object { $_.Id -eq $HolderProcess.Id } | Select-Object -First 1
   if (-not $Holder) { throw 'Directory holder outside installation was not detected.' }
   Write-Output 'PASS: actual directory handle finds external terminal by CWD'
@@ -53,17 +103,36 @@ try {
   if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'confirm') { throw 'Stale ownership authorized automatic cleanup.' }
   Write-Output 'PASS: ownership, services, ancestors and unknown processes classified safely'
   # Exercise the actual resolver with the same local consent hook as the UI.
-  function Confirm-UpdateHolderStop { param($Holder) return $false }
+  $script:DeclinedHolderIds=@()
+  function Confirm-UpdateHolderStop {
+    param($Holder)
+    if ($Holder -is [Array]) { throw 'Confirmation received an aggregated holder array.' }
+    Assert-ScalarHolderRecords @($Holder) @($Holder.Id)
+    $script:DeclinedHolderIds += $Holder.Id
+    return $false
+  }
   Resolve-UpdateDirectoryLocks $Installation
   $HolderProcess.Refresh()
-  if ($HolderProcess.HasExited) { throw 'Declining confirmation killed the holder.' }
+  $SecondHolderProcess.Refresh()
+  if ($HolderProcess.HasExited -or $SecondHolderProcess.HasExited) { throw 'Declining confirmation killed a holder.' }
+  if ($script:DeclinedHolderIds.Count -ne 2 -or $HolderProcess.Id -notin $script:DeclinedHolderIds -or $SecondHolderProcess.Id -notin $script:DeclinedHolderIds) { throw 'Each holder must receive a separate decline confirmation.' }
   Write-Output 'PASS: declining local confirmation preserves external process'
-  function Confirm-UpdateHolderStop { param($Holder) return $true }
+  $script:AcceptedHolderIds=@()
+  function Confirm-UpdateHolderStop {
+    param($Holder)
+    if ($Holder -is [Array]) { throw 'Confirmation received an aggregated holder array.' }
+    Assert-ScalarHolderRecords @($Holder) @($Holder.Id)
+    $script:AcceptedHolderIds += $Holder.Id
+    return $true
+  }
   Move-UpdateDirectory $Installation $Destination -TimeoutSeconds 1 -ResolveLocks
   $HolderProcess.Refresh()
-  if (-not $HolderProcess.HasExited -or -not (Test-Path -LiteralPath $Destination)) { throw 'Confirmed holder cleanup did not release directory rename.' }
+  $SecondHolderProcess.Refresh()
+  if (-not $HolderProcess.HasExited -or -not $SecondHolderProcess.HasExited -or -not (Test-Path -LiteralPath $Destination)) { throw 'Confirmed holder cleanup did not release directory rename.' }
+  if ($script:AcceptedHolderIds.Count -ne 2 -or $HolderProcess.Id -notin $script:AcceptedHolderIds -or $SecondHolderProcess.Id -notin $script:AcceptedHolderIds) { throw 'Each holder must receive a separate accept confirmation.' }
   Write-Output 'PASS: confirmed holder cleanup releases actual directory rename'
   $HolderProcess.Dispose(); $HolderProcess=$null
+  $SecondHolderProcess.Dispose(); $SecondHolderProcess=$null
   Move-UpdateDirectory $Destination $Installation
   $NodePath=(Get-Command node.exe).Source
   $HolderProcess=Start-Process $NodePath -ArgumentList @('-e','"setTimeout(()=>{},120000)"') -WorkingDirectory $Installation -WindowStyle Hidden -PassThru
@@ -88,6 +157,7 @@ try {
   Write-Output 'PASS: Desktop exit timeout terminates only the original process identity'
 } finally {
   if ($HolderProcess) { $HolderProcess.Refresh(); if (-not $HolderProcess.HasExited) { $HolderProcess.Kill(); $HolderProcess.WaitForExit() }; $HolderProcess.Dispose() }
+  if ($SecondHolderProcess) { $SecondHolderProcess.Refresh(); if (-not $SecondHolderProcess.HasExited) { $SecondHolderProcess.Kill(); $SecondHolderProcess.WaitForExit() }; $SecondHolderProcess.Dispose() }
   if (Test-Path -LiteralPath $LogPath) { Get-Content -LiteralPath $LogPath | Write-Output }
   Remove-PortableDirectory $Root
 }

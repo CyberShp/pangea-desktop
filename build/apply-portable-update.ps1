@@ -236,7 +236,12 @@ function Get-UpdateLockHolders {
     $null = $Worker.Handle
     if (-not $Worker.WaitForExit(15000)) { $Worker.Kill(); throw 'Local handle inspection timed out; no occupying processes were stopped.' }
     if ($Worker.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $Output)) { throw 'Local handle inspection unavailable; no occupying processes were stopped.' }
-    return @(Get-Content -LiteralPath $Output -Raw | ConvertFrom-Json)
+    # Windows PowerShell 5.1 emits a top-level JSON array as one pipeline
+    # object. Wrapping that pipeline in @() nests the holders: member access
+    # then returns arrays, and a multi-item Critical array evaluates to true.
+    # Assign first and emit each record explicitly on both PowerShell editions.
+    $ParsedHolders = Get-Content -LiteralPath $Output -Raw | ConvertFrom-Json
+    foreach ($Holder in $ParsedHolders) { $Holder }
   } finally { $Worker.Dispose(); Remove-Item -LiteralPath $Output -Force -ErrorAction SilentlyContinue }
 }
 
