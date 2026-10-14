@@ -48,7 +48,7 @@ try {
     Write-UpdateResult $Terminal $Published.message $Published.rollback
     $Result = Set-InterruptedUpdateFailure $StaleRunning
     $Persisted = Read-UpdateProgress "$PlanPath.progress.json"
-    $SavedResult = Get-Content -LiteralPath $ResultPath -Raw | ConvertFrom-Json
+    $SavedResult = Get-Content -LiteralPath $ResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($Result.state -ne $Terminal -or $Persisted.state -ne $Terminal -or $SavedResult.status -ne $Terminal -or $Persisted.message -ne $Published.message) {
       throw "A stale running snapshot overwrote the published $Terminal outcome."
     }
@@ -145,7 +145,7 @@ function Write-FixtureJson {
 }
 function Read-FixtureJson {
   param([string]$Path)
-  try { return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json } catch { return $null }
+  try { return Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null }
 }
 function New-ProgressFixture {
   param([string]$Name, [switch]$NoProgress)
