@@ -5,6 +5,21 @@ import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { expect, it } from 'vitest'
 
+it.skipIf(process.platform !== 'win32')('keeps independent upgrade progress visible, responsive and reviewable', () => {
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File',
+    path.resolve('scripts/verify-portable-update-progress.ps1')], {
+    encoding: 'utf8', timeout: 120_000,
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'psmodulepath'))
+  })
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+  expect(result.stdout).toContain('PASS: independent progress monitor announces ready')
+  expect(result.stdout).toContain('PASS: elapsed time and stages refresh')
+  expect(result.stdout).toContain('PASS: failed outcome and restoration status')
+  expect(result.stdout).toContain('PASS: unexpected worker exit persists a failed outcome')
+  expect(result.stdout).toContain('PASS: successful outcome survives normal worker exit')
+  expect(result.stdout).toContain('PASS: monitor startup failure never announces')
+}, 125_000)
+
 it.skipIf(process.platform !== 'win32')('retries real directory locks and preserves the installation on timeout', () => {
   const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
     path.resolve('scripts/verify-portable-update-locks.ps1')], {

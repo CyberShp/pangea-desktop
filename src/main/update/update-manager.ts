@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
@@ -21,6 +21,8 @@ interface PortableUpdateResult {
   status: 'success' | 'failed'
   version: string
   message?: string
+  rollback?: 'restored' | 'not_needed' | 'failed' | 'unknown'
+  log_path?: string
 }
 
 const LAST_UPDATE_RESULT = 'last-update-result.json'
@@ -146,7 +148,8 @@ async function launchPortableUpdateHelper(imported: StagedImport): Promise<void>
   const baseVersion = imported.kind === 'patch' ? imported.manifest.from_version : undefined
   const updateRoot = dirname(imported.packagePath)
   const helperPath = join(updateRoot, `apply-portable-update-${randomUUID()}.ps1`)
-  const planPath = join(updateRoot, 'update-plan.json')
+  // Retrying must never consume a previous helper's ready/continue markers.
+  const planPath = join(updateRoot, `update-plan-${randomUUID()}.json`)
   const healthMarker = join(updateRoot, `healthy-${randomUUID()}.json`)
   const resultPath = join(app.getPath('userData'), 'updates', LAST_UPDATE_RESULT)
   const helperSource = join(process.resourcesPath, 'update', 'apply-portable-update.ps1')
@@ -154,6 +157,7 @@ async function launchPortableUpdateHelper(imported: StagedImport): Promise<void>
   await rm(resultPath, { force: true })
   await writeFile(planPath, JSON.stringify({
     schema_version: 2,
+    handoff_required: true,
     package_type: patch ? 'patch' : 'full',
     parent_pid: process.pid,
     // prepareToInstall has already rejected active analysis sessions. The helper
@@ -172,14 +176,13 @@ async function launchPortableUpdateHelper(imported: StagedImport): Promise<void>
     log_path: join(updateRoot, 'apply-update.log')
   }, null, 2), 'utf8')
 
-  await launchPortableHelper(helperPath, planPath)
+  await launchPortableHelper(helperPath, planPath, { requireUiReady: true })
 }
 
 function restoreLastUpdateFailure(): void {
   try {
     const resultPath = join(app.getPath('userData'), 'updates', LAST_UPDATE_RESULT)
     const serialized = readFileSync(resultPath, 'utf8').replace(/^\uFEFF/, '')
-    rmSync(resultPath, { force: true })
     const result = JSON.parse(serialized) as PortableUpdateResult
     if (
       result.schema_version !== 1
@@ -187,10 +190,13 @@ function restoreLastUpdateFailure(): void {
       || typeof result.version !== 'string'
       || typeof result.message !== 'string'
     ) return
+    const recovery = result.rollback === 'restored' ? '已恢复原版本。'
+      : result.rollback === 'not_needed' ? '安装目录未切换，原版本仍保留。'
+        : result.rollback === 'failed' ? '自动恢复未完成，请查看升级窗口中的恢复信息。' : ''
     transition({
       type: 'restore-error',
       version: result.version,
-      message: `升级到 v${result.version} 失败：${result.message}`
+      message: `上次升级到 v${result.version} 失败：${result.message}${recovery ? `\n${recovery}` : ''}${typeof result.log_path === 'string' ? `\n升级日志：${result.log_path}` : ''}`
     }, true)
   } catch {
     // A missing result means there is no previous update outcome to report.

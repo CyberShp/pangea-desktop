@@ -32,11 +32,10 @@ if ($Running.Count) {
 
 if (-not $PlanPath) {
   $MatchingPlans = @(Get-ChildItem -LiteralPath $UpdateRoot -Directory | ForEach-Object {
-    $Candidate = Join-Path $_.FullName 'update-plan.json'
-    if (Test-Path -LiteralPath $Candidate -PathType Leaf) {
-      $Saved = Get-Content -LiteralPath $Candidate -Raw | ConvertFrom-Json
+    foreach ($Candidate in @(Get-ChildItem -LiteralPath $_.FullName -Filter 'update-plan*.json' -File | Where-Object { $_.Name -match '^update-plan(?:-[0-9a-f-]+)?\.json$' })) {
+      $Saved = Get-Content -LiteralPath $Candidate.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
       if ([IO.Path]::GetFullPath([string]$Saved.install_root).TrimEnd('\') -ieq $InstallRoot -and
-          [string]$Saved.expected_version -eq $TargetVersion) { Get-Item -LiteralPath $Candidate }
+          [string]$Saved.expected_version -eq $TargetVersion) { $Candidate }
     }
   } | Sort-Object LastWriteTime -Descending)
   if (-not $MatchingPlans.Count) { throw "No previously imported update to $TargetVersion found for $InstallRoot." }
@@ -46,18 +45,20 @@ $PlanPath = (Resolve-Path -LiteralPath $PlanPath).Path
 if (-not $PlanPath.StartsWith(([IO.Path]::GetFullPath($UpdateRoot).TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Use the original Desktop update plan from its profile updates directory.'
 }
-$Plan = Get-Content -LiteralPath $PlanPath -Raw | ConvertFrom-Json
+$Plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($Plan.schema_version -ne 2 -or [string]$Plan.package_type -ne 'patch' -or
     [string]$Plan.expected_version -ne $TargetVersion -or
     [IO.Path]::GetFullPath([string]$Plan.install_root).TrimEnd('\') -ine $InstallRoot) {
   throw 'The saved patch plan does not match this recovery request.'
 }
-$BaseManifest = Get-Content -LiteralPath (Join-Path $InstallRoot 'resources\update\pangea-package-manifest.json') -Raw | ConvertFrom-Json
+$BaseManifest = Get-Content -LiteralPath (Join-Path $InstallRoot 'resources\update\pangea-package-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([string]$BaseManifest.version -ne [string]$Plan.expected_base_version) { throw 'The installed version no longer matches the saved patch base.' }
 # Keep the original plan, including its verified package hash, for diagnosis.
 # The old PID may have been reused; do not wait for an unrelated process.
 $Plan.parent_pid = 0
 $Plan | Add-Member -NotePropertyName allow_owned_process_cleanup -NotePropertyValue $false -Force
+# Manual recovery has no running Desktop to acknowledge the UI handoff.
+$Plan | Add-Member -NotePropertyName handoff_required -NotePropertyValue $false -Force
 $ResumePlan = Join-Path (Split-Path -Parent $PlanPath) ('resume-plan-' + [guid]::NewGuid().ToString('N') + '.json')
 [IO.File]::WriteAllText($ResumePlan, ($Plan | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
 Write-Output "Resuming verified patch $($Plan.expected_base_version) -> $TargetVersion for $InstallRoot"

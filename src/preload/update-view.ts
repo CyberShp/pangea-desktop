@@ -58,8 +58,8 @@ export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): Upda
       return {
         title: zh ? '升级未完成' : 'Update was not completed',
         description: zh
-          ? `${version} 未安装，当前可用版本已重新启动。`
-          : `${version} was not installed. The current working version was restarted.`
+          ? `${version} 升级未完成，请查看失败原因和恢复结果。`
+          : `The update to ${version} was not completed. Check the error and recovery result.`
       }
     case 'unsupported':
       return {

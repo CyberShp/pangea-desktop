@@ -1,5 +1,6 @@
+﻿# PANGEA_UPDATE_MONITOR_PROTOCOL=1
 [CmdletBinding()]
-param([string]$PlanPath, [switch]$ScanLocks, [string]$ScanRoot, [string]$ScanOutput, [string]$WatchExplorer)
+param([string]$PlanPath, [switch]$ScanLocks, [string]$ScanRoot, [string]$ScanOutput, [string]$WatchExplorer, [switch]$WatchUpdate)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -16,6 +17,7 @@ function Copy-PortableUserData([string]$PreviousRoot, [string]$CandidateRoot) {
       $Target = Join-Path $CandidateRoot $Name
       if (Test-Path -LiteralPath $Target) { Remove-PortableDirectory $Target }
       $CopyLog = "$LogPath.copy-$Name.log"
+      Set-UpdateStage "正在保留用户数据：$Name（含工作区、任务和本地技能）…" 70 'user-data'
       Write-UpdateLog "copying user directory: $Name; details: $CopyLog"
       # PowerShell 5.1 Copy-Item can fail when the longer candidate path exceeds
       # MAX_PATH. Robocopy supports long paths and preserves links without
@@ -240,7 +242,7 @@ function Get-UpdateLockHolders {
     # object. Wrapping that pipeline in @() nests the holders: member access
     # then returns arrays, and a multi-item Critical array evaluates to true.
     # Assign first and emit each record explicitly on both PowerShell editions.
-    $ParsedHolders = Get-Content -LiteralPath $Output -Raw | ConvertFrom-Json
+    $ParsedHolders = Get-Content -LiteralPath $Output -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($Holder in $ParsedHolders) { $Holder }
   } finally { $Worker.Dispose(); Remove-Item -LiteralPath $Output -Force -ErrorAction SilentlyContinue }
 }
@@ -304,7 +306,7 @@ function Restore-ExplorerShell {
 
 function Watch-ExplorerRecovery {
   param([string]$WatchFile)
-  $Watch = Get-Content -LiteralPath $WatchFile -Raw | ConvertFrom-Json
+  $Watch = Get-Content -LiteralPath $WatchFile -Raw -Encoding UTF8 | ConvertFrom-Json
   if ([int]$Watch.session -ne [Diagnostics.Process]::GetCurrentProcess().SessionId) { throw 'Explorer recovery session mismatch.' }
   $Supervisor = $null
   try {
@@ -357,6 +359,7 @@ function Complete-ExplorerRecovery {
 
 function Resolve-UpdateDirectoryLocks {
   param([string]$Root)
+  Set-UpdateStage '正在检查目录占用；若弹出确认窗口，请先保存相关工作…' 76 'directory-locks'
   try {
     $Holders = @(Get-UpdateLockHolders $Root)
     $ServiceIds = @(Get-CimInstance Win32_Service -Filter "State='Running'" -ErrorAction Stop | ForEach-Object { [int]$_.ProcessId })
@@ -426,6 +429,7 @@ function Move-UpdateDirectory {
       $Reason = $_.Exception.GetBaseException().Message
       if (-not (Test-Path -LiteralPath $Source -PathType Container)) { throw }
       if ($Attempt % 10 -eq 0) {
+        Set-UpdateStage '正在等待安装目录占用释放，请查看日志中的占用进程信息…' 76 'directory-locks'
         Write-UpdateLog "directory rename blocked; waiting for handles to close: $Reason"
         Write-InstallationProcesses $Source
       }
@@ -440,103 +444,287 @@ function Move-UpdateDirectory {
       }
       $Attempt++
       Start-Sleep -Milliseconds 500
-      if ($null -ne $script:UpdateForm -and -not $script:UpdateForm.IsDisposed) {
-        [System.Windows.Forms.Application]::DoEvents()
-      }
     }
   }
+}
+
+function Write-AtomicUpdateJson {
+  param([string]$Path, $Value)
+  $Directory = [IO.Path]::GetDirectoryName($Path)
+  New-Item $Directory -ItemType Directory -Force | Out-Null
+  $Temporary = "$Path.$PID.$([guid]::NewGuid().ToString('N')).tmp"
+  try {
+    [IO.File]::WriteAllText($Temporary, ($Value | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+    if ([IO.File]::Exists($Path)) { [IO.File]::Replace($Temporary, $Path, [NullString]::Value) }
+    else { [IO.File]::Move($Temporary, $Path) }
+  } finally { if (Test-Path -LiteralPath $Temporary) { Remove-Item -LiteralPath $Temporary -Force -ErrorAction SilentlyContinue } }
 }
 
 function Write-UpdateResult {
-  param(
-    [ValidateSet('success', 'failed')][string]$Status,
-    [string]$Message
-  )
+  param([ValidateSet('success', 'failed')][string]$Status, [string]$Message, [string]$Rollback = '')
   try {
-    $Directory = [System.IO.Path]::GetDirectoryName($ResultPath)
-    New-Item $Directory -ItemType Directory -Force | Out-Null
-    $TemporaryPath = "$ResultPath.tmp"
-    $Json = @{
-      schema_version = 1
-      status = $Status
-      version = $ExpectedVersion
-      message = $Message
-    } | ConvertTo-Json
-    [System.IO.File]::WriteAllText(
-      $TemporaryPath,
-      $Json,
-      (New-Object System.Text.UTF8Encoding($false))
-    )
-    Move-Item -LiteralPath $TemporaryPath $ResultPath -Force
-  } catch {
-    Write-UpdateLog "could not persist update result: $($_.Exception.Message)"
-  }
+    $Result = @{ schema_version=1; status=$Status; version=$ExpectedVersion; message=$Message; log_path=$LogPath }
+    if ($Rollback) { $Result.rollback=$Rollback }
+    if ((Get-Variable -Name PlanPath -ErrorAction SilentlyContinue) -and $PlanPath) { $Result.plan_path=$PlanPath }
+    if ((Get-Variable -Name UpdateProgressData -Scope Script -ErrorAction SilentlyContinue) -and $script:UpdateProgressData) {
+      $Result.worker_pid=$script:UpdateProgressData.worker_pid
+      $Result.worker_started_at=$script:UpdateProgressData.worker_started_at
+    }
+    Write-AtomicUpdateJson $ResultPath $Result
+  } catch { Write-UpdateLog "could not persist update result: $($_.Exception.Message)" }
 }
 
-function Open-UpdateWindow {
+function Read-UpdateProgress {
+  param([string]$Path)
   try {
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
+    $Value = [IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ($Value.schema_version -ne 1 -or $Value.state -notin @('running','success','failed')) { return $null }
+    return $Value
+  } catch { return $null }
+}
 
-    $script:UpdateForm = New-Object System.Windows.Forms.Form
-    $script:UpdateForm.Text = 'PANGEA Desktop'
-    $script:UpdateForm.ClientSize = New-Object System.Drawing.Size(480, 154)
-    $script:UpdateForm.StartPosition = 'CenterScreen'
-    $script:UpdateForm.FormBorderStyle = 'FixedDialog'
-    $script:UpdateForm.MaximizeBox = $false
-    $script:UpdateForm.MinimizeBox = $false
-    $script:UpdateForm.ControlBox = $false
-    $script:UpdateForm.BackColor = [System.Drawing.Color]::White
-    $script:UpdateForm.TopMost = $true
-    if (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf) {
-      $script:UpdateForm.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($InstalledExecutable)
+function Write-UpdateProgress {
+  param([ValidateSet('running','success','failed')][string]$State = 'running', [string]$Stage = 'prepare',
+    [string]$Message, [int]$Percent = 0, [string]$Rollback = '', [int]$FilesCompleted = -1, [int]$FilesTotal = -1)
+  # Also used by AST-based component tests that do not execute script globals.
+  if (-not (Get-Variable -Name PlanPath -ErrorAction SilentlyContinue) -or -not $PlanPath) { return }
+  try {
+    $Now = [DateTime]::UtcNow.ToString('o')
+    if (-not (Get-Variable -Name UpdateProgressData -Scope Script -ErrorAction SilentlyContinue) -or -not $script:UpdateProgressData) {
+      $Self = Get-Process -Id $PID -ErrorAction Stop
+      $script:UpdateProgressData = @{ schema_version=1; state='running'; stage=''; message=''; percent=0;
+        started_at=$Now; stage_started_at=$Now; updated_at=$Now; worker_pid=$PID;
+        worker_started_at=$Self.StartTime.ToUniversalTime().ToString('o'); log_path=$LogPath; version=$ExpectedVersion }
     }
-
-    $Title = New-Object System.Windows.Forms.Label
-    $Title.Text = "Updating PANGEA Desktop to $ExpectedVersion"
-    $Title.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 12, [System.Drawing.FontStyle]::Bold)
-    $Title.AutoSize = $true
-    $Title.Location = New-Object System.Drawing.Point(24, 22)
-
-    $script:UpdateLabel = New-Object System.Windows.Forms.Label
-    $script:UpdateLabel.Text = 'Closing the current version...'
-    $script:UpdateLabel.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
-    $script:UpdateLabel.ForeColor = [System.Drawing.Color]::FromArgb(88, 94, 102)
-    $script:UpdateLabel.AutoSize = $true
-    $script:UpdateLabel.Location = New-Object System.Drawing.Point(25, 62)
-
-    $script:UpdateProgress = New-Object System.Windows.Forms.ProgressBar
-    $script:UpdateProgress.Style = 'Continuous'
-    $script:UpdateProgress.Minimum = 0
-    $script:UpdateProgress.Maximum = 100
-    $script:UpdateProgress.Value = 5
-    $script:UpdateProgress.Size = New-Object System.Drawing.Size(430, 12)
-    $script:UpdateProgress.Location = New-Object System.Drawing.Point(25, 103)
-
-    $script:UpdateForm.Controls.Add($Title)
-    $script:UpdateForm.Controls.Add($script:UpdateLabel)
-    $script:UpdateForm.Controls.Add($script:UpdateProgress)
-    $script:UpdateForm.Show()
-    [System.Windows.Forms.Application]::DoEvents()
-    $script:UpdateForm.TopMost = $false
-  } catch {
-    Write-UpdateLog "update progress window unavailable: $($_.Exception.Message)"
-  }
+    $Data = $script:UpdateProgressData
+    if ($Data.stage -ne $Stage) {
+      $Data.stage_started_at=$Now
+      $Data.Remove('files_completed'); $Data.Remove('files_total')
+    }
+    $Data.state=$State; $Data.stage=$Stage; $Data.message=$Message
+    $Data.percent=[Math]::Max(0,[Math]::Min(100,$Percent)); $Data.updated_at=$Now
+    if ($Rollback) { $Data.rollback=$Rollback }
+    if ($FilesCompleted -ge 0) { $Data.files_completed=$FilesCompleted }
+    if ($FilesTotal -ge 0) { $Data.files_total=$FilesTotal }
+    Write-AtomicUpdateJson "$PlanPath.progress.json" $Data
+  } catch { Write-UpdateLog "could not persist update progress: $($_.Exception.Message)" }
 }
 
 function Set-UpdateStage {
-  param([string]$Message, [int]$Percent)
+  param([string]$Message, [int]$Percent, [string]$Stage = 'prepare', [int]$FilesCompleted = -1, [int]$FilesTotal = -1)
   Write-UpdateLog "$Percent% $Message"
-  if ($null -eq $script:UpdateForm -or $script:UpdateForm.IsDisposed) { return }
-  $script:UpdateLabel.Text = $Message
-  $script:UpdateProgress.Value = [Math]::Max(0, [Math]::Min(100, $Percent))
-  [System.Windows.Forms.Application]::DoEvents()
+  Write-UpdateProgress -State running -Stage $Stage -Message $Message -Percent $Percent -FilesCompleted $FilesCompleted -FilesTotal $FilesTotal
 }
 
-function Close-UpdateWindow {
-  if ($null -ne $script:UpdateForm -and -not $script:UpdateForm.IsDisposed) {
-    $script:UpdateForm.Close()
-    $script:UpdateForm.Dispose()
+function Test-UpdateWorkerIdentity {
+  param($Progress)
+  $Worker = $null
+  try {
+    $Worker = Get-Process -Id ([int]$Progress.worker_pid) -ErrorAction Stop
+    return -not $Worker.HasExited -and $Worker.StartTime.ToUniversalTime().Ticks -eq ([DateTime]$Progress.worker_started_at).ToUniversalTime().Ticks
+  } catch { return $false }
+  finally { if ($Worker) { $Worker.Dispose() } }
+}
+
+function Set-InterruptedUpdateFailure {
+  param($Progress)
+  # The monitor only writes after the original process identity has gone.
+  if ($Progress.state -ne 'running' -or (Test-UpdateWorkerIdentity $Progress)) { return $Progress }
+  # The last timer read can predate the worker's terminal write. Once the
+  # worker has exited, read again before declaring interruption.
+  $Latest=Read-UpdateProgress "$PlanPath.progress.json"
+  if ($Latest) {
+    if ($Latest.state -ne 'running') { return $Latest }
+    if ($Latest.worker_pid -ne $Progress.worker_pid -or $Latest.worker_started_at -ne $Progress.worker_started_at) { return $Latest }
+    $Progress=$Latest
+  }
+  $Data=@{}; foreach ($Property in $Progress.PSObject.Properties) { $Data[$Property.Name]=$Property.Value }
+  # If only the final progress write failed, preserve a matching persisted
+  # result. A previous attempt's result must never be mistaken for this one.
+  try {
+    $Result=[IO.File]::ReadAllText($ResultPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ($Result.schema_version -eq 1 -and $Result.status -in @('success','failed') -and
+        $Result.plan_path -eq $PlanPath -and $Result.worker_pid -eq $Progress.worker_pid -and
+        $Result.worker_started_at -eq $Progress.worker_started_at) {
+      $Data.state=$Result.status; $Data.message=$Result.message; $Data.stage='complete'
+      $Data.updated_at=[DateTime]::UtcNow.ToString('o'); $Data.stage_started_at=$Data.updated_at
+      if ($Result.status -eq 'success') { $Data.percent=100 }
+      if ($Result.PSObject.Properties['rollback']) { $Data.rollback=$Result.rollback }
+      try { Write-AtomicUpdateJson "$PlanPath.progress.json" $Data } catch { Write-UpdateLog $_.Exception.Message }
+      return [pscustomobject]$Data
+    }
+  } catch { }
+  $Data.state='failed'; $Data.stage='interrupted'; $Data.updated_at=[DateTime]::UtcNow.ToString('o')
+  $Data.stage_started_at=$Data.updated_at; $Data.rollback='unknown'
+  $Data.message='升级进程异常退出，无法确认版本切换或回滚是否完成。请打开升级日志核实；不要删除原版本备份目录。'
+  Write-UpdateLog $Data.message
+  Write-UpdateResult 'failed' $Data.message 'unknown'
+  try { Write-AtomicUpdateJson "$PlanPath.progress.json" $Data } catch { Write-UpdateLog "could not persist interrupted progress: $($_.Exception.Message)" }
+  return [pscustomobject]$Data
+}
+
+function Get-UpdateLogTail {
+  param([string]$Path, [int]$MaximumBytes = 16384)
+  $Stream=$null
+  try {
+    $Stream=New-Object IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    $Count=[int][Math]::Min($MaximumBytes,$Stream.Length)
+    $null=$Stream.Seek(-$Count,[IO.SeekOrigin]::End)
+    $Bytes=New-Object byte[] $Count
+    $Read=$Stream.Read($Bytes,0,$Count)
+    return [Text.Encoding]::UTF8.GetString($Bytes,0,$Read)
+  } catch { return '暂无日志，等待升级进程写入…' }
+  finally { if ($Stream) { $Stream.Dispose() } }
+}
+
+function Watch-UpdateWindow {
+  try {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [Windows.Forms.Application]::EnableVisualStyles()
+    $script:MonitorTerminal=$false
+    $script:MonitorProgress=Read-UpdateProgress "$PlanPath.progress.json"
+    if (-not $script:MonitorProgress) { throw '升级状态文件无法读取，未启动升级。' }
+    $script:MonitorLastLogRead=[DateTime]::MinValue
+    $script:UpdateForm=New-Object Windows.Forms.Form
+    $script:UpdateForm.Text='PANGEA Desktop · 升级进度'
+    $script:UpdateForm.ClientSize=New-Object Drawing.Size(760,570)
+    $script:UpdateForm.StartPosition='CenterScreen'
+    $script:UpdateForm.FormBorderStyle='FixedDialog'
+    $script:UpdateForm.MaximizeBox=$false; $script:UpdateForm.MinimizeBox=$true
+    $script:UpdateForm.Font=New-Object Drawing.Font('Microsoft YaHei UI',9)
+    $script:UpdateForm.BackColor=[Drawing.Color]::White
+    try { if (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf) { $script:UpdateForm.Icon=[Drawing.Icon]::ExtractAssociatedIcon($InstalledExecutable) } } catch { }
+    $script:UpdateTitle=New-Object Windows.Forms.Label
+    $script:UpdateTitle.Text="正在升级至 $ExpectedVersion"
+    $script:UpdateTitle.Font=New-Object Drawing.Font('Microsoft YaHei UI',14,[Drawing.FontStyle]::Bold)
+    $script:UpdateTitle.SetBounds(24,20,712,34)
+    $script:UpdateLabel=New-Object Windows.Forms.Label
+    $script:UpdateLabel.Name='UpdateMessage'; $script:UpdateLabel.SetBounds(24,64,712,74)
+    $script:UpdateProgress=New-Object Windows.Forms.ProgressBar
+    $script:UpdateProgress.SetBounds(24,144,712,16)
+    $script:UpdateProgress.Style='Continuous'
+    $Hint=New-Object Windows.Forms.Label
+    $Hint.Text='阶段进度用于说明当前步骤，不代表剩余时间。'; $Hint.SetBounds(24,167,712,23)
+    $script:UpdateElapsed=New-Object Windows.Forms.Label
+    $script:UpdateElapsed.Name='UpdateElapsed'; $script:UpdateElapsed.SetBounds(24,198,712,24)
+    $script:UpdateRecent=New-Object Windows.Forms.Label
+    $script:UpdateRecent.Name='UpdateRecent'; $script:UpdateRecent.SetBounds(24,228,712,45)
+    $script:UpdateRecovery=New-Object Windows.Forms.Label
+    $script:UpdateRecovery.Name='UpdateRecovery'; $script:UpdateRecovery.SetBounds(24,278,712,37)
+    $script:UpdateLogBox=New-Object Windows.Forms.TextBox
+    $script:UpdateLogBox.Name='UpdateLog'; $script:UpdateLogBox.SetBounds(24,322,712,168)
+    $script:UpdateLogBox.Multiline=$true; $script:UpdateLogBox.ReadOnly=$true
+    $script:UpdateLogBox.ScrollBars='Both'; $script:UpdateLogBox.WordWrap=$false
+    $script:UpdateLogBox.Font=New-Object Drawing.Font('Consolas',9)
+    $OpenLog=New-Object Windows.Forms.Button
+    $OpenLog.Text='打开日志'; $OpenLog.SetBounds(24,510,106,32)
+    $OpenLog.Add_Click({ try { if (Test-Path -LiteralPath $LogPath) { Start-Process -FilePath 'notepad.exe' -ArgumentList ('"'+$LogPath+'"') | Out-Null } } catch { $script:UpdateRecovery.Text=$_.Exception.Message } })
+    $OpenFolder=New-Object Windows.Forms.Button
+    $OpenFolder.Text='打开日志目录'; $OpenFolder.SetBounds(140,510,126,32)
+    $OpenFolder.Add_Click({ try { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"'+[IO.Path]::GetDirectoryName($LogPath)+'"') | Out-Null } catch { $script:UpdateRecovery.Text=$_.Exception.Message } })
+    $CopyError=New-Object Windows.Forms.Button
+    $CopyError.Text='复制诊断信息'; $CopyError.SetBounds(276,510,126,32)
+    $CopyError.Add_Click({ try { [Windows.Forms.Clipboard]::SetText(($script:MonitorProgress | ConvertTo-Json -Depth 8)+"`r`n"+$script:UpdateLogBox.Text) } catch { $script:UpdateRecovery.Text=$_.Exception.Message } })
+    $script:UpdateCloseButton=New-Object Windows.Forms.Button
+    $script:UpdateCloseButton.Text='升级中，可最小化'; $script:UpdateCloseButton.Enabled=$false
+    $script:UpdateCloseButton.SetBounds(566,510,170,32)
+    $script:UpdateCloseButton.Add_Click({ $script:UpdateForm.Close() })
+    foreach ($Control in @($script:UpdateTitle,$script:UpdateLabel,$script:UpdateProgress,$Hint,$script:UpdateElapsed,$script:UpdateRecent,$script:UpdateRecovery,$script:UpdateLogBox,$OpenLog,$OpenFolder,$CopyError,$script:UpdateCloseButton)) { $script:UpdateForm.Controls.Add($Control) }
+    $script:UpdateForm.Add_FormClosing({ param($Sender,$EventArgs) if (-not $script:MonitorTerminal) { $EventArgs.Cancel=$true; $script:UpdateRecovery.Text='升级仍在进行，可最小化窗口；结束后可以关闭。' } })
+    $script:UpdateTimer=New-Object Windows.Forms.Timer
+    $script:UpdateTimer.Interval=1000
+    $script:UpdateTimer.Add_Tick({ Update-MonitorWindow })
+    $script:UpdateForm.Add_Shown({
+      try {
+        if (-not $script:UpdateForm.Visible -or -not $script:UpdateForm.IsHandleCreated) { throw '升级窗口未显示。' }
+        Update-MonitorWindow
+        Write-AtomicUpdateJson "$PlanPath.ui-ready" @{ schema_version=1; monitor_pid=$PID; visible=$true }
+        $script:UpdateTimer.Start()
+      } catch {
+        [IO.File]::WriteAllText("$PlanPath.ui-error",$_.Exception.Message,(New-Object Text.UTF8Encoding($false)))
+        $script:MonitorTerminal=$true; $script:UpdateForm.Close()
+      }
+    })
+    # A dedicated STA process owns the real message loop, independent of file IO.
+    [Windows.Forms.Application]::Run($script:UpdateForm)
+  } catch {
+    $Reason=$_.Exception.Message
+    try { [IO.File]::WriteAllText("$PlanPath.ui-error",$Reason,(New-Object Text.UTF8Encoding($false))) } catch { }
+    throw
+  } finally {
+    if (Get-Variable -Name UpdateTimer -Scope Script -ErrorAction SilentlyContinue) { $script:UpdateTimer.Stop(); $script:UpdateTimer.Dispose() }
+    if ($script:UpdateForm) { $script:UpdateForm.Dispose() }
+  }
+}
+
+function Update-MonitorWindow {
+  try {
+    $Latest=Read-UpdateProgress "$PlanPath.progress.json"
+    if ($Latest) { $script:MonitorProgress=$Latest }
+    $Progress=$script:MonitorProgress
+    if ($Progress.state -eq 'running' -and -not (Test-UpdateWorkerIdentity $Progress)) {
+      $Progress=Set-InterruptedUpdateFailure $Progress; $script:MonitorProgress=$Progress
+    }
+    $script:MonitorTerminal=$Progress.state -in @('success','failed')
+    $script:UpdateLabel.Text=$Progress.message
+    $script:UpdateProgress.Value=[Math]::Max(0,[Math]::Min(100,[int]$Progress.percent))
+    $Now=[DateTime]::UtcNow
+    $End=if ($script:MonitorTerminal) { ([DateTime]$Progress.updated_at).ToUniversalTime() } else { $Now }
+    $Elapsed=$End-([DateTime]$Progress.started_at).ToUniversalTime()
+    $StageElapsed=$End-([DateTime]$Progress.stage_started_at).ToUniversalTime()
+    $script:UpdateElapsed.Text=('阶段进度 {0}%　总已用 {1:00}:{2:00}:{3:00}　本阶段 {4:00}:{5:00}:{6:00}' -f $Progress.percent,[Math]::Floor($Elapsed.TotalHours),$Elapsed.Minutes,$Elapsed.Seconds,[Math]::Floor($StageElapsed.TotalHours),$StageElapsed.Minutes,$StageElapsed.Seconds)
+    $Ago=[Math]::Max(0,[int]($Now-([DateTime]$Progress.updated_at).ToUniversalTime()).TotalSeconds)
+    $script:UpdateRecent.Text=if ($script:MonitorTerminal) { '升级流程已结束，此窗口将保留，便于查看结果和日志。' } elseif ($Ago -ge 30) { "最近进展：${Ago} 秒前。大文件校验、复制或目录占用处理可能耗时较长，暂无新进展不代表程序卡死。" } else { "最近进展：${Ago} 秒前。窗口可最小化，升级将继续进行。" }
+    if ($script:MonitorTerminal) {
+      $script:UpdateCloseButton.Enabled=$true; $script:UpdateCloseButton.Text='关闭'
+      $script:UpdateForm.Text=if ($Progress.state -eq 'success') { 'PANGEA Desktop · 升级完成' } else { 'PANGEA Desktop · 升级失败' }
+      $script:UpdateTitle.Text=if ($Progress.state -eq 'success') { "升级完成 · $ExpectedVersion" } else { "升级失败 · $ExpectedVersion" }
+      $Rollback=if ($Progress.PSObject.Properties['rollback']) { [string]$Progress.rollback } else { '' }
+      $script:UpdateRecovery.Text=switch ($Rollback) {
+        'restored' { '已恢复原版本文件；旧版启动结果请查看上方信息与日志。' }
+        'not_needed' { '安装目录尚未切换，原版本文件保持完整。' }
+        'failed' { '自动回滚未完成，请保留备份目录并查看日志中的恢复位置。' }
+        'unknown' { '升级进程意外结束，回滚状态未知，请查看日志。' }
+        default { '新版已通过启动健康检查。' }
+      }
+    }
+    if (($Now-$script:MonitorLastLogRead).TotalSeconds -ge 2) {
+      $Tail=Get-UpdateLogTail $LogPath
+      if ($script:UpdateLogBox.Text -ne $Tail) { $script:UpdateLogBox.Text=$Tail; $script:UpdateLogBox.SelectionStart=$script:UpdateLogBox.Text.Length; $script:UpdateLogBox.ScrollToCaret() }
+      $script:MonitorLastLogRead=$Now
+    }
+  } catch { $script:UpdateRecovery.Text="状态刷新遇到问题，将继续重试：$($_.Exception.Message)" }
+}
+
+function Open-UpdateWindow {
+  Set-UpdateStage '正在启动独立升级窗口…' 2 'prepare'
+  $Quote={ param($Value) "'"+$Value.Replace("'","''")+"'" }
+  $Command='& '+(& $Quote $script:UpdaterScriptPath)+' -WatchUpdate -PlanPath '+(& $Quote $PlanPath)
+  $Encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Command))
+  $script:UpdateMonitor=Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-NonInteractive','-STA','-ExecutionPolicy','Bypass','-EncodedCommand',$Encoded) -WorkingDirectory ([IO.Path]::GetDirectoryName($PlanPath)) -WindowStyle Hidden -PassThru
+  $Deadline=(Get-Date).AddSeconds(20)
+  while ($true) {
+    if (Test-Path -LiteralPath "$PlanPath.ui-error") { throw ('升级窗口启动失败：'+[IO.File]::ReadAllText("$PlanPath.ui-error")) }
+    if ($script:UpdateMonitor.HasExited) { throw '升级窗口进程已退出，当前版本将保持运行。' }
+    if (Test-Path -LiteralPath "$PlanPath.ui-ready") {
+      $Ready=[IO.File]::ReadAllText("$PlanPath.ui-ready") | ConvertFrom-Json
+      if ($Ready.visible -eq $true -and [int]$Ready.monitor_pid -eq $script:UpdateMonitor.Id) { return }
+      throw '升级窗口就绪状态无效，当前版本将保持运行。'
+    }
+    if ((Get-Date) -ge $Deadline) { throw '升级窗口在 20 秒内未能显示，已取消升级。' }
+    Start-Sleep -Milliseconds 100; $script:UpdateMonitor.Refresh()
+  }
+}
+
+function Wait-UpdateHandoff {
+  if (-not $Plan.PSObject.Properties['handoff_required'] -or $Plan.handoff_required -ne $true) { return }
+  $Deadline=(Get-Date).AddSeconds(20)
+  while ($true) {
+    if (Test-Path -LiteralPath "$PlanPath.cancel") { throw '升级交接已取消，当前版本保持运行。' }
+    if (Test-Path -LiteralPath "$PlanPath.continue") { return }
+    if ((Get-Date) -ge $Deadline) { throw '未收到主窗口的升级交接确认，已取消升级，当前版本保持运行。' }
+    Start-Sleep -Milliseconds 100
   }
 }
 
@@ -547,6 +735,8 @@ function Expand-VerifiedArchive {
   $DestinationPrefix = [System.IO.Path]::GetFullPath($Destination).TrimEnd('\') + '\'
   $Zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
   try {
+    $Total=@($Zip.Entries | Where-Object { -not [string]::IsNullOrEmpty($_.Name) }).Count
+    $Completed=0; $LastProgress=[DateTime]::UtcNow
     foreach ($Entry in $Zip.Entries) {
       $Target = [System.IO.Path]::GetFullPath((Join-Path $Destination $Entry.FullName))
       if (-not $Target.StartsWith($DestinationPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -559,6 +749,11 @@ function Expand-VerifiedArchive {
       $TargetParent = [System.IO.Path]::GetDirectoryName($Target)
       New-Item $TargetParent -ItemType Directory -Force | Out-Null
       [System.IO.Compression.ZipFileExtensions]::ExtractToFile($Entry, $Target, $true)
+      $Completed++
+      if (($Completed % 100 -eq 0) -or $Completed -eq $Total -or ([DateTime]::UtcNow-$LastProgress).TotalSeconds -ge 2) {
+        Set-UpdateStage "正在解压新版本：$Completed / $Total 个文件" (42+[int](24*$Completed/[Math]::Max(1,$Total))) 'extract' $Completed $Total
+        $LastProgress=[DateTime]::UtcNow
+      }
     }
   } finally {
     $Zip.Dispose()
@@ -626,7 +821,7 @@ function Apply-VerifiedPatch {
     }
 
     New-Item $Destination -ItemType Directory -Force | Out-Null
-    $Completed = 0
+    $Completed = 0; $LastProgress=[DateTime]::UtcNow
     foreach ($File in $TargetManifest.files) {
       $Relative = [string]$File.path
       $TargetPath = Join-Path $Destination ($Relative.Replace('/', '\'))
@@ -643,8 +838,9 @@ function Apply-VerifiedPatch {
       if ((Get-Item -LiteralPath $TargetPath).Length -ne [long]$File.size) { throw "Patched file size mismatch: $Relative" }
       if ((Get-FileHash -LiteralPath $TargetPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne ([string]$File.sha256)) { throw "Patched file hash mismatch: $Relative" }
       $Completed++
-      if ($Completed % 500 -eq 0 -or $Completed -eq $TargetManifest.files.Count) {
-        Set-UpdateStage "Verified $Completed / $($TargetManifest.files.Count) files" (42 + [int](24 * $Completed / $TargetManifest.files.Count))
+      if ($Completed % 100 -eq 0 -or $Completed -eq $TargetManifest.files.Count -or ([DateTime]::UtcNow-$LastProgress).TotalSeconds -ge 2) {
+        Set-UpdateStage "正在重建并校验补丁：$Completed / $($TargetManifest.files.Count) 个文件" (42 + [int](24 * $Completed / $TargetManifest.files.Count)) 'rebuild' $Completed $TargetManifest.files.Count
+        $LastProgress=[DateTime]::UtcNow
       }
     }
     Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json' (Join-Path $Destination 'resources\update\pangea-package-manifest.json')
@@ -661,197 +857,206 @@ if ($ScanLocks) {
   exit 0
 }
 if (-not $PlanPath) { throw 'PlanPath is required.' }
-$Plan = Get-Content -LiteralPath $PlanPath -Raw | ConvertFrom-Json
-if ($Plan.schema_version -notin @(1, 2)) { throw 'Unsupported portable update plan.' }
-
-$InstallRoot = [System.IO.Path]::GetFullPath([string]$Plan.install_root)
-$InstallParent = [System.IO.Path]::GetDirectoryName($InstallRoot)
-$PackagePath = [System.IO.Path]::GetFullPath([string]$Plan.package_path)
-$ExecutableName = [string]$Plan.executable_name
-$ExpectedVersion = [string]$Plan.expected_version
-$PackageType = if ($Plan.package_type) { [string]$Plan.package_type } else { 'full' }
-$ExpectedBaseVersion = if ($Plan.expected_base_version) { [string]$Plan.expected_base_version } else { '' }
-$ExpectedSize = [long]$Plan.expected_size
-$ExpectedSha256 = [string]$Plan.expected_sha256
-$HealthMarker = [System.IO.Path]::GetFullPath([string]$Plan.health_marker)
-$ResultPath = [System.IO.Path]::GetFullPath([string]$Plan.result_path)
-$LogPath = [System.IO.Path]::GetFullPath([string]$Plan.log_path)
-$ParentPid = [int]$Plan.parent_pid
-$InstalledExecutable = Join-Path $InstallRoot $ExecutableName
-
-$script:OwnedUpdateProcesses = @()
-$script:AutomaticUpdateCleanup = $Plan.PSObject.Properties['allow_owned_process_cleanup'] -and $Plan.allow_owned_process_cleanup -eq $true
-$DesktopIdentity = $null
-$script:ProtectedUpdateProcesses = @($PID, $ParentPid)
 try {
-  # Protect the helper's ancestors, including the user's recovery terminal.
-  $ProcessRows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
-  $AncestorId = $PID
-  for ($Depth=0; $Depth -lt 32; $Depth++) {
-    $Row = $ProcessRows | Where-Object { [int]$_.ProcessId -eq $AncestorId } | Select-Object -First 1
-    if (-not $Row -or [int]$Row.ParentProcessId -le 0) { break }
-    $AncestorId = [int]$Row.ParentProcessId
-    if ($AncestorId -in $script:ProtectedUpdateProcesses) { break }
-    $script:ProtectedUpdateProcesses += $AncestorId
-  }
-  if ($Plan.PSObject.Properties['allow_owned_process_cleanup'] -and $Plan.allow_owned_process_cleanup -eq $true) {
-    $Desktop = Get-Process -Id $ParentPid -ErrorAction Stop
-    if ($Desktop.Path -ine $InstalledExecutable) { throw 'Desktop executable identity does not match update plan.' }
-    $DesktopIdentity = [pscustomobject]@{ Id=$Desktop.Id; Created=$Desktop.StartTime.ToUniversalTime().ToFileTimeUtc() }
-    $script:OwnedUpdateProcesses = @(Get-OwnedUpdateProcesses $ParentPid $InstalledExecutable)
-    # Snapshot only other instances of this exact installed executable, never
-    # all processes with the same name or another portable installation.
-    foreach ($Instance in @(Get-Process | Where-Object { try { $_.Id -ne $ParentPid -and $_.Path -ieq $InstalledExecutable } catch { $false } })) {
-      $script:OwnedUpdateProcesses += [pscustomobject]@{ Id=$Instance.Id; Created=$Instance.StartTime.ToUniversalTime().ToFileTimeUtc(); Executable=$Instance.Path }
-      $script:OwnedUpdateProcesses += @(Get-OwnedUpdateProcesses $Instance.Id $InstalledExecutable)
-    }
-  }
-} catch { Write-UpdateLog "Process ownership snapshot unavailable; automatic cleanup disabled: $($_.Exception.Message)" }
+  $Plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($Plan.schema_version -notin @(1, 2)) { throw 'Unsupported portable update plan.' }
+  $InstallRoot = [IO.Path]::GetFullPath([string]$Plan.install_root)
+  $InstallParent = [IO.Path]::GetDirectoryName($InstallRoot)
+  $PackagePath = [IO.Path]::GetFullPath([string]$Plan.package_path)
+  $ExecutableName = [string]$Plan.executable_name
+  $ExpectedVersion = [string]$Plan.expected_version
+  $PackageType = if ($Plan.PSObject.Properties['package_type'] -and $Plan.package_type) { [string]$Plan.package_type } else { 'full' }
+  $ExpectedBaseVersion = if ($Plan.PSObject.Properties['expected_base_version'] -and $Plan.expected_base_version) { [string]$Plan.expected_base_version } else { '' }
+  $ExpectedSize = [long]$Plan.expected_size
+  $ExpectedSha256 = [string]$Plan.expected_sha256
+  $HealthMarker = [IO.Path]::GetFullPath([string]$Plan.health_marker)
+  $ResultPath = [IO.Path]::GetFullPath([string]$Plan.result_path)
+  $LogPath = [IO.Path]::GetFullPath([string]$Plan.log_path)
+  $ParentPid = [int]$Plan.parent_pid
+  $InstalledExecutable = Join-Path $InstallRoot $ExecutableName
+} catch {
+  $ErrorFile=if ($WatchUpdate) { "$PlanPath.ui-error" } else { "$PlanPath.startup-error" }
+  try { [IO.File]::WriteAllText($ErrorFile,$_.Exception.Message,(New-Object Text.UTF8Encoding($false))) } catch { }
+  throw
+}
+if ($WatchUpdate) { Watch-UpdateWindow; exit 0 }
 
-$Leaf = [System.IO.Path]::GetFileName($InstallRoot.TrimEnd('\'))
+$Leaf = [IO.Path]::GetFileName($InstallRoot.TrimEnd('\'))
 $Nonce = [Guid]::NewGuid().ToString('N')
 $CandidateRoot = Join-Path $InstallParent "$Leaf.update-$Nonce"
 $BackupRoot = Join-Path $InstallParent "$Leaf.previous-$Nonce"
 $FailedRoot = Join-Path $InstallParent "$Leaf.failed-$Nonce"
-$OriginalMoved = $false
-$Swapped = $false
-$NewProcess = $null
+$OriginalMoved = $false; $Swapped = $false; $NewProcess = $null
+$script:OwnedUpdateProcesses = @()
+$script:AutomaticUpdateCleanup = $Plan.PSObject.Properties['allow_owned_process_cleanup'] -and $Plan.allow_owned_process_cleanup -eq $true
+$DesktopIdentity = $null
+$script:ProtectedUpdateProcesses = @($PID, $ParentPid)
 
-Open-UpdateWindow
-[System.IO.File]::WriteAllText("$PlanPath.ready", 'ready')
+# The installed Desktop remains open until the independent window is visible
+# and process ownership has been captured. Never acknowledge a hidden updater.
+try {
+  Open-UpdateWindow
+  $script:ProtectedUpdateProcesses += $script:UpdateMonitor.Id
+  Set-UpdateStage '升级窗口已就绪，正在记录进程信息；当前主窗口暂时保持打开…' 5 'prepare'
+  try {
+    $ProcessRows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    $AncestorId = $PID
+    for ($Depth=0; $Depth -lt 32; $Depth++) {
+      $Row = $ProcessRows | Where-Object { [int]$_.ProcessId -eq $AncestorId } | Select-Object -First 1
+      if (-not $Row -or [int]$Row.ParentProcessId -le 0) { break }
+      $AncestorId = [int]$Row.ParentProcessId
+      if ($AncestorId -in $script:ProtectedUpdateProcesses) { break }
+      $script:ProtectedUpdateProcesses += $AncestorId
+    }
+    if ($script:AutomaticUpdateCleanup) {
+      $Desktop = Get-Process -Id $ParentPid -ErrorAction Stop
+      if ($Desktop.Path -ine $InstalledExecutable) { throw 'Desktop executable identity does not match update plan.' }
+      $DesktopIdentity = [pscustomobject]@{ Id=$Desktop.Id; Created=$Desktop.StartTime.ToUniversalTime().ToFileTimeUtc() }
+      $script:OwnedUpdateProcesses = @(Get-OwnedUpdateProcesses $ParentPid $InstalledExecutable)
+      foreach ($Instance in @(Get-Process | Where-Object { try { $_.Id -ne $ParentPid -and $_.Path -ieq $InstalledExecutable } catch { $false } })) {
+        $script:OwnedUpdateProcesses += [pscustomobject]@{ Id=$Instance.Id; Created=$Instance.StartTime.ToUniversalTime().ToFileTimeUtc(); Executable=$Instance.Path }
+        $script:OwnedUpdateProcesses += @(Get-OwnedUpdateProcesses $Instance.Id $InstalledExecutable)
+      }
+      $script:OwnedUpdateProcesses = @($script:OwnedUpdateProcesses | Where-Object { $_.Id -notin $script:ProtectedUpdateProcesses })
+    }
+  } catch {
+    $script:AutomaticUpdateCleanup=$false; $script:OwnedUpdateProcesses=@()
+    Write-UpdateLog "Process ownership snapshot unavailable; automatic cleanup disabled: $($_.Exception.Message)"
+  }
+  if (Test-Path -LiteralPath "$PlanPath.cancel") { throw '升级启动已取消，当前版本保持运行。' }
+  $script:UpdateMonitor.Refresh()
+  if ($script:UpdateMonitor.HasExited -or (Test-Path -LiteralPath "$PlanPath.ui-error")) { throw '升级窗口已关闭或启动失败，已取消升级。' }
+  Write-AtomicUpdateJson "$PlanPath.ready" @{ schema_version=1; ui_ready=$true; worker_pid=$PID; monitor_pid=$script:UpdateMonitor.Id }
+  Wait-UpdateHandoff
+} catch {
+  $StartupMessage=$_.Exception.Message
+  Write-UpdateLog "updater startup cancelled: $StartupMessage"
+  try { [IO.File]::WriteAllText("$PlanPath.startup-error",$StartupMessage,(New-Object Text.UTF8Encoding($false))) } catch { }
+  Write-UpdateResult 'failed' $StartupMessage 'not_needed'
+  Write-UpdateProgress -State failed -Stage 'startup' -Message $StartupMessage -Percent 0 -Rollback 'not_needed'
+  exit 1
+}
 
 try {
   Write-UpdateLog "waiting for PANGEA Desktop process $ParentPid"
-  Set-UpdateStage 'Closing the current version...' 12
+  Set-UpdateStage '正在等待当前版本退出…' 12 'desktop-exit'
   Wait-UpdateDesktopExit $ParentPid $DesktopIdentity
-
-  if ([string]::IsNullOrWhiteSpace($InstallParent) -or $InstallRoot -eq [System.IO.Path]::GetPathRoot($InstallRoot)) {
-    throw 'The portable application directory is unsafe to replace.'
-  }
+  if ([string]::IsNullOrWhiteSpace($InstallParent) -or $InstallRoot -eq [IO.Path]::GetPathRoot($InstallRoot)) { throw 'The portable application directory is unsafe to replace.' }
+  Set-UpdateStage '正在校验升级包的大小与 SHA256…' 18 'verify-package'
   if (-not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) { throw 'The downloaded update package is missing.' }
-  if ($ExpectedSize -le 0 -or (Get-Item -LiteralPath $PackagePath).Length -ne $ExpectedSize) {
-    throw 'The downloaded update package size no longer matches the signed release.'
-  }
+  if ($ExpectedSize -le 0 -or (Get-Item -LiteralPath $PackagePath).Length -ne $ExpectedSize) { throw 'The downloaded update package size no longer matches the signed release.' }
   if ($ExpectedSha256 -notmatch '^[0-9a-f]{64}$') { throw 'The expected update hash is invalid.' }
-  Set-UpdateStage 'Verifying the update package...' 18
   $ActualSha256 = (Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
-  if ($ActualSha256 -ne $ExpectedSha256) {
-    throw 'The downloaded update package no longer matches the signed release.'
-  }
-  if (-not $ExecutableName.EndsWith('.exe', [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw 'The portable executable name is invalid.'
-  }
+  if ($ActualSha256 -ne $ExpectedSha256) { throw 'The downloaded update package no longer matches the signed release.' }
+  if (-not $ExecutableName.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) { throw 'The portable executable name is invalid.' }
 
-  Set-UpdateStage 'Preparing the new version...' 42
   if ($PackageType -eq 'patch') {
+    Set-UpdateStage '正在根据补丁重建新版本，并逐文件校验…' 42 'rebuild'
     if ([string]::IsNullOrWhiteSpace($ExpectedBaseVersion)) { throw 'Patch base version is missing.' }
     $BaseManifestPath = Join-Path $InstallRoot 'resources\update\pangea-package-manifest.json'
     if (-not (Test-Path -LiteralPath $BaseManifestPath -PathType Leaf)) { throw 'Installed package manifest is missing.' }
-    $BaseManifest = Get-Content -LiteralPath $BaseManifestPath -Raw | ConvertFrom-Json
-    if ([string]$BaseManifest.version -ne $ExpectedBaseVersion) {
-      throw "Installed version $($BaseManifest.version) does not match patch base $ExpectedBaseVersion."
-    }
-    # Build and verify beside the installed version; keep it intact on failure.
+    $BaseManifest = Get-Content -LiteralPath $BaseManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([string]$BaseManifest.version -ne $ExpectedBaseVersion) { throw "Installed version $($BaseManifest.version) does not match patch base $ExpectedBaseVersion." }
     Apply-VerifiedPatch $PackagePath $InstallRoot $CandidateRoot
   } elseif ($PackageType -eq 'full') {
+    Set-UpdateStage '正在解压新版本文件…' 42 'extract'
     Expand-VerifiedArchive $PackagePath $CandidateRoot
-  } else {
-    throw "Unsupported package type: $PackageType"
-  }
+  } else { throw "Unsupported package type: $PackageType" }
   $CandidateExecutable = Join-Path $CandidateRoot $ExecutableName
   $CandidateManifest = Join-Path $CandidateRoot 'resources\pangea-manifest.json'
-  if (-not (Test-Path -LiteralPath $CandidateExecutable -PathType Leaf)) {
-    throw "Updated executable is missing: $ExecutableName"
-  }
-  if (-not (Test-Path -LiteralPath $CandidateManifest -PathType Leaf)) {
-    throw 'Updated component manifest is missing.'
-  }
-  $Manifest = Get-Content -LiteralPath $CandidateManifest -Raw | ConvertFrom-Json
-  if ([string]$Manifest.product.version -ne $ExpectedVersion) {
-    throw "Updated product version does not match $ExpectedVersion."
-  }
+  if (-not (Test-Path -LiteralPath $CandidateExecutable -PathType Leaf)) { throw "Updated executable is missing: $ExecutableName" }
+  if (-not (Test-Path -LiteralPath $CandidateManifest -PathType Leaf)) { throw 'Updated component manifest is missing.' }
+  $Manifest = Get-Content -LiteralPath $CandidateManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ([string]$Manifest.product.version -ne $ExpectedVersion) { throw "Updated product version does not match $ExpectedVersion." }
 
+  Set-UpdateStage '正在保留用户工作区、任务和本地技能…' 70 'user-data'
   Copy-PortableUserData $InstallRoot $CandidateRoot
-
-  Set-UpdateStage 'Replacing application files...' 68
+  Set-UpdateStage '正在切换版本，保留原版本备份…' 76 'switch-version'
   Move-UpdateDirectory $InstallRoot $BackupRoot -ResolveLocks
   $OriginalMoved = $true
+  Set-UpdateStage '原版本已备份，正在启用新版本…' 78 'switch-version'
   Move-UpdateDirectory $CandidateRoot $InstallRoot -ResolveLocks
   $Swapped = $true
 
   $UpdatedExecutable = Join-Path $InstallRoot $ExecutableName
   Remove-Item -LiteralPath $HealthMarker -Force -ErrorAction SilentlyContinue
   $HealthArgument = "--pangea-update-health=`"$HealthMarker`""
-  Set-UpdateStage 'Starting the new version...' 82
-  $NewProcess = Start-Process -FilePath $UpdatedExecutable `
-    -ArgumentList $HealthArgument -PassThru
+  Set-UpdateStage '正在启动新版本…' 82 'start-version'
+  $NewProcess = Start-Process -FilePath $UpdatedExecutable -ArgumentList $HealthArgument -PassThru
   Write-UpdateLog "started PANGEA Desktop $ExpectedVersion as process $($NewProcess.Id)"
-
-  Set-UpdateStage 'Checking that the new version is ready...' 92
+  Set-UpdateStage '正在等待新版本健康检查，最长等待 150 秒…' 92 'health-check'
   $Deadline = (Get-Date).AddSeconds(150)
+  $LastHealthProgress=[DateTime]::UtcNow
   while ((Get-Date) -lt $Deadline) {
     if (Test-Path -LiteralPath $HealthMarker -PathType Leaf) {
       Write-UpdateLog "PANGEA Desktop $ExpectedVersion reported healthy"
-      Write-UpdateResult 'success' 'The update completed successfully.'
-      Complete-ExplorerRecovery
+      Set-UpdateStage '新版健康检查通过，正在恢复资源管理器并清理备份…' 97 'cleanup'
+      $SuccessMessage='升级完成，新版本已通过健康检查并重新启动。'
+      try { Complete-ExplorerRecovery } catch { $SuccessMessage+=" 资源管理器恢复提示：$($_.Exception.Message)"; Write-UpdateLog $SuccessMessage }
       if (Test-Path -LiteralPath $BackupRoot) {
-        try { Remove-PortableDirectory $BackupRoot } catch { Write-UpdateLog $_.Exception.Message }
+        try { Remove-PortableDirectory $BackupRoot } catch { $SuccessMessage+=" 旧版本备份暂未清理：$BackupRoot"; Write-UpdateLog $_.Exception.Message }
       }
-      Set-UpdateStage 'Update complete. PANGEA Desktop has restarted.' 100
-      Start-Sleep -Milliseconds 700
-      Close-UpdateWindow
+      Write-UpdateResult 'success' $SuccessMessage
+      Write-UpdateProgress -State success -Stage 'complete' -Message $SuccessMessage -Percent 100
       exit 0
     }
     if ($NewProcess.HasExited) { throw 'Updated PANGEA Desktop exited before reporting healthy.' }
+    if (([DateTime]::UtcNow-$LastHealthProgress).TotalSeconds -ge 5) {
+      $Remaining=[Math]::Max(0,[int]($Deadline-(Get-Date)).TotalSeconds)
+      Set-UpdateStage "正在等待新版本健康检查，超时回滚倒计时 $Remaining 秒…" 92 'health-check'
+      $LastHealthProgress=[DateTime]::UtcNow
+    }
     Start-Sleep -Milliseconds 500
     $NewProcess.Refresh()
-    if ($null -ne $script:UpdateForm -and -not $script:UpdateForm.IsDisposed) {
-      [System.Windows.Forms.Application]::DoEvents()
-    }
   }
   throw 'Updated PANGEA Desktop did not report healthy before the rollback timeout.'
 } catch {
   $FailureMessage = $_.Exception.Message
   Write-UpdateLog "update failed: $FailureMessage"
   Write-UpdateLog "failed operation: $($_.InvocationInfo.PositionMessage)"
-  Set-UpdateStage 'Update incomplete. Restoring the working version...' 35
+  Set-UpdateStage '升级失败，正在检查并恢复原版本，请勿关闭计算机…' 35 'rollback'
   if ($NewProcess -and -not $NewProcess.HasExited) {
     Stop-Process -Id $NewProcess.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
   }
   $Restored = -not $OriginalMoved
+  $Rollback=if ($OriginalMoved) { 'failed' } else { 'not_needed' }
   try {
-   if ($Swapped) {
-    if (Test-Path -LiteralPath $InstallRoot) { Move-UpdateDirectory $InstallRoot $FailedRoot }
-    if (Test-Path -LiteralPath $BackupRoot) {
+    if ($Swapped) {
+      if (Test-Path -LiteralPath $InstallRoot) { Move-UpdateDirectory $InstallRoot $FailedRoot }
+      if (Test-Path -LiteralPath $BackupRoot) {
+        Move-UpdateDirectory $BackupRoot $InstallRoot
+        $Restored=$true; $Rollback='restored'
+        Write-UpdateLog 'previous PANGEA Desktop version restored'
+      }
+    } elseif ($OriginalMoved -and -not (Test-Path -LiteralPath $InstallRoot) -and (Test-Path -LiteralPath $BackupRoot)) {
       Move-UpdateDirectory $BackupRoot $InstallRoot
-      $Restored = $true
-      Write-UpdateLog 'previous PANGEA Desktop version restored'
+      $Restored=$true; $Rollback='restored'
+      Write-UpdateLog 'previous PANGEA Desktop directory restored'
     }
-   } elseif ($OriginalMoved -and -not (Test-Path -LiteralPath $InstallRoot) -and (Test-Path -LiteralPath $BackupRoot)) {
-    Move-UpdateDirectory $BackupRoot $InstallRoot
-    $Restored = $true
-    Write-UpdateLog 'previous PANGEA Desktop directory restored'
-   }
+    if (-not $Restored) { throw "Original installation retained at '$BackupRoot'; automatic restoration could not be confirmed." }
   } catch {
-    $FailureMessage += " Rollback could not complete: $($_.Exception.Message). Original installation retained at '$BackupRoot'."
+    $FailureMessage+=" 回滚未完成：$($_.Exception.Message)。原版本备份：'$BackupRoot'。"
     Write-UpdateLog $FailureMessage
   }
-  if ($Restored -and (Test-Path -LiteralPath $CandidateRoot)) {
-    try { Remove-PortableDirectory $CandidateRoot } catch { Write-UpdateLog $_.Exception.Message }
+  if ($Restored) {
+    foreach ($CleanupRoot in @($CandidateRoot,$FailedRoot)) {
+      if (Test-Path -LiteralPath $CleanupRoot) { try { Remove-PortableDirectory $CleanupRoot } catch { Write-UpdateLog $_.Exception.Message } }
+    }
+    if (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf) {
+      try {
+        Start-Process -FilePath $InstalledExecutable | Out-Null
+        $FailureMessage+=' 原版本文件可用，已发出旧版启动请求。'
+        Write-UpdateLog 'working PANGEA Desktop version restart requested'
+      } catch { $FailureMessage+=" 原版本文件已保留，但启动失败：$($_.Exception.Message)"; Write-UpdateLog $FailureMessage }
+    } else { $FailureMessage+=' 未找到可启动的原版本程序，请查看日志。' }
   }
-  if ($Restored -and (Test-Path -LiteralPath $FailedRoot)) {
-    try { Remove-PortableDirectory $FailedRoot } catch { Write-UpdateLog $_.Exception.Message }
-  }
-
-  Write-UpdateResult 'failed' $FailureMessage
-  if ($Restored -and (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf)) {
-    Start-Process -FilePath $InstalledExecutable | Out-Null
-    Write-UpdateLog 'working PANGEA Desktop version restarted'
-  }
-  Start-Sleep -Milliseconds 500
-  Close-UpdateWindow
+  try { Complete-ExplorerRecovery } catch { $FailureMessage+=" 资源管理器恢复失败：$($_.Exception.Message)"; Write-UpdateLog $FailureMessage }
+  $FailureMessage="升级失败。$FailureMessage"
+  Write-UpdateResult 'failed' $FailureMessage $Rollback
+  Write-UpdateProgress -State failed -Stage 'failed' -Message $FailureMessage -Percent 35 -Rollback $Rollback
   exit 1
 } finally {
-  Complete-ExplorerRecovery
+  # Best effort only: failures here must not erase the true terminal outcome.
+  try { Complete-ExplorerRecovery } catch { Write-UpdateLog "Explorer recovery final check: $($_.Exception.Message)" }
 }

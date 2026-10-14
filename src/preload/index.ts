@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { UpdateStatus } from '../shared/contracts'
+import type { UpdateInstallResult, UpdateStatus } from '../shared/contracts'
 import {
   isUpdateDismissed,
   shouldShowUpdate,
@@ -351,7 +351,9 @@ function render(): void {
 
   // The failure's own words beat ours, when it has any.
   const description = element('p', 'description')
-  description.textContent = status.message ?? (productShell && status.phase === 'downloaded' && status.availableVersion
+  description.textContent = installing
+    ? (updateLocale === 'zh' ? '正在打开独立升级窗口，确认窗口就绪后将自动退出。' : 'Opening the update progress window. Desktop will exit once it is ready.')
+    : status.message ?? (productShell && status.phase === 'downloaded' && status.availableVersion
     ? `${status.availableVersion} 已验证。完成当前分析后，可以重启升级。`
     : headline.description)
   if (description.textContent) body.appendChild(description)
@@ -373,8 +375,8 @@ function render(): void {
     const install = button(
       installing
         ? updateLocale === 'zh'
-          ? '正在重启…'
-          : 'Restarting…'
+          ? '正在打开升级窗口…'
+          : 'Opening update window…'
         : updateLocale === 'zh'
           ? '重启并升级'
           : 'Restart and update',
@@ -385,7 +387,12 @@ function render(): void {
     install.addEventListener('click', () => {
       installing = true
       render()
-      void ipcRenderer.invoke('updates:install').catch((error: unknown) => {
+      void ipcRenderer.invoke('updates:install').then((result: UpdateInstallResult) => {
+        if (!result.helperLaunched) {
+          installing = false
+          render()
+        }
+      }).catch((error: unknown) => {
         installing = false
         console.error('[updater] unable to install update', error)
         render()
