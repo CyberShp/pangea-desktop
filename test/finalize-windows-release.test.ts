@@ -106,7 +106,9 @@ describe('signed portable Windows package', () => {
     expect(helper).toContain('Move-UpdateDirectory $BackupRoot $InstallRoot')
     expect(helper).toContain("Write-UpdateResult 'failed' $FailureMessage")
     expect(helper).toContain('Start-Process -FilePath $InstalledExecutable')
-    expect(helper).toContain('New-Object System.Windows.Forms.ProgressBar')
+    // PowerShell accepts both the full System namespace and its shorthand.
+    // Native visibility and responsiveness are checked by verify-portable-update-progress.ps1.
+    expect(helper).toMatch(/\bNew-Object\s+(?:System\.)?Windows\.Forms\.ProgressBar\b/)
   })
 })
 
