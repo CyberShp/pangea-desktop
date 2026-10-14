@@ -36,8 +36,9 @@ it('accepts matching staging metadata and rejects a stale Agent lock or missing 
       runtime + 'src/pangea_agent/graph/nodes/source_first.py',
       runtime + 'src/pangea_agent/rubrics/builtin/behavior_test_generation.md',
       runtime + 'src/pangea_agent/analysis_scenarios.py',
-      ...['common_generation', 'common_review', 'flow', 'planning', 'module', 'risk', 'branch', 'coverage'].map(name =>
+      ...['common_generation', 'common_review', 'flow', 'planning', 'module', 'risk', 'risk_review', 'branch', 'coverage'].map(name =>
         `${runtime}src/pangea_agent/rubrics/builtin/scene_${name}.md`),
+      ...['c_cpp_risk_methods', 'lua_risk_methods'].map(name => `${runtime}src/pangea_agent/rubrics/builtin/${name}.md`),
       runtime + '.opencode/agents/pangea-agent.md',
       runtime + '.opencode/plugins/pangea.ts',
       runtime + '.opencode/skills/product-blackbox-test-case/SKILL.md',

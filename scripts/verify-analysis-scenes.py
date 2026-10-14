@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from pangea_agent.agent_io import read_json, write_json
-from pangea_agent.analysis_scenarios import SCENES
+from pangea_agent.analysis_scenarios import SCENES, scene_spec
 from pangea_agent.assets import import_asset, prepare_asset_extraction, asset_detail, analysis_asset_inputs
 from pangea_agent.cli.adapter_api import bind_action, settle_action
 from pangea_agent.cli.run_module_analysis import run_module_analysis, resume_module_analysis
@@ -87,6 +87,9 @@ class SceneAcceptance(unittest.TestCase):
                     analysis = next(a for a in progress['actions'].values() if a['role'] == 'analysis')
                     task = read_json(Path(analysis['task_path']))
                     self.assertEqual(task['scenario'], scenario)
+                    if scenario == 'risk-analysis':
+                        self.assertEqual(task['record_contracts'], scene_spec(scenario)['record_contracts'])
+                        self.assertIn('c_cpp_risk_methods.md', ' '.join(task['rubric_paths']))
                     self.assertIn('scene_common_generation.md', ' '.join(task['rubric_paths']))
                     self.assertNotIn('behavior_test_generation.md', ' '.join(task['rubric_paths']))
                     unit_id = task['unit_id']
@@ -99,7 +102,18 @@ class SceneAcceptance(unittest.TestCase):
                     opened = task_open(*binding)
                     self.assertEqual(opened['task']['scenario'], scenario)
                     self.assertNotIn('all_scope_paths', opened['task'])
+                    if scenario == 'risk-analysis':
+                        self.assertEqual(json.loads(input_read(*binding, input_id='unit_risk_signals')['text'])['unit_id'], unit_id)
+                    risk_check = {'format_version': 'behavior-check-v1', 'check_id': 'C1', 'lens': 'error_path',
+                        'object': 'connection readiness', 'sites': ['sample:tls.c:1'], 'hypothesis': 'not ready is rejected',
+                        'conclusion': 'confirmed', 'reasoning': 'synthetic protocol fixture; no semantic claim',
+                        'evidence_quotes': [{'ref': 'sample:tls.c:1', 'snippet': 'if (!ready) return -1;'}], 'risk_ids': ['R1']}
+                    risk = {'format_version': 'behavior-risk-v2', 'risk_id': 'R1', 'title': '合成协议记录',
+                        'trigger': 'fixture', 'system_result': 'fixture', 'external_observation': 'fixture',
+                        'exclusion_condition': 'fixture', 'source_evidence': ['sample:tls.c:1'],
+                        'evidence_quotes': [{'ref': 'sample:tls.c:1', 'snippet': 'if (!ready) return -1;'}]}
                     saved = result_write(*binding, expected_revision=0, records=[
+                        *([{'kind': 'check', 'body': risk_check}, {'kind': 'risk', 'body': risk}] if scenario == 'risk-analysis' else []),
                         {'kind': 'flow', 'body': {'format_version': 'module-flow-text-v1', 'flow_id': 'F1', 'title': '连接流程', 'text': '入口→检查就绪；未就绪拒绝，否则建立连接。'}},
                         {'kind': 'summary', 'body': '合成样例：未确认产品风险，无新增补测。'}])
                     work_finish(*binding, revision=saved['revision'])
@@ -111,18 +125,31 @@ class SceneAcceptance(unittest.TestCase):
                         task = read_json(Path(review['task_path']))
                         self.assertEqual(task['scenario'], scenario)
                         self.assertIn('scene_common_review.md', ' '.join(task['rubric_paths']))
+                        if scenario == 'risk-analysis':
+                            self.assertIn('scene_risk_review.md', ' '.join(task['rubric_paths']))
+                            self.assertIn('c_cpp_risk_methods.md', ' '.join(task['rubric_paths']))
                         binding = (str(data), 'scene-run', review['action_id'], 'reviewer-session')
                         if review.get('task_id'): self.assertEqual(review['task_id'], binding[-1])
                         bind_action(*binding)
                         self.assertIn('确认再次连接可恢复', input_read(*binding, input_id='rubric_user_tls-recovery')['text'])
                         current = read_json(Path(task['result_path']))
                         if task.get('review_stage') == 'comparison_review':
+                            if scenario == 'risk-analysis':
+                                saved_review = result_write(*binding, expected_revision=current['revision'], records=[{'kind': 'note', 'body': {
+                                    'format_version': 'behavior-review-check-v1', 'unit_id': unit_id, 'version_set_id': task['version_set_id'],
+                                    'risk_verdicts': [{'record_id': 'rec-000002', 'risk_id': 'R1', 'verdict': 'uncertain', 'basis': '合成协议验证', 'finding_record_ids': []}],
+                                    'recall_items': ([] if mode == 'speed' else [{'probe_check_id': 'P1', 'status': 'covered', 'analysis_record_ids': ['rec-000001'], 'finding_record_ids': [], 'basis': '合成协议验证'}]),
+                                    'ledger_spot_checks': [{'record_id': 'rec-000001', 'check_id': 'C1', 'verdict': 'agree', 'basis': '合成协议验证'}], 'summary': '合成协议验证'}}])
+                                self.assertEqual(saved_review['warnings'], [])
+                                current = read_json(Path(task['result_path']))
                             if exercise_closure:
                                 comparison_finding_write(*binding, expected_revision=current['revision'], unit_ids=[unit_id], finding={'summary': '补充拒绝后的恢复说明', 'body': '合成定向修正路由验收'})
                                 current = read_json(Path(task['result_path']))
                             saved = review_decide(*binding, expected_revision=current['revision'], decision={'disposition': 'finding' if exercise_closure else 'pass', 'version_set_id': task['version_set_id'], 'correction_record_ids': [r['record_id'] for r in current['records'] if r['kind'] == 'finding'] if exercise_closure else [], 'summary': '合成路由验收，不代表模型质量验收'})
                         else:
-                            saved = result_write(*binding, expected_revision=current['revision'], records=[{'kind': 'summary', 'body': '独立核实连接主干'}])
+                            saved = result_write(*binding, expected_revision=current['revision'], records=[
+                                *([{'kind': 'check', 'body': {**risk_check, 'check_id': 'P1', 'unit_id': unit_id}}] if scenario == 'risk-analysis' else []),
+                                {'kind': 'summary', 'body': '独立核实连接主干'}])
                         work_finish(*binding, revision=saved['revision'])
                         settle_action(*binding[:3])
                     if exercise_closure:
@@ -142,15 +169,22 @@ class SceneAcceptance(unittest.TestCase):
                         self.assertEqual(first_result_path.read_bytes(), first_result)
                     progress = read_json(run / 'progress.json')
                     self.assertEqual(progress['lifecycle_status'], 'complete', progress)
-                    report = (run / 'report.md').read_text()
+                    report = (run / 'report.md').read_text(encoding='utf-8')
                     self.assertIn('入口→检查就绪', report)
                     self.assertNotIn('.svg', report)
+                    if scenario == 'risk-analysis':
+                        self.assertIn('风险检查账本', report)
+                        self.assertIn('```c', report)
+                        self.assertNotIn('目标 ≥70%', report)
+                        signals_before = {p: p.read_bytes() for p in (run / 'inputs/risk-signals').glob('*.json')}
                     if scenario in {'branch-analysis', 'coverage-analysis'}:
                         self.assertNotIn('## 风险依据', report)
                         self.assertIn('本次未开展风险分析', report)
                     with patch('pangea_agent.analysis_scenarios.scene_spec', side_effect=AssertionError('must use frozen rules')), patch('pangea_agent.methodology.SPECIALIZED_METHODOLOGIES', {}):
                         resume_module_analysis('scene-run', str(data))
                     self.assertEqual((run / 'inputs/analysis-scene.json').read_bytes(), frozen)
+                    if scenario == 'risk-analysis':
+                        self.assertEqual({p: p.read_bytes() for p in signals_before}, signals_before)
 
     def test_coverage_missing_and_valid_empty_are_distinct(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -206,6 +240,33 @@ class SceneAcceptance(unittest.TestCase):
                 measurements.append({"files": count, "task_open_chars": len(text), "freeze_ms": freeze_ms})
         self.assertLess(abs(lengths[1] - lengths[0]), 100)
         print("Compact task measurements:", json.dumps(measurements))
+
+    def test_risk_small_unit_prompt_stays_bounded(self):
+        measurements = []
+        for count in [16, 2000]:
+            with tempfile.TemporaryDirectory() as temp:
+                data, run, request = self.fixture(temp, 'risk-analysis')
+                repo = data / 'repositories/sample'
+                for number in range(count-1):
+                    (repo / f'unrelated-{number:04}.c').write_text('int other(void) { return 0; }')
+                first = run_module_analysis(str(request))
+                self.assertFalse((run / 'inputs/source-details').exists())
+                action = first['agent_actions'][0]
+                binding = (str(data), 'scene-run', action['action_id'], 'planner')
+                bind_action(*binding)
+                self.assertLess(len(json.dumps(task_open(*binding), ensure_ascii=False)), 12000)
+                saved = plan_write(*binding, expected_revision=0, unit={'title': '连接', 'purpose': '主干流程', 'owned_files': [{'repo_id': 'sample', 'path': 'tls.c'}], 'risk_lenses': ['error_path']})
+                work_finish(*binding, revision=saved['revision'])
+                settle_action(*binding[:3])
+                action = next(a for a in read_json(run / 'progress.json')['actions'].values() if a['role'] == 'analysis')
+                binding = (str(data), 'scene-run', action['action_id'], 'worker')
+                bind_action(*binding)
+                view = json.dumps(task_open(*binding), ensure_ascii=False)
+                self.assertNotIn('unrelated-', view)
+                self.assertLess(len(view), 12000)
+                measurements.append(len(view))
+        self.assertLess(abs(measurements[1] - measurements[0]), 100)
+        print('Risk compact task measurements:', measurements)
 
     def test_old_profile_and_contract_defaults_do_not_acquire_v2(self):
         old = TaskContract(repository='sample', target='TLS').model_dump(exclude_none=True)
