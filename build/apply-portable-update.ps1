@@ -577,10 +577,24 @@ function Get-UpdateLogTail {
   finally { if ($Stream) { $Stream.Dispose() } }
 }
 
+function Initialize-UpdateWindowApi {
+  if ('PangeaUpdateWindow' -as [type]) { return }
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class PangeaUpdateWindow {
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+}
+'@
+}
+
 function Watch-UpdateWindow {
   try {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
+    Initialize-UpdateWindowApi
     [Windows.Forms.Application]::EnableVisualStyles()
     $script:MonitorTerminal=$false
     $script:MonitorProgress=Read-UpdateProgress "$PlanPath.progress.json"
@@ -638,8 +652,17 @@ function Watch-UpdateWindow {
     $script:UpdateForm.Add_Shown({
       try {
         if (-not $script:UpdateForm.Visible -or -not $script:UpdateForm.IsHandleCreated) { throw '升级窗口未显示。' }
+        # The hidden console's STARTUPINFO can hide the first native ShowWindow
+        # even when WinForms reports Visible=true. Explicitly show the HWND and
+        # verify the operating system state before acknowledging the handoff.
+        $WindowHandle=$script:UpdateForm.Handle
+        [PangeaUpdateWindow]::ShowWindow($WindowHandle,5) | Out-Null
+        if (-not [PangeaUpdateWindow]::IsWindowVisible($WindowHandle)) {
+          [PangeaUpdateWindow]::ShowWindow($WindowHandle,5) | Out-Null
+        }
+        if (-not [PangeaUpdateWindow]::IsWindowVisible($WindowHandle)) { throw 'Windows 未能显示升级窗口，已取消交接。' }
         Update-MonitorWindow
-        Write-AtomicUpdateJson "$PlanPath.ui-ready" @{ schema_version=1; monitor_pid=$PID; visible=$true }
+        Write-AtomicUpdateJson "$PlanPath.ui-ready" @{ schema_version=1; monitor_pid=$PID; visible=$true; window_handle=$WindowHandle.ToInt64() }
         $script:UpdateTimer.Start()
       } catch {
         [IO.File]::WriteAllText("$PlanPath.ui-error",$_.Exception.Message,(New-Object Text.UTF8Encoding($false)))

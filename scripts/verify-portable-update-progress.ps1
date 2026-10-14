@@ -93,6 +93,7 @@ public static class UpdateWindowFixture {
   [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc proc, IntPtr data);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+  public static uint Owner(IntPtr window) { uint owner; GetWindowThreadProcessId(window, out owner); return owner; }
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr SendMessageTimeout(
     IntPtr window, uint message, IntPtr wParam, StringBuilder lParam, uint flags, uint timeout, out IntPtr result);
   [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW")] static extern IntPtr SendPing(
@@ -184,8 +185,10 @@ function Wait-MonitorReady {
   if ($Fixture.Monitor.HasExited) { throw "Monitor exited before ready: $(Get-Content -LiteralPath (Join-Path (Split-Path $Fixture.PlanPath) 'monitor-error.log') -Raw)" }
   $Ready = Read-FixtureJson "$($Fixture.PlanPath).ui-ready"
   if (-not $Ready -or [int]$Ready.monitor_pid -ne $Fixture.Monitor.Id) { throw 'Visible-window handshake has an incorrect process identity.' }
-  $Window = [UpdateWindowFixture]::Find($Fixture.Monitor.Id)
-  if ($Window -eq [IntPtr]::Zero -or -not [UpdateWindowFixture]::IsWindowVisible($Window)) { throw 'Monitor announced ready without a visible window.' }
+  $Window = [IntPtr]([long]$Ready.window_handle)
+  if ($Window -eq [IntPtr]::Zero -or [UpdateWindowFixture]::Owner($Window) -ne $Fixture.Monitor.Id -or -not [UpdateWindowFixture]::IsWindowVisible($Window)) {
+    throw "Monitor announced ready without its own visible window. HWND=$Window owner=$([UpdateWindowFixture]::Owner($Window)) monitor=$($Fixture.Monitor.Id) visible=$([UpdateWindowFixture]::IsWindowVisible($Window)) enumerated=$([UpdateWindowFixture]::Find($Fixture.Monitor.Id))"
+  }
   Wait-Fixture { [UpdateWindowFixture]::Text($Window).Contains($Fixture.Progress.message) } 'first stage rendered'
   return $Window
 }
