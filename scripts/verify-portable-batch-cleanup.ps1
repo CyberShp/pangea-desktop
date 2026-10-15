@@ -16,14 +16,13 @@ function New-HolderFixture {
   return [pscustomobject]@{Id=$ProcessId; Created=[long](1000+$ProcessId); Name='node'; Executable='fixture/node.exe'; Path='fixture/install/data'; Critical=$false; SameUser=$true; Session=$Session}
 }
 function Reset-BatchFixture {
-  $script:UpdateHolderDecisions=@{}
   $script:OwnedUpdateProcesses=@()
   $script:ProtectedUpdateProcesses=@()
   $script:AutomaticUpdateCleanup=$false
   $script:ExplorerRestartAttempted=$false
-  $script:PromptCount=0; $script:PromptSizes=@(); $script:PromptIds=@(); $script:PromptHasExplorer=$false
+  $script:PromptCount=0
   $script:ScanCalls=0; $script:StoppedIds=@(); $script:FixtureLogs=@()
-  $script:Approved=$true; $script:Mode='stable'; $script:RecoveryStarted=$false; $script:FoldersClosed=$false
+  $script:Mode='stable'; $script:RecoveryStarted=$false; $script:FoldersClosed=$false
   $script:FixtureHolders=@(1..20 | ForEach-Object { New-HolderFixture $_ })
 }
 function Set-UpdateStage { param($Message, $Percent, $Stage) }
@@ -32,11 +31,7 @@ function Initialize-HandleInspector { }
 function Confirm-UpdateHolderBatchStop {
   param([object[]]$Holders, [bool]$IncludesExplorer=$false)
   $script:PromptCount++
-  $script:PromptSizes += $Holders.Count
-  $script:PromptIds += @($Holders | ForEach-Object { $_.Id })
-  $script:PromptHasExplorer=$IncludesExplorer
-  if (@($Holders | Where-Object { $_ -is [Array] -or $_.Id -is [Array] }).Count) { throw 'Batch contains nested holders.' }
-  return $script:Approved
+  throw 'Directory lock cleanup must never request confirmation.'
 }
 function Get-UpdateLockHolders {
   param($Root)
@@ -56,12 +51,12 @@ function Get-UpdateLockHolders {
       }
       $Record
     }
-    New-HolderFixture 100 # arrived after the reviewed batch
+    New-HolderFixture 100 # arrived after the initial holder scan
     return
   }
   if ($script:Mode -eq 'ownership-changed' -and $script:ScanCalls -gt 1) { $script:OwnedUpdateProcesses=@() }
   foreach ($Record in $script:FixtureHolders) {
-    if ($Record.Name -eq 'explorer' -and $script:FoldersClosed) { continue }
+    if ($Record.Name -eq 'explorer' -and $script:FoldersClosed -and $script:Mode -ne 'explorer-held') { continue }
     $Record
   }
 }
@@ -69,50 +64,76 @@ function Get-CimInstance {
   param($ClassName, $Filter, $ErrorAction)
   if ($script:Mode -eq 'changed' -and $script:ScanCalls -gt 1) { [pscustomobject]@{ProcessId=4} }
 }
-function Stop-UpdateHolder { param($Holder) $script:StoppedIds += $Holder.Id; return $true }
+function Stop-UpdateHolder {
+  param($Holder)
+  if ($Holder -is [Array] -or $Holder.Id -is [Array]) { throw 'Termination received nested holder records.' }
+  if ($Holder.Name -eq 'explorer' -and (-not $script:RecoveryStarted -or -not $script:FoldersClosed)) { throw 'Explorer termination must follow recovery setup and matching folder close.' }
+  $script:StoppedIds += $Holder.Id
+  return $true
+}
 function Start-ExplorerRecovery { $script:RecoveryStarted=$true }
 function Close-InstallationExplorerWindows { param($Root) $script:FoldersClosed=$true }
 function Assert-NoResolverError {
   if (@($script:FixtureLogs | Where-Object { $_ -like 'local lock resolution:*' }).Count) { throw ($script:FixtureLogs -join "`n") }
+  if ($script:PromptCount) { throw 'Resolver requested confirmation.' }
 }
 try {
+  $ResolverAst=$Ast.Find({param($Node) $Node -is [Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq 'Resolve-UpdateDirectoryLocks'}, $true)
+  if ($ResolverAst.Extent.Text -match 'ShowDialog|MessageBox|Confirm-UpdateHolder') { throw 'Directory lock resolver still contains a blocking confirmation dialog.' }
   Reset-BatchFixture
   Resolve-UpdateDirectoryLocks 'fixture/install'
   Assert-NoResolverError
-  if ($script:PromptCount -ne 1 -or $script:PromptSizes[0] -ne 20 -or $script:StoppedIds.Count -ne 20 -or $script:ScanCalls -ne 21) { throw '20 holders must share one prompt, with a fresh scan before every stop.' }
+  if ($script:StoppedIds.Count -ne 20 -or $script:ScanCalls -ne 21) { throw '20 holders must be stopped automatically, with a fresh scan before every stop.' }
   Resolve-UpdateDirectoryLocks 'fixture/install'
   Assert-NoResolverError
-  if ($script:PromptCount -ne 1) { throw 'Accepted identities were prompted again on retry.' }
-  Write-Output 'PASS: 20 holder identities share one confirmation and retry does not repeat it'
+  Write-Output 'PASS: 20 actual holder identities are cleaned automatically and retry never requests confirmation'
 
   Reset-BatchFixture
-  $script:Approved=$false
-  $script:OwnedUpdateProcesses=@($script:FixtureHolders[19] | Select-Object Id,Created,Executable)
-  Resolve-UpdateDirectoryLocks 'fixture/install'
+  $RuntimeNames=@('node','python','pythonw','cmd','powershell','pwsh','WindowsTerminal','OpenConsole','opencode','nga','codeagent','codeagentcli','claude','uv','uvx')
+  $script:FixtureHolders=@()
+  for ($Index=0; $Index -lt $RuntimeNames.Count; $Index++) {
+    $Holder=New-HolderFixture ($Index+1)
+    $Holder.Name=$RuntimeNames[$Index]
+    $Holder.Executable="fixture/$($Holder.Name).exe"
+    if ((Get-UpdateHolderPolicy $Holder @() @() @()) -ne 'automatic') { throw "Known runtime $($Holder.Name) is not classified for automatic cleanup." }
+    $script:FixtureHolders += $Holder
+  }
   Resolve-UpdateDirectoryLocks 'fixture/install'
   Assert-NoResolverError
-  if ($script:PromptCount -ne 1 -or $script:PromptSizes[0] -ne 19 -or $script:StoppedIds.Count -ne 2 -or @($script:StoppedIds | Where-Object { $_ -ne 20 }).Count) { throw 'Decline must preserve all external holders while keeping owned cleanup automatic.' }
-  $script:FixtureHolders[0].Created++
+  if ($script:StoppedIds.Count -ne $RuntimeNames.Count) { throw 'Runtime or terminal wrappers were left waiting for manual cleanup.' }
+  Write-Output 'PASS: Python, Node, shells, terminal hosts, Agent wrappers and uv runtimes release their installation handles automatically'
+
+  Reset-BatchFixture
+  $ProtectedNames=@('Code','notepad','notepad++','unknown-security-service')
+  $script:FixtureHolders=@()
+  for ($Index=0; $Index -lt $ProtectedNames.Count; $Index++) {
+    $Holder=New-HolderFixture ($Index+1)
+    $Holder.Name=$ProtectedNames[$Index]
+    $Holder.Executable="fixture/$($Holder.Name).exe"
+    if ((Get-UpdateHolderPolicy $Holder @() @() @()) -ne 'protected') { throw "Unapproved desktop application $($Holder.Name) is not protected." }
+    $script:FixtureHolders += $Holder
+  }
   Resolve-UpdateDirectoryLocks 'fixture/install'
   Assert-NoResolverError
-  if ($script:PromptCount -ne 2 -or $script:PromptSizes[1] -ne 1 -or $script:PromptIds[-1] -ne 1) { throw 'A reused PID needs its own new identity decision without re-prompting the unchanged holders.' }
-  Write-Output 'PASS: decline is cached, owned processes stay automatic, and reused PID requires new consent'
+  if ($script:StoppedIds.Count) { throw 'Unknown applications or editors were terminated.' }
+  Write-Output 'PASS: unknown applications and editors remain protected without opening a blocking modal'
 
   Reset-BatchFixture
   $script:Mode='changed'
   Resolve-UpdateDirectoryLocks 'fixture/install'
   Assert-NoResolverError
-  if ($script:PromptCount -ne 1 -or ($script:StoppedIds -join ',') -ne ((10..20) -join ',')) { throw "Changed/released/protected/unreviewed holders reached termination: $($script:StoppedIds -join ',')" }
+  if (($script:StoppedIds -join ',') -ne ((10..20) -join ',')) { throw "Changed/released/protected/new holders reached termination: $($script:StoppedIds -join ',')" }
   Write-Output 'PASS: rescan excludes released, reused, executable-changed, service, user, session, critical, ancestor and unknown holders'
-  Write-Output 'PASS: holders arriving after consent cannot inherit batch authorization'
+  Write-Output 'PASS: a newly appearing process cannot inherit another holder identity'
 
   Reset-BatchFixture
   $script:Mode='ownership-changed'
   $script:FixtureHolders=@(New-HolderFixture 1)
+  $script:FixtureHolders[0].Name='PANGEA Desktop'
   $script:OwnedUpdateProcesses=@($script:FixtureHolders[0] | Select-Object Id,Created,Executable)
   Resolve-UpdateDirectoryLocks 'fixture/install'
   Assert-NoResolverError
-  if ($script:StoppedIds.Count -or $script:PromptCount) { throw 'Lost ownership must not reuse automatic authorization.' }
+  if ($script:StoppedIds.Count) { throw 'Lost ownership must not reuse automatic authorization.' }
   Write-Output 'PASS: fresh ownership policy must still authorize automatic termination'
 
   Reset-BatchFixture
@@ -121,8 +142,8 @@ try {
   $script:FixtureHolders += $Explorer
   Resolve-UpdateDirectoryLocks 'fixture/install'
   Assert-NoResolverError
-  if ($script:PromptCount -ne 1 -or $script:PromptSizes[0] -ne 21 -or -not $script:PromptHasExplorer -or -not $script:RecoveryStarted -or -not $script:FoldersClosed -or 21 -in $script:StoppedIds) { throw 'Manual Explorer must share the batch warning/consent and preserve guarded folder-close recovery.' }
-  Write-Output 'PASS: manual Explorer shares the single batch prompt and keeps its recovery guard'
+  if (-not $script:RecoveryStarted -or -not $script:FoldersClosed -or 21 -in $script:StoppedIds) { throw 'Explorer must close matching folders automatically and avoid termination when the lock is released.' }
+  Write-Output 'PASS: matching Explorer folders close automatically, preserving Explorer when that releases the lock'
 
   Reset-BatchFixture
   $script:FixtureHolders=@($Explorer)
@@ -131,5 +152,16 @@ try {
   Assert-NoResolverError
   if ($script:PromptCount -or -not $script:RecoveryStarted -or -not $script:FoldersClosed -or $script:StoppedIds.Count) { throw 'Existing automatic Explorer cleanup policy changed.' }
   Write-Output 'PASS: automatic Explorer policy still needs no extra confirmation'
+
+  Reset-BatchFixture
+  $script:Mode='explorer-held'
+  $script:FixtureHolders=@($Explorer)
+  Resolve-UpdateDirectoryLocks 'fixture/install'
+  Assert-NoResolverError
+  if (($script:StoppedIds -join ',') -ne '21') { throw 'Explorer retaining its directory handle must be stopped with recovery armed.' }
+  Resolve-UpdateDirectoryLocks 'fixture/install'
+  Assert-NoResolverError
+  if ($script:StoppedIds.Count -ne 1) { throw 'Explorer restart was attempted repeatedly.' }
+  Write-Output 'PASS: Explorer retaining a lock is terminated once after its independent recovery guard is armed'
 } finally { $env:SystemRoot=$OriginalSystemRoot }
 $global:LASTEXITCODE=0

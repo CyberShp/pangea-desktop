@@ -1,6 +1,5 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-& (Join-Path $PSScriptRoot 'verify-portable-batch-cleanup.ps1')
 $Updater = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\build\apply-portable-update.ps1'))
 $Tokens=$null; $Errors=$null
 $Ast=[Management.Automation.Language.Parser]::ParseFile($Updater,[ref]$Tokens,[ref]$Errors)
@@ -16,9 +15,16 @@ $script:UpdaterScriptPath=$Updater
 $script:UpdateForm=$null
 $script:OwnedUpdateProcesses=@()
 $script:ProtectedUpdateProcesses=@($PID)
-$script:UpdateHolderDecisions=@{}
+$script:AutomaticUpdateCleanup=$false
+$script:ConfirmationCount=0
 $HolderProcess=$null
 $SecondHolderProcess=$null
+$UnrelatedProcess=$null
+function Confirm-UpdateHolderBatchStop {
+  param([object[]]$Holders, [bool]$IncludesExplorer)
+  $script:ConfirmationCount++
+  throw 'Installation holder cleanup must never request confirmation.'
+}
 
 function Assert-ScalarHolderRecords {
   param([object[]]$Holders, [int[]]$ExpectedIds)
@@ -77,8 +83,8 @@ try {
   $Holders=@(Get-UpdateLockHolders $Installation)
   Assert-ScalarHolderRecords $Holders @($HolderProcess.Id, $SecondHolderProcess.Id)
   foreach ($Record in $Holders) {
-    if ((Get-UpdateHolderPolicy $Record @() @() @($PID)) -ne 'confirm') {
-      throw "External CWD holder $($Record.Id) must be individually classified for confirmation."
+    if ((Get-UpdateHolderPolicy $Record @() @() @($PID)) -ne 'automatic') {
+      throw "External CWD holder $($Record.Id) must be individually classified for automatic cleanup."
     }
   }
   Write-Output 'PASS: multiple actual CWD holders retain scalar PID, name and security flags'
@@ -90,7 +96,7 @@ try {
   if ($HolderProcess.HasExited) { throw 'PID reuse guard killed the process.' }
   Write-Output 'PASS: mismatched process creation time cannot terminate a PID'
   $Services=@(Get-CimInstance Win32_Service -Filter "State='Running'" | ForEach-Object { [int]$_.ProcessId })
-  if ((Get-UpdateHolderPolicy $Holder @() $Services @($PID)) -ne 'confirm') { throw 'External terminal must require confirmation.' }
+  if ((Get-UpdateHolderPolicy $Holder @() $Services @($PID)) -ne 'automatic') { throw 'External terminal must be cleaned automatically.' }
   if ((Get-UpdateHolderPolicy $Holder @() @($Holder.Id) @($PID)) -ne 'protected') { throw 'Service process not protected.' }
   if ((Get-UpdateHolderPolicy $Holder @() @() @($Holder.Id)) -ne 'protected') { throw 'Updater ancestor not protected.' }
   $Fake=$Holder | Select-Object *; $Fake.Name='unknown-security-service'
@@ -102,50 +108,36 @@ try {
   if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'owned') { throw 'Owned Electron helper not recognized.' }
   $Fake.Name='node'
   $Owned[0].Created++
-  if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'confirm') { throw 'Stale ownership authorized automatic cleanup.' }
+  if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'automatic') { throw 'Stale ownership must not classify a known runtime as owned.' }
+  $Fake.Name='PANGEA Desktop'
+  if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'protected') { throw 'Stale ownership authorized cleanup of an unknown application.' }
   Write-Output 'PASS: ownership, services, ancestors and unknown processes classified safely'
-  # Exercise the actual resolver with the same local consent hook as the UI.
-  $script:DeclinePrompts=0
-  function Confirm-UpdateHolderBatchStop {
-    param([object[]]$Holders, [bool]$IncludesExplorer)
-    Assert-ScalarHolderRecords $Holders @($HolderProcess.Id, $SecondHolderProcess.Id)
-    $script:DeclinePrompts++
-    return $false
-  }
-  Resolve-UpdateDirectoryLocks $Installation
-  Resolve-UpdateDirectoryLocks $Installation
-  $HolderProcess.Refresh()
-  $SecondHolderProcess.Refresh()
-  if ($HolderProcess.HasExited -or $SecondHolderProcess.HasExited) { throw 'Declining confirmation killed a holder.' }
-  if ($script:DeclinePrompts -ne 1) { throw 'Both holders must share one decline, with no repeated prompt on retry.' }
-  Write-Output 'PASS: declining one batch preserves both external processes without repeated prompts'
-  # A new updater invocation permits a fresh decision; the current attempt
-  # never re-prompts identities that were already declined.
-  $script:UpdateHolderDecisions=@{}
-  $script:AcceptPrompts=0
-  function Confirm-UpdateHolderBatchStop {
-    param([object[]]$Holders, [bool]$IncludesExplorer)
-    Assert-ScalarHolderRecords $Holders @($HolderProcess.Id, $SecondHolderProcess.Id)
-    $script:AcceptPrompts++
-    return $true
-  }
+  # The user authorized automatic cleanup of actual installation holders.
+  # Both processes are test-owned, but intentionally absent from the updater's
+  # ownership snapshot so this exercises the external terminal policy.
+  $NodePath=(Get-Command node.exe).Source
+  $UnrelatedProcess=Start-Process $NodePath -ArgumentList @('-e','"setTimeout(()=>{},120000)"') -WorkingDirectory $Root -WindowStyle Hidden -PassThru
   Move-UpdateDirectory $Installation $Destination -TimeoutSeconds 1 -ResolveLocks
   $HolderProcess.Refresh()
   $SecondHolderProcess.Refresh()
-  if (-not $HolderProcess.HasExited -or -not $SecondHolderProcess.HasExited -or -not (Test-Path -LiteralPath $Destination)) { throw 'Confirmed holder cleanup did not release directory rename.' }
-  if ($script:AcceptPrompts -ne 1) { throw 'Both actual holders must share exactly one accept confirmation.' }
-  Write-Output 'PASS: one batch confirmation releases both actual holders and permits directory rename'
+  if (-not $HolderProcess.HasExited -or -not $SecondHolderProcess.HasExited -or -not (Test-Path -LiteralPath $Destination)) { throw 'Automatic holder cleanup did not release directory rename.' }
+  if ($script:ConfirmationCount) { throw 'Actual holder cleanup requested user confirmation.' }
+  $UnrelatedProcess.Refresh()
+  if ($UnrelatedProcess.HasExited) { throw 'Runtime outside the installation holder set was terminated.' }
+  Write-Output 'PASS: both actual external CWD holders exit automatically and directory rename succeeds without confirmation'
+  Write-Output 'PASS: a Node runtime outside the installation remains alive during automatic cleanup'
   $HolderProcess.Dispose(); $HolderProcess=$null
   $SecondHolderProcess.Dispose(); $SecondHolderProcess=$null
   Move-UpdateDirectory $Destination $Installation
-  $NodePath=(Get-Command node.exe).Source
   $HolderProcess=Start-Process $NodePath -ArgumentList @('-e','"setTimeout(()=>{},120000)"') -WorkingDirectory $Installation -WindowStyle Hidden -PassThru
   $script:OwnedUpdateProcesses=@(Get-OwnedUpdateProcesses $PID ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName))
   if (-not @($script:OwnedUpdateProcesses | Where-Object { $_.Id -eq $HolderProcess.Id }).Count) { throw 'Live descendant ownership snapshot missed Node.' }
-  function Confirm-UpdateHolderBatchStop { param([object[]]$Holders, [bool]$IncludesExplorer) throw 'Owned idle descendant should not require external confirmation.' }
   Move-UpdateDirectory $Installation $Destination -TimeoutSeconds 1 -ResolveLocks
   $HolderProcess.Refresh()
   if (-not $HolderProcess.HasExited -or -not (Test-Path -LiteralPath $Destination)) { throw 'Owned runtime cleanup failed.' }
+  if ($script:ConfirmationCount) { throw 'Owned runtime cleanup requested user confirmation.' }
+  $UnrelatedProcess.Refresh()
+  if ($UnrelatedProcess.HasExited) { throw 'Owned runtime without an installation handle was terminated.' }
   Write-Output 'PASS: live ownership snapshot automatically releases this Desktop runtime descendant'
   $HolderProcess.Dispose(); $HolderProcess=$null
   $HolderProcess=Start-Process $NodePath -ArgumentList @('-e','"setTimeout(()=>{},120000)"') -WorkingDirectory $Root -WindowStyle Hidden -PassThru
@@ -162,6 +154,7 @@ try {
 } finally {
   if ($HolderProcess) { $HolderProcess.Refresh(); if (-not $HolderProcess.HasExited) { $HolderProcess.Kill(); $HolderProcess.WaitForExit() }; $HolderProcess.Dispose() }
   if ($SecondHolderProcess) { $SecondHolderProcess.Refresh(); if (-not $SecondHolderProcess.HasExited) { $SecondHolderProcess.Kill(); $SecondHolderProcess.WaitForExit() }; $SecondHolderProcess.Dispose() }
+  if ($UnrelatedProcess) { $UnrelatedProcess.Refresh(); if (-not $UnrelatedProcess.HasExited) { $UnrelatedProcess.Kill(); $UnrelatedProcess.WaitForExit() }; $UnrelatedProcess.Dispose() }
   if (Test-Path -LiteralPath $LogPath) { Get-Content -LiteralPath $LogPath | Write-Output }
   Remove-PortableDirectory $Root
 }

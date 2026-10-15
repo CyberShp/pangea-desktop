@@ -176,9 +176,11 @@ public static class PangeaUpdateHandles {
           !SameUser(handle) || !IsProcessCritical(handle,out critical) || critical) return false;
       using (var p = Process.GetProcessById(id)) {
         if (p.SessionId != Process.GetCurrentProcess().SessionId) return false;
-        p.CloseMainWindow();
+        // Console runtimes have no main window. Do not spend two seconds on
+        // every headless holder waiting for a close request that was not sent.
+        if (p.CloseMainWindow() && WaitForSingleObject(handle,2000) == 0) return true;
       }
-      if (WaitForSingleObject(handle,2000) == 0) return true;
+      if (WaitForSingleObject(handle,0) == 0) return true;
       if (!TerminateProcess(handle,1)) return false;
       return WaitForSingleObject(handle,3000) == 0;
     } finally { CloseHandle(handle); }
@@ -256,81 +258,19 @@ function Get-UpdateHolderPolicy {
   # Exact descendant identity, not a short executable-name allowlist: Electron
   # helpers and shell wrappers can also retain this installation's handles.
   if (@($Owned | Where-Object { $_.Id -eq $Holder.Id -and $_.Created -eq $Holder.Created -and $_.Executable -ieq $Holder.Executable }).Count) { return 'owned' }
-  $RuntimeNames = @('node','python','pythonw','opencode','nga','codeagent','claude')
-  $IsRuntime = $Holder.Name -in $RuntimeNames
-  # Unknown programs, other Desktop instances, Explorer and security software
-  # are display-only. Only familiar user applications can be selected locally.
-  if ($IsRuntime -or $Holder.Name -in @('Code','notepad','notepad++','powershell','pwsh','cmd','WindowsTerminal')) { return 'confirm' }
+  # This policy is applied only to verified holders of this installation.
+  # Include Agent launchers and terminal hosts so their remaining handles do
+  # not require a separate user action after the runtime has been stopped.
+  $RuntimeNames = @('node','python','pythonw','opencode','nga','codeagent','codeagentcli','claude','uv','uvx',
+    'powershell','pwsh','cmd','WindowsTerminal','OpenConsole')
+  if ($Holder.Name -in $RuntimeNames) { return 'automatic' }
   return 'protected'
 }
 
 function Get-UpdateHolderIdentityKey {
   param([string]$Root, $Holder)
-  # Consent belongs to this observed process at this directory, never a name
-  # or PID alone. Cache both Yes and No for this updater invocation only.
+  # Match this observed process at this directory, never a name or PID alone.
   return ('{0}|{1}|{2}|{3}' -f $Root.TrimEnd('\').ToLowerInvariant(), $Holder.Id, $Holder.Created, ([string]$Holder.Executable).ToLowerInvariant())
-}
-
-function Confirm-UpdateHolderBatchStop {
-  param([object[]]$Holders, [bool]$IncludesExplorer = $false)
-  if (-not $Holders.Count) { return $false }
-  Add-Type -AssemblyName System.Windows.Forms
-  Add-Type -AssemblyName System.Drawing
-  $Dialog = New-Object Windows.Forms.Form
-  try {
-    $Dialog.Text = 'PANGEA 升级 - 确认释放目录占用'
-    $Dialog.ClientSize = New-Object Drawing.Size(900, 490)
-    $Dialog.MinimumSize = New-Object Drawing.Size(700, 420)
-    $Dialog.StartPosition = 'CenterScreen'
-    $Dialog.ShowInTaskbar = $true
-    $Dialog.MaximizeBox = $false
-    $Dialog.MinimizeBox = $false
-    $Dialog.TopMost = $true
-    $Dialog.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9)
-    $Summary = New-Object Windows.Forms.Label
-    $Summary.Location = New-Object Drawing.Point(16, 12)
-    $Summary.Size = New-Object Drawing.Size(868, 76)
-    $Summary.Anchor = 'Top, Left, Right'
-    $Summary.Text = "以下 $($Holders.Count) 个进程正在占用安装目录。请先保存相关工作，再一次性确认结束清单中的进程。`r`n结束进程可能中断其任务或丢失未保存的内容；进程信息仅在本机使用。"
-    if ($IncludesExplorer) { $Summary.Text += "`r`n清单包含资源管理器：请先完成文件复制/移动；桌面和任务栏可能短暂消失，随后自动恢复。" }
-    $List = New-Object Windows.Forms.ListView
-    $List.Location = New-Object Drawing.Point(16, 92)
-    $List.Size = New-Object Drawing.Size(868, 328)
-    $List.Anchor = 'Top, Bottom, Left, Right'
-    $List.View = 'Details'
-    $List.FullRowSelect = $true
-    $List.GridLines = $true
-    $List.MultiSelect = $false
-    $List.HideSelection = $false
-    [void]$List.Columns.Add('进程', 155)
-    [void]$List.Columns.Add('PID', 75)
-    [void]$List.Columns.Add('程序路径', 390)
-    [void]$List.Columns.Add('占用路径', 420)
-    foreach ($Holder in $Holders) {
-      $Item = New-Object Windows.Forms.ListViewItem([string]$Holder.Name)
-      [void]$Item.SubItems.Add([string]$Holder.Id)
-      [void]$Item.SubItems.Add([string]$Holder.Executable)
-      [void]$Item.SubItems.Add([string]$Holder.Path)
-      [void]$List.Items.Add($Item)
-    }
-    $Accept = New-Object Windows.Forms.Button
-    $Accept.Text = '结束以上全部进程并继续'
-    $Accept.Location = New-Object Drawing.Point(516, 438)
-    $Accept.Size = New-Object Drawing.Size(220, 36)
-    $Accept.Anchor = 'Bottom, Right'
-    $Accept.DialogResult = [Windows.Forms.DialogResult]::Yes
-    $Cancel = New-Object Windows.Forms.Button
-    $Cancel.Text = '暂不结束'
-    $Cancel.Location = New-Object Drawing.Point(748, 438)
-    $Cancel.Size = New-Object Drawing.Size(136, 36)
-    $Cancel.Anchor = 'Bottom, Right'
-    $Cancel.DialogResult = [Windows.Forms.DialogResult]::Cancel
-    $Dialog.Controls.AddRange(@($Summary, $List, $Accept, $Cancel))
-    $Dialog.AcceptButton = $Cancel
-    $Dialog.CancelButton = $Cancel
-    $Dialog.ActiveControl = $Cancel
-    return $Dialog.ShowDialog() -eq [Windows.Forms.DialogResult]::Yes
-  } finally { $Dialog.Dispose() }
 }
 
 function Stop-UpdateHolder {
@@ -421,16 +361,13 @@ function Complete-ExplorerRecovery {
 
 function Resolve-UpdateDirectoryLocks {
   param([string]$Root)
-  Set-UpdateStage '正在检查目录占用；需要确认时将一次性列出进程，请先保存相关工作…' 76 'directory-locks'
+  Set-UpdateStage '正在检查并自动释放安装目录占用…' 76 'directory-locks'
   try {
     $Holders = @(Get-UpdateLockHolders $Root)
     $ServiceIds = @(Get-CimInstance Win32_Service -Filter "State='Running'" -ErrorAction Stop | ForEach-Object { [int]$_.ProcessId })
     Initialize-HandleInspector
-    if (-not (Get-Variable -Name UpdateHolderDecisions -Scope Script -ErrorAction SilentlyContinue)) { $script:UpdateHolderDecisions = @{} }
-    $Automatic = (Get-Variable -Name AutomaticUpdateCleanup -Scope Script -ErrorAction SilentlyContinue) -and $script:AutomaticUpdateCleanup
     $ManualHolders = @()
     $Candidates = @()
-    $Pending = @()
     $Seen = @{}
     foreach ($Holder in $Holders) {
       $Policy = Get-UpdateHolderPolicy $Holder $script:OwnedUpdateProcesses $ServiceIds $script:ProtectedUpdateProcesses
@@ -443,22 +380,12 @@ function Resolve-UpdateDirectoryLocks {
       $Key = Get-UpdateHolderIdentityKey $Root $Holder
       if ($Seen.ContainsKey($Key)) { continue }
       $Seen[$Key] = $true
-      $NeedsConsent = $Policy -eq 'confirm' -or ($Policy -eq 'explorer' -and -not $Automatic)
-      $Candidate = [pscustomobject]@{ Holder=$Holder; Policy=$Policy; Key=$Key; NeedsConsent=$NeedsConsent }
-      $Candidates += $Candidate
-      if ($NeedsConsent -and -not $script:UpdateHolderDecisions.ContainsKey($Key)) { $Pending += $Candidate }
+      $Candidates += [pscustomobject]@{ Holder=$Holder; Policy=$Policy; Key=$Key }
     }
-    # One scrollable, reviewable list replaces one modal dialog per PID. A new
-    # holder or reused PID is never covered by an earlier identity's decision.
-    if ($Pending.Count) {
-      $Confirmed = Confirm-UpdateHolderBatchStop -Holders @($Pending | ForEach-Object { $_.Holder }) -IncludesExplorer (@($Pending | Where-Object { $_.Policy -eq 'explorer' }).Count -gt 0)
-      foreach ($Candidate in $Pending) {
-        $script:UpdateHolderDecisions[$Candidate.Key] = [bool]$Confirmed
-        Write-UpdateLog "directory cleanup consent: pid=$($Candidate.Holder.Id); approved=$Confirmed"
-      }
-    }
+    $Index = 0
     foreach ($Candidate in $Candidates) {
-      if ($Candidate.NeedsConsent -and -not $script:UpdateHolderDecisions[$Candidate.Key]) { continue }
+      $Index++
+      Set-UpdateStage "正在自动释放目录占用：$Index / $($Candidates.Count)，$($Candidate.Holder.Name) (PID $($Candidate.Holder.Id))…" 76 'directory-locks'
       if ($Candidate.Policy -eq 'explorer') {
         if ((Get-Variable -Name ExplorerRestartAttempted -Scope Script -ErrorAction SilentlyContinue) -and $script:ExplorerRestartAttempted) { continue }
         $script:ExplorerRestartAttempted=$true
@@ -466,10 +393,13 @@ function Resolve-UpdateDirectoryLocks {
         Close-InstallationExplorerWindows $Root
         Start-Sleep -Milliseconds 500
       }
-      # Re-scan before every termination. Consent and automatic ownership must
-      # still match PID, creation time, executable, directory AND fresh policy.
+      # Re-scan before every termination. Automatic cleanup must still match
+      # PID, creation time, executable, directory AND fresh policy.
       $StillHolding = @(Get-UpdateLockHolders $Root | Where-Object { (Get-UpdateHolderIdentityKey $Root $_) -eq $Candidate.Key })
-      if (-not $StillHolding.Count) { continue }
+      if (-not $StillHolding.Count) {
+        Write-UpdateLog "directory holder released or identity changed; skipping pid=$($Candidate.Holder.Id)"
+        continue
+      }
       $Fresh = $StillHolding[0]
       $FreshServices = @(Get-CimInstance Win32_Service -Filter "State='Running'" -ErrorAction Stop | ForEach-Object { [int]$_.ProcessId })
       $FreshPolicy = Get-UpdateHolderPolicy $Fresh $script:OwnedUpdateProcesses $FreshServices $script:ProtectedUpdateProcesses
@@ -481,8 +411,9 @@ function Resolve-UpdateDirectoryLocks {
       Write-UpdateLog "release directory handle: $($Fresh.Name) pid=$($Fresh.Id); stopped=$Stopped"
     }
     if ($ManualHolders.Count) {
-      Add-Type -AssemblyName System.Windows.Forms
-      [Windows.Forms.MessageBox]::Show(("These processes hold the installation directory and will not be terminated by the updater:`n" + ($ManualHolders -join "`n") + "`n`nClose other Desktop instances or user applications normally. System, security and unknown processes require local investigation. No information is uploaded."), 'PANGEA update - manual action needed', 'OK', 'Information') | Out-Null
+      # Never block the rename timeout on an unattended modal dialog.
+      Write-UpdateLog ('protected directory holders remain: ' + ($ManualHolders -join '; '))
+      Set-UpdateStage ('自动清理已完成，仍有受保护的目录占用：' + ($ManualHolders -join '、') + '；正在重试版本切换…') 76 'directory-locks'
     }
     if (-not $Holders.Count) { Write-UpdateLog 'No inspectable directory holders found; permissions or protected/inaccessible processes may prevent rename.' }
   } catch { Write-UpdateLog "local lock resolution: $($_.Exception.Message)" }
@@ -1032,7 +963,7 @@ try {
     }
   } catch {
     $script:AutomaticUpdateCleanup=$false; $script:OwnedUpdateProcesses=@()
-    Write-UpdateLog "Process ownership snapshot unavailable; automatic cleanup disabled: $($_.Exception.Message)"
+    Write-UpdateLog "Process ownership snapshot unavailable; descendant cleanup disabled: $($_.Exception.Message)"
   }
   if (Test-Path -LiteralPath "$PlanPath.cancel") { throw '升级启动已取消，当前版本保持运行。' }
   $script:UpdateMonitor.Refresh()

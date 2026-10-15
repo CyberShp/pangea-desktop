@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 
 # Recovery for a package already imported and signature-verified by Desktop.
 # Never change signed files or the package. Old plans cannot establish ownership;
-# any eligible external holder requires confirmation in the local updater UI.
+# verified runtime/terminal holders still use the updater's automatic cleanup.
 $InstallRoot = (Resolve-Path -LiteralPath $InstallRoot).Path.TrimEnd('\')
 $Prefix = $InstallRoot + '\'
 $UpdateRoot = Join-Path $env:APPDATA 'pangea-desktop\updates'
