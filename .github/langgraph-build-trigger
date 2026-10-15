@@ -1,1 +1,1 @@
-2026-10-13: verify the PowerShell 5.1 updater holder-array fix. Multiple directory holders must be classified individually; retain process identity checks and local confirmation. Run the complete Windows package checks with dsh-pangea 12abee8 and pangea-agent c68b711.
+2026-10-15: verify the Windows Agent session path fix after build 38699817409. Run the complete Windows package checks with dsh-pangea 6ab8840, including real uppercase/lowercase data roots, first append, legacy history and restart reads. Preserve Run isolation and reject escaping or dangling symlinks.
