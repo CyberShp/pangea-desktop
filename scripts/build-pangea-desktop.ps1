@@ -267,6 +267,18 @@ try {
   ) $AgentRuntime
   Invoke-Checked $Python @(
   '-X', 'utf8',
+    (Join-Path $PangeaAgent 'verification/branch_behavior_contract.py')
+  ) $AgentRuntime
+  Invoke-Checked $Python @(
+  '-X', 'utf8',
+    (Join-Path $PangeaAgent 'verification/flow_stability.py')
+  ) $AgentRuntime
+  Invoke-Checked $Python @(
+  '-X', 'utf8',
+    (Join-Path $PangeaAgent 'verification/report_delivery_smoke.py')
+  ) $AgentRuntime
+  Invoke-Checked $Python @(
+  '-X', 'utf8',
     (Join-Path $PangeaAgent 'verification/asset_lifecycle.py')
   ) $AgentRuntime
   Invoke-Checked $Python @(
