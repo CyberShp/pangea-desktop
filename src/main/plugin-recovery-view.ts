@@ -1,4 +1,5 @@
 import type { RuntimeSnapshot } from '../shared/contracts'
+import { extractFailureCause } from './runtime/harness-runtime'
 
 export type PluginRecoveryLocale = 'en' | 'zh'
 
@@ -30,6 +31,7 @@ export interface PluginRecoveryViewModel {
 interface FailureDescription {
   title: string
   detail: string
+  summary?: string
 }
 
 function displayPluginName(packageName: string): string {
@@ -179,14 +181,53 @@ export function describePluginFailure(
         }
   }
 
+  const reportedCause = extractFailureCause(logs)
+  const errorSummary = [rawError.trim(), reportedCause]
+    .filter((value, index, values): value is string => Boolean(value) &&
+      !values.slice(0, index).some((previous) => previous?.includes(value!)))
+    .join('\n')
+  const detail = errorSummary.length > 1_200 ? `${errorSummary.slice(0, 1_199)}…` : errorSummary
+
+  if (/\b(?:EPERM|EACCES|EBUSY)\b[^\r\n]*rename[^\r\n]*monitor-v1\.json/i.test(text)) {
+    return locale === 'zh'
+      ? {
+          title: '运行监控记录保存失败',
+          summary: '已定位到运行监控文件保存失败，请查看下方错误和 Harness 日志。',
+          detail: `系统拒绝替换 monitor-v1.json 运行观察记录。文件占用或访问限制可能导致此错误，具体原因需要结合日志核实。\n${detail}`
+        }
+      : {
+          title: 'Runtime monitoring history could not be saved',
+          summary: 'The failure occurred while saving runtime monitoring history. See the error and Harness log below.',
+          detail: `The operating system rejected replacement of monitor-v1.json. File sharing or access restrictions may cause this error; the exact cause requires further investigation.\n${detail}`
+        }
+  }
+
+  if (/Harness did not become ready within/i.test(text)) {
+    return locale === 'zh'
+      ? { title: 'Harness 启动超时', detail: `本地服务未在规定时间内就绪。${detail ? `\n${detail}` : ''}` }
+      : { title: 'Harness startup timed out', detail: `The local service did not become ready in time.${detail ? `\n${detail}` : ''}` }
+  }
+
+  if (/(?:Harness entry|Bundled Node\.js runtime|Harness diagnostic entry|DSH Desktop patch) was not found/i.test(text)) {
+    return locale === 'zh'
+      ? { title: 'Harness 运行文件缺失', detail }
+      : { title: 'A required Harness runtime file is missing', detail }
+  }
+
+  if (/Harness stopped unexpectedly/i.test(text)) {
+    return locale === 'zh'
+      ? { title: 'Harness 运行进程已退出', detail }
+      : { title: 'The Harness process exited unexpectedly', detail }
+  }
+
   return locale === 'zh'
     ? {
-        title: '插件启动失败',
-        detail: 'Harness 在加载插件时发生错误，但暂时无法自动判断更具体的原因。'
+        title: 'Harness 发生错误',
+        detail: `暂时无法自动判断具体原因。${detail ? `\n${detail}` : '请打开 Harness 日志查看错误记录。'}`
       }
     : {
-        title: 'A plugin failed during startup',
-        detail: 'Harness reported an error while loading a plugin, but the exact cause could not be determined automatically.'
+        title: 'Harness reported an error',
+        detail: `The exact cause could not be determined automatically.${detail ? `\n${detail}` : ' Open the Harness log to inspect the error.'}`
       }
 }
 
@@ -212,10 +253,10 @@ export function buildPluginRecoveryViewModel(options: {
       badge: '启动修复',
       heading: canUninstall
         ? multiple ? `发现 ${plugins.length} 个导致启动失败的插件` : '发现导致启动失败的插件'
-        : 'Harness 暂时无法启动',
+        : /Harness stopped unexpectedly/i.test(snapshot.message) ? 'Harness 运行已中断' : 'Harness 暂时无法启动',
       summary: canUninstall
         ? ''
-        : '暂时无法定位到具体插件。你可以进入安全模式，停用所有第三方插件并继续使用 Agent。',
+        : description.summary ?? '尚未定位到具体故障组件。你可以打开 Harness 日志查看错误，或尝试安全模式排查第三方插件影响。',
       reasonTitle: description.title,
       reasonDetail: description.detail,
       plugins,
@@ -246,10 +287,10 @@ export function buildPluginRecoveryViewModel(options: {
     badge: 'Startup recovery',
     heading: canUninstall
       ? multiple ? `${plugins.length} plugins are preventing startup` : 'A plugin is preventing startup'
-      : 'Harness could not start',
+      : /Harness stopped unexpectedly/i.test(snapshot.message) ? 'Harness stopped unexpectedly' : 'Harness could not start',
     summary: canUninstall
       ? ''
-      : 'No specific plugin could be identified. Enter Safe Mode to disable all third-party plugins and keep using the Agent.',
+      : description.summary ?? 'The failing component has not been identified. Open the Harness log for details. Enter Safe Mode to investigate third-party plugins.',
     reasonTitle: description.title,
     reasonDetail: description.detail,
     plugins,

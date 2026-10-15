@@ -30,6 +30,18 @@ it('exposes remote model/session and tool failures through the real ACP transpor
 it('leaves an unadvertised model unknown', async () => {
   await fixtureRun('no-model', 'ping', run => expect(run.readDiagnostics().model).toBeNull())
 })
+
+for (const mode of ['tool-partial', 'tool-partial-concurrent', 'tool-partial-pending', 'tool-partial-failed']) {
+  it(`preserves terminal tool status across partial metadata updates (${mode})`, async () => {
+    await fixtureRun(mode, 'PANGEA_TOOL_OK', (run, result) => {
+      expect(result.protocolStopReason).toBe('end_turn')
+      expect(run.readDiagnostics()).toMatchObject({
+        lastToolId: 'tool-1', lastToolStatus: mode === 'tool-partial-pending' ? 'in_progress' : mode === 'tool-partial-failed' ? 'failed' : 'completed',
+        activeToolCount: ['tool-partial-concurrent', 'tool-partial-pending'].includes(mode) ? 1 : 0,
+      })
+    })
+  })
+}
 it('retains bounded structured RPC error evidence', async () => {
   await fixtureRun('error', 'ping', (run, result) => {
     expect(result.stopReason).toBe('error')

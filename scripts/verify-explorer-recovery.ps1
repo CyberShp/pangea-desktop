@@ -27,7 +27,7 @@ $script:ProtectedUpdateProcesses=@($PID)
 $script:ScanCalls=0; $script:RecoveryStarted=$false; $script:FoldersClosed=$false
 $Fake.Executable=Join-Path $env:SystemRoot 'explorer.exe'
 function Get-UpdateLockHolders { param($Root) $script:ScanCalls++; if ($script:ScanCalls -eq 1) { return @($Fake) }; return @() }
-function Confirm-ExplorerRestart { throw 'Automatic cleanup must not ask for Explorer confirmation.' }
+function Confirm-UpdateHolderBatchStop { throw 'Automatic cleanup must not ask for Explorer confirmation.' }
 function Start-ExplorerRecovery { $script:RecoveryStarted=$true }
 function Close-InstallationExplorerWindows { param($Root) $script:FoldersClosed=$true }
 Resolve-UpdateDirectoryLocks $Root

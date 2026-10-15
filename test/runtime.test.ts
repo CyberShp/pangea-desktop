@@ -266,6 +266,37 @@ describe('harness failure cause extraction', () => {
     expect(extractFailureCause(logs)).toBe('ReferenceError: foo is not defined')
   })
 
+  it('preserves nested loader failures from an AggregateError without copying its stack', () => {
+    const logs = [
+      '[stderr] [harness-node] DSH entry failed: AggregateError: loader entries failed to apply',
+      '[stderr]     at apply (loader.js:12:3)',
+      '[stderr] Aggregate member 1: Error: failed to apply loader entry assets (dsh-pangea-asset-catalog): invalid configuration',
+      '[stderr]     at load (assets.js:20:1)',
+      '[stderr] Caused by: Error: missing asset directory',
+      '[stderr] [harness-node] unhandled rejection: Error: later unrelated failure',
+      '[stderr] Caused by: Error: unrelated cause'
+    ]
+    const cause = extractFailureCause(logs)
+    expect(cause).toContain('AggregateError: loader entries failed to apply')
+    expect(cause).toContain('dsh-pangea-asset-catalog')
+    expect(cause).toContain('missing asset directory')
+    expect(cause).not.toContain('at apply')
+    expect(cause).not.toContain('unrelated')
+    expect(extractDshEntryFailureCause(logs)).toBe(cause)
+  })
+
+  it('bounds a nested diagnostic while keeping the deepest causes', () => {
+    const logs = [
+      '[stderr] [harness-node] DSH entry failed: Error: startup failed',
+      ...Array.from({ length: 10 }, (_, index) => `[stderr] Caused by: Error: cause ${index} ${'x'.repeat(600)}`)
+    ]
+    const cause = extractFailureCause(logs)!
+    expect(cause.split('\n')).toHaveLength(6)
+    expect(cause.length).toBeLessThan(3_100)
+    expect(cause).toContain('cause 9')
+    expect(cause).not.toContain('cause 0')
+  })
+
   it('extracts unhandled rejection messages from stderr', () => {
     const logs = [
       '[stderr] [harness-node] unhandled rejection: TypeError: cannot read property x of null',

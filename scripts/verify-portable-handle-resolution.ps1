@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+& (Join-Path $PSScriptRoot 'verify-portable-batch-cleanup.ps1')
 $Updater = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\build\apply-portable-update.ps1'))
 $Tokens=$null; $Errors=$null
 $Ast=[Management.Automation.Language.Parser]::ParseFile($Updater,[ref]$Tokens,[ref]$Errors)
@@ -15,6 +16,7 @@ $script:UpdaterScriptPath=$Updater
 $script:UpdateForm=$null
 $script:OwnedUpdateProcesses=@()
 $script:ProtectedUpdateProcesses=@($PID)
+$script:UpdateHolderDecisions=@{}
 $HolderProcess=$null
 $SecondHolderProcess=$null
 
@@ -103,34 +105,36 @@ try {
   if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'confirm') { throw 'Stale ownership authorized automatic cleanup.' }
   Write-Output 'PASS: ownership, services, ancestors and unknown processes classified safely'
   # Exercise the actual resolver with the same local consent hook as the UI.
-  $script:DeclinedHolderIds=@()
-  function Confirm-UpdateHolderStop {
-    param($Holder)
-    if ($Holder -is [Array]) { throw 'Confirmation received an aggregated holder array.' }
-    Assert-ScalarHolderRecords @($Holder) @($Holder.Id)
-    $script:DeclinedHolderIds += $Holder.Id
+  $script:DeclinePrompts=0
+  function Confirm-UpdateHolderBatchStop {
+    param([object[]]$Holders, [bool]$IncludesExplorer)
+    Assert-ScalarHolderRecords $Holders @($HolderProcess.Id, $SecondHolderProcess.Id)
+    $script:DeclinePrompts++
     return $false
   }
+  Resolve-UpdateDirectoryLocks $Installation
   Resolve-UpdateDirectoryLocks $Installation
   $HolderProcess.Refresh()
   $SecondHolderProcess.Refresh()
   if ($HolderProcess.HasExited -or $SecondHolderProcess.HasExited) { throw 'Declining confirmation killed a holder.' }
-  if ($script:DeclinedHolderIds.Count -ne 2 -or $HolderProcess.Id -notin $script:DeclinedHolderIds -or $SecondHolderProcess.Id -notin $script:DeclinedHolderIds) { throw 'Each holder must receive a separate decline confirmation.' }
-  Write-Output 'PASS: declining local confirmation preserves external process'
-  $script:AcceptedHolderIds=@()
-  function Confirm-UpdateHolderStop {
-    param($Holder)
-    if ($Holder -is [Array]) { throw 'Confirmation received an aggregated holder array.' }
-    Assert-ScalarHolderRecords @($Holder) @($Holder.Id)
-    $script:AcceptedHolderIds += $Holder.Id
+  if ($script:DeclinePrompts -ne 1) { throw 'Both holders must share one decline, with no repeated prompt on retry.' }
+  Write-Output 'PASS: declining one batch preserves both external processes without repeated prompts'
+  # A new updater invocation permits a fresh decision; the current attempt
+  # never re-prompts identities that were already declined.
+  $script:UpdateHolderDecisions=@{}
+  $script:AcceptPrompts=0
+  function Confirm-UpdateHolderBatchStop {
+    param([object[]]$Holders, [bool]$IncludesExplorer)
+    Assert-ScalarHolderRecords $Holders @($HolderProcess.Id, $SecondHolderProcess.Id)
+    $script:AcceptPrompts++
     return $true
   }
   Move-UpdateDirectory $Installation $Destination -TimeoutSeconds 1 -ResolveLocks
   $HolderProcess.Refresh()
   $SecondHolderProcess.Refresh()
   if (-not $HolderProcess.HasExited -or -not $SecondHolderProcess.HasExited -or -not (Test-Path -LiteralPath $Destination)) { throw 'Confirmed holder cleanup did not release directory rename.' }
-  if ($script:AcceptedHolderIds.Count -ne 2 -or $HolderProcess.Id -notin $script:AcceptedHolderIds -or $SecondHolderProcess.Id -notin $script:AcceptedHolderIds) { throw 'Each holder must receive a separate accept confirmation.' }
-  Write-Output 'PASS: confirmed holder cleanup releases actual directory rename'
+  if ($script:AcceptPrompts -ne 1) { throw 'Both actual holders must share exactly one accept confirmation.' }
+  Write-Output 'PASS: one batch confirmation releases both actual holders and permits directory rename'
   $HolderProcess.Dispose(); $HolderProcess=$null
   $SecondHolderProcess.Dispose(); $SecondHolderProcess=$null
   Move-UpdateDirectory $Destination $Installation
@@ -138,7 +142,7 @@ try {
   $HolderProcess=Start-Process $NodePath -ArgumentList @('-e','"setTimeout(()=>{},120000)"') -WorkingDirectory $Installation -WindowStyle Hidden -PassThru
   $script:OwnedUpdateProcesses=@(Get-OwnedUpdateProcesses $PID ([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName))
   if (-not @($script:OwnedUpdateProcesses | Where-Object { $_.Id -eq $HolderProcess.Id }).Count) { throw 'Live descendant ownership snapshot missed Node.' }
-  function Confirm-UpdateHolderStop { param($Holder) throw 'Owned idle descendant should not require external confirmation.' }
+  function Confirm-UpdateHolderBatchStop { param([object[]]$Holders, [bool]$IncludesExplorer) throw 'Owned idle descendant should not require external confirmation.' }
   Move-UpdateDirectory $Installation $Destination -TimeoutSeconds 1 -ResolveLocks
   $HolderProcess.Refresh()
   if (-not $HolderProcess.HasExited -or -not (Test-Path -LiteralPath $Destination)) { throw 'Owned runtime cleanup failed.' }

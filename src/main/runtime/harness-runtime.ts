@@ -491,33 +491,18 @@ function latestHarnessAttemptLogs(logLines: readonly string[]): readonly string[
 }
 
 export function extractFailureCause(logLines: readonly string[]): string | undefined {
-  const stderrLines: string[] = []
-  let dshEntryError: string | undefined
-  let uncaughtError: string | undefined
+  const attemptLogs = latestHarnessAttemptLogs(logLines)
+  const reportedFailure =
+    extractReportedFailure(attemptLogs, /DSH entry failed:\s*(.+)/) ??
+    extractReportedFailure(attemptLogs, /(?:uncaught exception|unhandled rejection):\s*(.+)/)
+  if (reportedFailure) return reportedFailure
 
-  for (const line of latestHarnessAttemptLogs(logLines)) {
+  const stderrLines: string[] = []
+  for (const line of attemptLogs) {
     if (!line.startsWith('[stderr] ')) continue
     const text = line.slice(8)
     stderrLines.push(text)
-
-    if (dshEntryError === undefined) {
-      const m = text.match(/DSH entry failed:\s*(.+)/)
-      if (m && m[1]) dshEntryError = m[1].trim()
-    }
-
-    if (uncaughtError === undefined) {
-      const m1 = text.match(/uncaught exception:\s*(.+)/)
-      if (m1 && m1[1]) {
-        uncaughtError = m1[1].trim()
-      } else {
-        const m2 = text.match(/unhandled rejection:\s*(.+)/)
-        if (m2 && m2[1]) uncaughtError = m2[1].trim()
-      }
-    }
   }
-
-  if (dshEntryError) return dshEntryError
-  if (uncaughtError) return uncaughtError
 
   for (let i = stderrLines.length - 1; i >= 0; i--) {
     const line = stderrLines[i]?.trim()
@@ -538,12 +523,33 @@ export function extractFailureCause(logLines: readonly string[]): string | undef
 export function extractDshEntryFailureCause(
   logLines: readonly string[]
 ): string | undefined {
-  for (const line of latestHarnessAttemptLogs(logLines)) {
+  return extractReportedFailure(latestHarnessAttemptLogs(logLines), /DSH entry failed:\s*(.+)/)
+}
+
+function extractReportedFailure(logLines: readonly string[], pattern: RegExp): string | undefined {
+  let headline: string | undefined
+  const causes: string[] = []
+  for (const line of logLines) {
     if (!line.startsWith('[stderr] ')) continue
-    const match = line.slice(8).match(/DSH entry failed:\s*(.+)/)
-    if (match?.[1]) return match[1].trim()
+    const text = line.slice(8)
+    if (headline === undefined) {
+      const match = text.match(pattern)
+      if (match?.[1]) headline = match[1].trim()
+      continue
+    }
+    // describeError prints nested causes after the outer stack. Keeping only
+    // the first line reduces AggregateError to "loader entries failed" and
+    // hides the plugin/cause from the recovery page's error message.
+    if (text.trimStart().startsWith('[harness-node] ')) break
+    const cause = text.trim()
+    if (/^(?:Caused by:|Aggregate member \d+:)/.test(cause) && !causes.includes(cause)) {
+      causes.push(cause)
+    }
   }
-  return undefined
+  if (!headline) return undefined
+  return [headline, ...causes.slice(-5)]
+    .map((line) => line.length > 500 ? `${line.slice(0, 499)}…` : line)
+    .join('\n')
 }
 
 const CORE_BUNDLES = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dshmarket'])

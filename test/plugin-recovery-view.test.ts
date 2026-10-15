@@ -31,9 +31,56 @@ describe('plugin recovery view model', () => {
       ['[stderr] plugin initialization returned an unexpected error'],
       'zh'
     )
-    expect(description.title).toBe('插件启动失败')
-    expect(description.detail).toContain('无法自动判断更具体的原因')
+    expect(description.title).toBe('Harness 发生错误')
+    expect(description.detail).toContain('无法自动判断具体原因')
+    expect(description.detail).toContain('plugin initialization returned an unexpected error')
     expect(description.detail).not.toContain('/sidebar/api')
+  })
+
+  it.each([
+    ['Harness stopped unexpectedly (exit code 1 (0x00000001)).\nError: EADDRINUSE', 'Harness 运行进程已退出'],
+    ['Harness did not become ready within 120 seconds.', 'Harness 启动超时'],
+    ['Bundled Node.js runtime was not found: C:\\app\\node.exe', 'Harness 运行文件缺失'],
+    ['Harness could not start: spawn EPERM', 'Harness 发生错误']
+  ])('does not blame plugins for a runtime failure: %s', (message, title) => {
+    const model = buildPluginRecoveryViewModel({
+      snapshot: { ...failedSnapshot(), message },
+      plugins: [],
+      removedPlugins: [],
+      locale: 'zh'
+    })
+    expect(model.reasonTitle).toBe(title)
+    expect(model.reasonDetail).toContain(message)
+    expect(model.summary).not.toContain('并继续使用 Agent')
+    expect(model.canUninstall).toBe(false)
+  })
+
+  it('keeps the current error without repeating its cause or using previous launch failures', () => {
+    const message = 'Harness stopped unexpectedly (exit code 1).\nError: listen EACCES'
+    const description = describePluginFailure([
+      '[desktop] starting previous',
+      '[stderr] failed to apply loader entry old (old-plugin): old failure',
+      '[desktop] starting current',
+      '[stderr] [harness-node] uncaught exception: Error: listen EACCES'
+    ], 'en', message)
+    expect(description.title).toBe('The Harness process exited unexpectedly')
+    expect(description.detail).toBe(message)
+    expect(description.detail).not.toContain('old-plugin')
+  })
+
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('identifies monitor rename failure without diagnosing a third-party plugin: %s', (code) => {
+    const message = `Harness stopped unexpectedly (exit code 1 (0x00000001)).\nError: ${code}: operation not permitted, rename 'C:\\profile\\monitor-v1.json.tmp' -> 'C:\\profile\\monitor-v1.json'`
+    const model = buildPluginRecoveryViewModel({
+      snapshot: { ...failedSnapshot(), message }, plugins: [], removedPlugins: [], locale: 'zh'
+    })
+    expect(model.heading).toBe('Harness 运行已中断')
+    expect(model.reasonTitle).toBe('运行监控记录保存失败')
+    expect(model.reasonDetail).toContain(message)
+    expect(model.summary).toContain('运行监控文件保存失败')
+    expect(model.summary).not.toContain('第三方插件')
+    expect(model.canUninstall).toBe(false)
+    const english = describePluginFailure([], 'en', message)
+    expect(english.title).toBe('Runtime monitoring history could not be saved')
   })
 
   it('shows the exact loader entry and plugin when no friendlier cause is known', () => {

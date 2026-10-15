@@ -263,6 +263,14 @@ try {
   ) $AgentRuntime
   Invoke-Checked $Python @(
   '-X', 'utf8',
+    (Join-Path $PangeaAgent 'verification/test_case_contract.py')
+  ) $AgentRuntime
+  Invoke-Checked $Python @(
+  '-X', 'utf8',
+    (Join-Path $PangeaAgent 'verification/asset_lifecycle.py')
+  ) $AgentRuntime
+  Invoke-Checked $Python @(
+  '-X', 'utf8',
     (Join-Path $ProjectRoot 'scripts/verify-coverage-path-quality.py')
   ) $AgentRuntime
   Invoke-Checked $Python @(

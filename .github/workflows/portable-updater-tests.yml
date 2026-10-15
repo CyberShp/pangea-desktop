@@ -18,6 +18,7 @@ on:
       - scripts/verify-portable-patch-apply.ps1
       - scripts/verify-portable-user-data.ps1
       - scripts/verify-portable-handle-resolution.ps1
+      - scripts/verify-portable-batch-cleanup.ps1
       - scripts/verify-explorer-recovery.ps1
       - .github/workflows/portable-updater-tests.yml
 permissions:

@@ -31,7 +31,11 @@ createInterface({ input: process.stdin }).on('line', line => {
   const tool = text.includes('PANGEA_TOOL_OK')
   if (tool) {
     update({ sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'echo', kind: 'execute', status: 'in_progress' })
-    update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: mode === 'tool-failed' ? 'failed' : 'completed', content: [{ type: 'content', content: { type: 'text', text: 'PANGEA_TOOL_OK' } }] })
+    if (mode !== 'tool-partial-pending') update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: mode === 'tool-failed' || mode === 'tool-partial-failed' ? 'failed' : 'completed', content: [{ type: 'content', content: { type: 'text', text: 'PANGEA_TOOL_OK' } }] })
+    if (mode.startsWith('tool-partial')) {
+      if (mode === 'tool-partial-concurrent') update({ sessionUpdate: 'tool_call', toolCallId: 'tool-2', title: 'still running', kind: 'execute', status: 'pending' })
+      update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', title: 'final output', content: [{ type: 'content', content: { type: 'text', text: 'late output' } }] })
+    }
   }
   const message = () => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: mode === 'empty' ? 'authentication is a topic, not an error' : mode === 'volume' ? 'x'.repeat(200000) + 'PANGEA_PING_OK' : tool ? 'PANGEA_TOOL_OK' : 'PANGEA_PING_OK' } })
   if (mode === 'delayed') setTimeout(message, 80)
