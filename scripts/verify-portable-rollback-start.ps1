@@ -124,7 +124,11 @@ function Assert-HealthRejected {
 
 try {
   [IO.Directory]::CreateDirectory($Installed) | Out-Null
-  Add-Type -TypeDefinition $FixtureSource -Language CSharp -ReferencedAssemblies 'System.dll','System.Core.dll','System.Web.Extensions.dll' -OutputAssembly $Executable -OutputType ConsoleApplication
+  # Add-Type resolves OutputAssembly as a wildcard path in Windows PowerShell 5.1.
+  # Compile at a plain path, then move literally to retain bracket-path coverage.
+  $CompiledFixture = Join-Path $Root 'desktop-fixture.exe'
+  Add-Type -TypeDefinition $FixtureSource -Language CSharp -ReferencedAssemblies 'System.dll','System.Core.dll','System.Web.Extensions.dll' -OutputAssembly $CompiledFixture -OutputType ConsoleApplication
+  [IO.File]::Move($CompiledFixture, $Executable)
   foreach ($Name in $DirtyEnvironment.Keys) {
     $SavedEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process')
     [Environment]::SetEnvironmentVariable($Name, $DirtyEnvironment[$Name], 'Process')
