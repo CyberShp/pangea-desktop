@@ -63,6 +63,8 @@ public static class PortableLongPathFixture {
   }
 }
 '@
+# PS 5.1 resolves ZipArchiveMode before calling ZipFile; load its assembly explicitly.
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Get-FixturePath {
