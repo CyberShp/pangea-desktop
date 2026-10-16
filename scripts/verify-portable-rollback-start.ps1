@@ -105,6 +105,13 @@ function Stop-DesktopFixture {
   $Process.Refresh()
   if (-not $Process.HasExited) { $Process.Kill(); $Process.WaitForExit() }
 }
+function Read-DesktopFixtureLog {
+  param([string]$Path)
+  # The live child still owns a write handle, so the reader must share writes too.
+  $Stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+  $Reader = New-Object IO.StreamReader($Stream)
+  try { return $Reader.ReadToEnd() } finally { $Reader.Dispose() }
+}
 function Assert-HealthRejected {
   param([Diagnostics.Process]$Process, [string]$Scenario, [int]$TimeoutSeconds = 1)
   $Failure = ''
@@ -160,8 +167,8 @@ try {
     if (-not [string]::IsNullOrEmpty([string]$Evidence.environment.$Name)) { throw "Inherited unsafe Desktop environment: $Name" }
     if ([Environment]::GetEnvironmentVariable($Name, 'Process') -ne $DirtyEnvironment[$Name]) { throw "Launch changed its parent environment: $Name" }
   }
-  if ([IO.File]::ReadAllText("$LaunchLog.stdout") -notmatch 'fixture stdout: healthy' -or
-      [IO.File]::ReadAllText("$LaunchLog.stderr") -notmatch 'fixture stderr: healthy') {
+  if ((Read-DesktopFixtureLog "$LaunchLog.stdout") -notmatch 'fixture stdout: healthy' -or
+      (Read-DesktopFixtureLog "$LaunchLog.stderr") -notmatch 'fixture stderr: healthy') {
     throw 'Desktop output was not redirected to its literal bracket-containing log paths.'
   }
   if (-not (Wait-PortableDesktopHealthy $Healthy $Marker $ExpectedVersion -TimeoutSeconds 5 -Stage 'rollback-health' -Percent 35)) {
