@@ -787,8 +787,108 @@ function Wait-UpdateHandoff {
   }
 }
 
+function Initialize-PortableDesktopLauncher {
+  if ('PangeaPortableDesktopLauncher' -as [type]) { return }
+  # PS 5.1 Start-Process expands wildcard characters in WorkingDirectory and
+  # resolves redirect paths more than once, so escaping [] is not sufficient.
+  # Inherit native log-file handles: no pipe reader must survive this updater.
+  Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class PangeaPortableDesktopLauncher {
+  [StructLayout(LayoutKind.Sequential)]
+  struct SECURITY_ATTRIBUTES {
+    public int Length; public IntPtr Descriptor; public int InheritHandle;
+  }
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+  struct STARTUPINFO {
+    public int Size; public string Reserved; public string Desktop; public string Title;
+    public uint X, Y, XSize, YSize, XCountChars, YCountChars, FillAttribute, Flags;
+    public ushort ShowWindow, ReservedSize; public IntPtr ReservedData;
+    public IntPtr StdInput, StdOutput, StdError;
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  struct PROCESS_INFORMATION {
+    public IntPtr Process, Thread; public uint ProcessId, ThreadId;
+  }
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+  static extern SafeFileHandle CreateFileW(string path, uint access, uint share,
+    ref SECURITY_ATTRIBUTES security, uint mode, uint flags, IntPtr template);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  static extern bool CreateProcessW(string application, StringBuilder commandLine,
+    IntPtr processSecurity, IntPtr threadSecurity, bool inheritHandles, uint flags,
+    IntPtr environment, string directory, ref STARTUPINFO startup, out PROCESS_INFORMATION process);
+  [DllImport("kernel32.dll", ExactSpelling=true, SetLastError=true)]
+  static extern uint ResumeThread(IntPtr thread);
+  [DllImport("kernel32.dll", ExactSpelling=true)]
+  static extern bool TerminateProcess(IntPtr process, uint exitCode);
+  [DllImport("kernel32.dll", ExactSpelling=true)]
+  static extern bool CloseHandle(IntPtr handle);
+
+  static SafeFileHandle OpenLog(string path, bool input) {
+    var security = new SECURITY_ATTRIBUTES();
+    security.Length = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
+    security.InheritHandle = 1;
+    // Direct file handles preserve literal brackets, spaces and Unicode.
+    var handle = CreateFileW(path, input ? 0x80000000u : 0x40000000u, 3,
+      ref security, input ? 3u : 2u, 0x80, IntPtr.Zero);
+    if (handle.IsInvalid) {
+      int error = Marshal.GetLastWin32Error();
+      handle.Dispose();
+      throw new Win32Exception(error, "Cannot open Desktop startup stream: " + path);
+    }
+    return handle;
+  }
+
+  public static Process Start(string executable, string arguments, string directory,
+    string stdout, string stderr) {
+    using (var input = OpenLog("NUL", true))
+    using (var output = OpenLog(stdout, false))
+    using (var error = OpenLog(stderr, false)) {
+      var startup = new STARTUPINFO();
+      startup.Size = Marshal.SizeOf(typeof(STARTUPINFO));
+      startup.Flags = 0x101; // STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW
+      startup.ShowWindow = 1; // SW_SHOWNORMAL
+      startup.StdInput = input.DangerousGetHandle();
+      startup.StdOutput = output.DangerousGetHandle();
+      startup.StdError = error.DangerousGetHandle();
+      PROCESS_INFORMATION created;
+      var commandLine = new StringBuilder("\"" + executable + "\" " + arguments);
+      // Suspend until Process owns a handle, retaining even an immediate exit's
+      // status. Null environment inherits the caller's sanitized environment.
+      if (!CreateProcessW(executable, commandLine, IntPtr.Zero, IntPtr.Zero, true,
+        0x14, IntPtr.Zero, directory, ref startup, out created))
+        throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot start Desktop: " + executable);
+      Process process = null;
+      try {
+        process = Process.GetProcessById((int)created.ProcessId);
+        IntPtr retainedHandle = process.Handle;
+        if (ResumeThread(created.Thread) == UInt32.MaxValue)
+          throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resume Desktop startup.");
+        return process;
+      } catch {
+        // Never strand an invisible suspended process after a launch error.
+        TerminateProcess(created.Process, 1);
+        if (process != null) process.Dispose();
+        throw;
+      } finally {
+        CloseHandle(created.Thread);
+        CloseHandle(created.Process);
+      }
+    }
+  }
+}
+'@
+}
+
 function Start-PortableDesktop {
   param([string]$Executable, [string]$Marker, [string]$LaunchLog)
+  Initialize-PortableDesktopLauncher
   Remove-Item -LiteralPath $Marker -Force -ErrorAction SilentlyContinue
   $Arguments = "--pangea-update-health=`"$Marker`" --enable-logging=file --log-file=`"$LaunchLog`""
   $SavedEnvironment = @{}
@@ -799,7 +899,8 @@ function Start-PortableDesktop {
       $SavedEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process')
       [Environment]::SetEnvironmentVariable($Name, $null, 'Process')
     }
-    $Desktop = Start-Process -FilePath $Executable -WorkingDirectory ([IO.Path]::GetDirectoryName($Executable)) -ArgumentList $Arguments -WindowStyle Normal -PassThru -RedirectStandardOutput "$LaunchLog.stdout" -RedirectStandardError "$LaunchLog.stderr"
+    $Desktop = [PangeaPortableDesktopLauncher]::Start($Executable, $Arguments,
+      [IO.Path]::GetDirectoryName($Executable), "$LaunchLog.stdout", "$LaunchLog.stderr")
     Write-UpdateLog "Desktop launch: pid=$($Desktop.Id); executable=$Executable; working-directory=$([IO.Path]::GetDirectoryName($Executable)); health=$Marker; log=$LaunchLog; stdout=$LaunchLog.stdout; stderr=$LaunchLog.stderr"
     # Retain the handle now so PS 5.1 can report an early exit code reliably.
     try { $null = $Desktop.Handle } catch { Write-UpdateLog "Desktop handle unavailable after launch: pid=$($Desktop.Id); $($_.Exception.Message)" }

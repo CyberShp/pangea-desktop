@@ -54,6 +54,10 @@ public static class RollbackDesktopFixture {
       { "pid", Process.GetCurrentProcess().Id }, { "cwd", Environment.CurrentDirectory },
       { "args", args }, { "marker", marker }, { "log", log }, { "environment", environment }
     };
+    Console.WriteLine("fixture stdout: " + scenario);
+    Console.Error.WriteLine("fixture stderr: " + scenario);
+    Console.Out.Flush();
+    Console.Error.Flush();
     File.WriteAllText(Path.Combine(root, "evidence.json"), json.Serialize(evidence), new UTF8Encoding(false));
     if (!String.IsNullOrEmpty(log)) File.WriteAllText(log, "fixture Desktop started", new UTF8Encoding(false));
     if (scenario == "exit17") return 17;
@@ -134,6 +138,17 @@ try {
     [Environment]::SetEnvironmentVariable($Name, $DirtyEnvironment[$Name], 'Process')
   }
 
+  $LaunchFailure = $null
+  try { Start-PortableDesktop (Join-Path $Installed 'missing [fixture].exe') $Marker $LaunchLog | Out-Null }
+  catch { $LaunchFailure = $_.Exception.Message }
+  if (-not $LaunchFailure) { throw 'A missing Desktop executable was accepted as a successful launch.' }
+  foreach ($Name in $DirtyEnvironment.Keys) {
+    if ([Environment]::GetEnvironmentVariable($Name, 'Process') -ne $DirtyEnvironment[$Name]) {
+      throw "Failed launch changed its parent environment: $Name"
+    }
+  }
+  Write-Output 'PASS: failed Desktop creation reports an error and preserves the parent environment'
+
   $Healthy = Start-DesktopFixture 'healthy'
   $Evidence = Get-Content -LiteralPath $EvidencePath -Raw -Encoding UTF8 | ConvertFrom-Json
   if ($Evidence.pid -ne $Healthy.Id -or $Evidence.cwd -ine $Installed) { throw 'Desktop must launch in its own installation directory.' }
@@ -145,10 +160,14 @@ try {
     if (-not [string]::IsNullOrEmpty([string]$Evidence.environment.$Name)) { throw "Inherited unsafe Desktop environment: $Name" }
     if ([Environment]::GetEnvironmentVariable($Name, 'Process') -ne $DirtyEnvironment[$Name]) { throw "Launch changed its parent environment: $Name" }
   }
+  if ([IO.File]::ReadAllText("$LaunchLog.stdout") -notmatch 'fixture stdout: healthy' -or
+      [IO.File]::ReadAllText("$LaunchLog.stderr") -notmatch 'fixture stderr: healthy') {
+    throw 'Desktop output was not redirected to its literal bracket-containing log paths.'
+  }
   if (-not (Wait-PortableDesktopHealthy $Healthy $Marker $ExpectedVersion -TimeoutSeconds 5 -Stage 'rollback-health' -Percent 35)) {
     throw 'Correct live Desktop health marker was rejected.'
   }
-  Write-Output 'PASS: explicit working directory, clean child environment, intact arguments and correct live health identity'
+  Write-Output 'PASS: literal working directory and output logs, clean child environment, intact arguments and correct live health identity'
   Stop-DesktopFixture $Healthy
 
   $Exited = Start-DesktopFixture 'exit17'
