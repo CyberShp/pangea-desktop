@@ -59,8 +59,22 @@ $Plan.parent_pid = 0
 $Plan | Add-Member -NotePropertyName allow_owned_process_cleanup -NotePropertyValue $false -Force
 # Manual recovery has no running Desktop to acknowledge the UI handoff.
 $Plan | Add-Member -NotePropertyName handoff_required -NotePropertyValue $false -Force
-$ResumePlan = Join-Path (Split-Path -Parent $PlanPath) ('resume-plan-' + [guid]::NewGuid().ToString('N') + '.json')
-[IO.File]::WriteAllText($ResumePlan, ($Plan | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
+$ResumePlan = $null
+for ($Number = 1; $Number -le 9999; $Number++) {
+  $CandidatePlan = Join-Path (Split-Path -Parent $PlanPath) "resume-$Number.json"
+  try { $Stream = [IO.File]::Open($CandidatePlan, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None) }
+  catch [IO.IOException] {
+    if ([IO.File]::Exists($CandidatePlan) -or [IO.Directory]::Exists($CandidatePlan)) { continue }
+    throw
+  }
+  try {
+    $Bytes = (New-Object Text.UTF8Encoding($false)).GetBytes(($Plan | ConvertTo-Json -Depth 10))
+    $Stream.Write($Bytes, 0, $Bytes.Length)
+    $ResumePlan = $CandidatePlan
+  } finally { $Stream.Dispose() }
+  break
+}
+if (-not $ResumePlan) { throw 'No unused recovery plan filename is available.' }
 Write-Output "Resuming verified patch $($Plan.expected_base_version) -> $TargetVersion for $InstallRoot"
 Write-Output "Log: $($Plan.log_path)"
 # Both PowerShell's provider location and the native working directory must be

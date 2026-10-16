@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import type { UpdateInstallResult, UpdateStatus } from '../../shared/contracts'
@@ -82,11 +81,13 @@ export async function importPortableUpdatePackage(): Promise<UpdateStatus> {
 
   importing = true
   transition({ type: 'check', manual: true, packageName: basename(sourcePath) })
-  await clearStagedPackage()
-  const root = join(app.getPath('userData'), 'updates', `import-${randomUUID()}`)
-  const destination = join(root, 'pangea-desktop.zip')
-  stagedRoot = root
   try {
+    await clearStagedPackage()
+    const updatesRoot = join(app.getPath('userData'), 'updates')
+    await mkdir(updatesRoot, { recursive: true })
+    const root = await mkdtemp(join(updatesRoot, 'import-'))
+    const destination = join(root, 'pangea-desktop.zip')
+    stagedRoot = root
     const patch = await isPortablePatchArchive(sourcePath)
     if (patch) {
       const staged = await stagePortablePatch({
@@ -146,11 +147,13 @@ async function launchPortableUpdateHelper(imported: StagedImport): Promise<void>
   const patch = imported.kind === 'patch'
   const version = imported.kind === 'patch' ? imported.manifest.to_version : imported.manifest.version
   const baseVersion = imported.kind === 'patch' ? imported.manifest.from_version : undefined
-  const updateRoot = dirname(imported.packagePath)
-  const helperPath = join(updateRoot, `apply-portable-update-${randomUUID()}.ps1`)
-  // Retrying must never consume a previous helper's ready/continue markers.
-  const planPath = join(updateRoot, `update-plan-${randomUUID()}.json`)
-  const healthMarker = join(updateRoot, `healthy-${randomUUID()}.json`)
+  // A short, exclusively created directory isolates every launch attempt. Fixed
+  // filenames remain readable and retries cannot consume earlier handoff markers.
+  // Keep runs directly below updates so recovery also finds these update plans.
+  const updateRoot = await mkdtemp(join(app.getPath('userData'), 'updates', 'run-'))
+  const helperPath = join(updateRoot, 'apply-update.ps1')
+  const planPath = join(updateRoot, 'update-plan.json')
+  const healthMarker = join(updateRoot, 'healthy.json')
   const resultPath = join(app.getPath('userData'), 'updates', LAST_UPDATE_RESULT)
   const helperSource = join(process.resourcesPath, 'update', 'apply-portable-update.ps1')
   await stageUpdateHelper(imported, helperSource, helperPath)

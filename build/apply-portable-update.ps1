@@ -227,11 +227,27 @@ function Get-OwnedUpdateProcesses {
   return $Owned
 }
 
+function New-UpdateControlFile {
+  param([string]$Prefix)
+  $Directory = [IO.Path]::GetDirectoryName($PlanPath)
+  for ($Number = 1; $Number -le 9999; $Number++) {
+    $Path = Join-Path $Directory "$Prefix-$Number.json"
+    try {
+      $Stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+      $Stream.Dispose()
+      return $Path
+    } catch [IO.IOException] {
+      if (-not [IO.File]::Exists($Path) -and -not [IO.Directory]::Exists($Path)) { throw }
+    }
+  }
+  throw "No unused update control file is available: $Prefix"
+}
+
 function Get-UpdateLockHolders {
   param([string]$Root)
   # A remote filesystem handle query can block inside Windows. Isolate the scan
   # and bound its lifetime; only this diagnostic child may be killed on timeout.
-  $Output = "$PlanPath.handles-$([guid]::NewGuid().ToString('N')).json"
+  $Output = New-UpdateControlFile 'handles'
   $Quote = { param($Value) "'" + $Value.Replace("'", "''") + "'" }
   $Command = '& ' + (& $Quote $script:UpdaterScriptPath) + ' -ScanLocks -ScanRoot ' + (& $Quote $Root) + ' -ScanOutput ' + (& $Quote $Output)
   $Encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Command))
@@ -328,7 +344,7 @@ function Watch-ExplorerRecovery {
 }
 
 function Start-ExplorerRecovery {
-  $WatchFile = "$PlanPath.explorer-$([guid]::NewGuid().ToString('N')).json"
+  $WatchFile = New-UpdateControlFile 'explorer'
   $Self = Get-Process -Id $PID
   $Watch = @{ supervisor_pid=$PID; supervisor_created=$Self.StartTime.ToUniversalTime().ToFileTimeUtc(); session=$Self.SessionId }
   [IO.File]::WriteAllText($WatchFile, ($Watch | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
@@ -471,7 +487,8 @@ function Write-AtomicUpdateJson {
   param([string]$Path, $Value)
   $Directory = [IO.Path]::GetDirectoryName($Path)
   New-Item $Directory -ItemType Directory -Force | Out-Null
-  $Temporary = "$Path.$PID.$([guid]::NewGuid().ToString('N')).tmp"
+  # Writes are synchronous within each process; PID separates worker/monitor.
+  $Temporary = "$Path.$PID.tmp"
   try {
     [IO.File]::WriteAllText($Temporary, ($Value | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
     if ([IO.File]::Exists($Path)) { [IO.File]::Replace($Temporary, $Path, [NullString]::Value) }
@@ -770,27 +787,224 @@ function Wait-UpdateHandoff {
   }
 }
 
+function Start-PortableDesktop {
+  param([string]$Executable, [string]$Marker, [string]$LaunchLog)
+  Remove-Item -LiteralPath $Marker -Force -ErrorAction SilentlyContinue
+  $Arguments = "--pangea-update-health=`"$Marker`" --enable-logging=file --log-file=`"$LaunchLog`""
+  $SavedEnvironment = @{}
+  try {
+    # GUI relaunch must not inherit Node-only launch/debug flags. Preserve the
+    # user's profile/runtime configuration and restore our own environment.
+    foreach ($Name in @('ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'NODE_PATH')) {
+      $SavedEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process')
+      [Environment]::SetEnvironmentVariable($Name, $null, 'Process')
+    }
+    $Desktop = Start-Process -FilePath $Executable -WorkingDirectory ([IO.Path]::GetDirectoryName($Executable)) -ArgumentList $Arguments -WindowStyle Normal -PassThru -RedirectStandardOutput "$LaunchLog.stdout" -RedirectStandardError "$LaunchLog.stderr"
+    Write-UpdateLog "Desktop launch: pid=$($Desktop.Id); executable=$Executable; working-directory=$([IO.Path]::GetDirectoryName($Executable)); health=$Marker; log=$LaunchLog; stdout=$LaunchLog.stdout; stderr=$LaunchLog.stderr"
+    # Retain the handle now so PS 5.1 can report an early exit code reliably.
+    try { $null = $Desktop.Handle } catch { Write-UpdateLog "Desktop handle unavailable after launch: pid=$($Desktop.Id); $($_.Exception.Message)" }
+    return $Desktop
+  } finally {
+    foreach ($Name in $SavedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($Name, $SavedEnvironment[$Name], 'Process') }
+  }
+}
+
+function Wait-PortableDesktopHealthy {
+  param($Process, [string]$Marker, [string]$Version, [int]$TimeoutSeconds = 150,
+    [string]$Stage = 'health-check', [int]$Percent = 92)
+  $Deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  $LastProgress = [DateTime]::MinValue
+  $Description = if ($Stage -eq 'rollback-health') { '原版本工作台' } else { '新版本工作台' }
+  $HealthDetail = '尚未收到工作台就绪确认'
+  while ([DateTime]::UtcNow -lt $Deadline) {
+    $Process.Refresh()
+    if ($Process.HasExited) {
+      $Message = "$Description 启动进程已退出，PID $($Process.Id)，退出码 $($Process.ExitCode)。请查看启动日志；退出码 0 也可能是已有实例占用。"
+      Write-UpdateLog $Message
+      throw $Message
+    }
+    if (Test-Path -LiteralPath $Marker -PathType Leaf) {
+      try {
+        $Health = [IO.File]::ReadAllText($Marker, [Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($Health.schema_version -eq 1 -and [int]$Health.pid -eq $Process.Id -and
+            (-not $Version -or [string]$Health.version -eq $Version) -and
+            ([DateTime]$Health.healthy_at).ToUniversalTime() -ge $Process.StartTime.ToUniversalTime().AddSeconds(-2)) {
+          $Process.Refresh()
+          if (-not $Process.HasExited) {
+            Write-UpdateLog "$Description 已确认就绪：PID $($Process.Id)，版本 $($Health.version)"
+            return $true
+          }
+        }
+        $HealthDetail = '就绪标记的 PID、版本或时间与本次启动不符'
+      } catch { $HealthDetail = '工作台就绪标记尚未完整写入或格式无效' }
+    }
+    if (([DateTime]::UtcNow - $LastProgress).TotalSeconds -ge 5) {
+      $Remaining = [Math]::Max(0, [int]($Deadline - [DateTime]::UtcNow).TotalSeconds)
+      Set-UpdateStage "正在等待$Description 就绪，PID $($Process.Id)，剩余 $Remaining 秒；$HealthDetail…" $Percent $Stage
+      $LastProgress = [DateTime]::UtcNow
+    }
+    Start-Sleep -Milliseconds 250
+  }
+  throw "$Description 进程已启动，但 $TimeoutSeconds 秒内未确认工作台就绪（PID $($Process.Id)；$HealthDetail）。进程尚在运行，请查看启动日志。"
+}
+
+function Initialize-PortableFileIO {
+  if ('PangeaPortableFileIO' -as [type]) { return }
+  # PS 5.1 providers and .NET Framework path-based FileStream constructors can
+  # still apply MAX_PATH, even when Windows long paths are enabled. Use Unicode
+  # Win32 calls with extended paths, then wrap the native handle for streaming.
+  Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using Microsoft.Win32.SafeHandles;
+public static class PangeaPortableFileIO {
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+  static extern uint GetFullPathNameW(string path, uint size, StringBuilder buffer, IntPtr part);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+  static extern bool CreateDirectoryW(string path, IntPtr security);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+  static extern uint GetFileAttributesW(string path);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+  static extern bool CopyFileW(string source, string target, bool failIfExists);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+  static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint mode, uint flags, IntPtr template);
+
+  static IOException Error(string operation, string path, int code) {
+    return new IOException(operation + " failed (Win32 " + code + ", path length " + path.Length + "): " + path,
+      new Win32Exception(code));
+  }
+  static string FullPath(string path) {
+    if (String.IsNullOrWhiteSpace(path)) throw new IOException("Empty update path.");
+    path = path.Replace('/', '\\');
+    if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) path = @"\\" + path.Substring(8);
+    else if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) path = path.Substring(4);
+    if (path.StartsWith(@"\\.\", StringComparison.Ordinal)) throw new IOException("Device update path is not allowed.");
+    string native;
+    if (path.StartsWith(@"\\", StringComparison.Ordinal)) native = @"\\?\UNC\" + path.Substring(2);
+    else if (path.Length >= 3 && Char.IsLetter(path[0]) && path[1] == ':' && path[2] == '\\') native = @"\\?\" + path;
+    else throw new IOException("Update path must be absolute: " + path);
+    // GetFullPathNameW also needs the extended prefix on non-opted-in hosts.
+    var buffer = new StringBuilder(32768);
+    uint length = GetFullPathNameW(native, (uint)buffer.Capacity, buffer, IntPtr.Zero);
+    if (length == 0) throw Error("Resolve path", path, Marshal.GetLastWin32Error());
+    if (length >= buffer.Capacity) throw new PathTooLongException("Update path exceeds the Windows extended path limit.");
+    string result = buffer.ToString();
+    return result.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase) ? @"\\" + result.Substring(8) : result.Substring(4);
+  }
+  static string Extended(string path) {
+    string full = FullPath(path);
+    return full.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + full.Substring(2) : @"\\?\" + full;
+  }
+  public static string Child(string root, string relative) {
+    if (String.IsNullOrEmpty(relative)) throw new IOException("Unsafe empty package path.");
+    relative = relative.Replace('/', '\\');
+    foreach (string part in relative.Split('\\')) {
+      if (part.Length == 0 || part == "." || part == ".." || part.EndsWith(".") || part.EndsWith(" ") ||
+          part.IndexOfAny(new char[] { ':', '\0', '<', '>', '"', '|', '?', '*' }) >= 0)
+        throw new IOException("Unsafe package path: " + relative);
+    }
+    // Validate components before concatenation: no provider expansion, drive
+    // paths, traversal, alternate streams or normalization outside this root.
+    return FullPath(root).TrimEnd('\\') + "\\" + relative;
+  }
+  static string Parent(string full) {
+    int index = full.LastIndexOf('\\');
+    if (index < 0) throw new IOException("Update path has no parent: " + full);
+    return full.Substring(0, index);
+  }
+  static void EnsureExtendedDirectory(string path) {
+    uint attributes = GetFileAttributesW(path);
+    if (attributes != UInt32.MaxValue) {
+      if ((attributes & 16) == 0) throw new IOException("Update directory is a file: " + path);
+      return;
+    }
+    int code = Marshal.GetLastWin32Error();
+    if (code != 2 && code != 3) throw Error("Inspect directory", path, code);
+    // Do not recurse above a drive root or UNC share when either is unavailable.
+    int rootEnd = path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)
+      ? path.IndexOf('\\', path.IndexOf('\\', 8) + 1) : 6;
+    if (rootEnd < 0 || path.Length <= rootEnd + 1) throw Error("Find volume or share", path, code);
+    string parent = Parent(path);
+    if (parent.EndsWith(":")) parent += "\\";
+    EnsureExtendedDirectory(parent);
+    if (!CreateDirectoryW(path, IntPtr.Zero)) {
+      code = Marshal.GetLastWin32Error();
+      attributes = GetFileAttributesW(path);
+      if (code != 183 || attributes == UInt32.MaxValue || (attributes & 16) == 0)
+        throw Error("Create directory", path, code);
+    }
+  }
+  public static void EnsureDirectory(string path) { EnsureExtendedDirectory(Extended(path)); }
+  public static string CreateWorkspace(string parent) {
+    // Reserve a short, readable name atomically. Never reuse an old backup or
+    // another updater's directory, including one left behind after a crash.
+    for (int number = 1; number <= 9999; number++) {
+      string path = Child(parent, "p-up-" + number);
+      if (CreateDirectoryW(Extended(path), IntPtr.Zero)) return path;
+      int code = Marshal.GetLastWin32Error();
+      if (code != 183 && code != 80) throw Error("Reserve update directory", path, code);
+    }
+    throw new IOException("No unused portable update directory is available.");
+  }
+  public static bool IsFile(string path) {
+    string full = Extended(path);
+    uint attributes = GetFileAttributesW(full);
+    if (attributes != UInt32.MaxValue) return (attributes & 16) == 0;
+    int code = Marshal.GetLastWin32Error();
+    if (code == 2 || code == 3) return false;
+    throw Error("Inspect file", path, code);
+  }
+  public static void Copy(string source, string target) {
+    string destination = Extended(target);
+    EnsureExtendedDirectory(Parent(destination));
+    if (!CopyFileW(Extended(source), destination, false)) throw Error("Copy file", target, Marshal.GetLastWin32Error());
+  }
+  public static FileStream Open(string path, bool write) {
+    string full = Extended(path);
+    if (write) EnsureExtendedDirectory(Parent(full));
+    SafeFileHandle handle = CreateFileW(full, write ? 0x40000000u : 0x80000000u,
+      write ? 0u : 1u, IntPtr.Zero, write ? 2u : 3u, 0x08000000u, IntPtr.Zero);
+    if (handle.IsInvalid) {
+      int code = Marshal.GetLastWin32Error(); handle.Dispose();
+      throw Error(write ? "Create file" : "Read file", path, code);
+    }
+    try { return new FileStream(handle, write ? FileAccess.Write : FileAccess.Read, 65536, false); }
+    catch { handle.Dispose(); throw; }
+  }
+  public static void Verify(string path, long size, string hash, string relative) {
+    using (FileStream input = Open(path, false)) {
+      if (input.Length != size) throw new IOException("Patched file size mismatch: " + relative);
+      using (SHA256 sha = SHA256.Create()) {
+        string actual = BitConverter.ToString(sha.ComputeHash(input)).Replace("-", "").ToLowerInvariant();
+        if (!String.Equals(actual, hash, StringComparison.Ordinal)) throw new IOException("Patched file hash mismatch: " + relative);
+      }
+    }
+  }
+}
+'@
+}
+
 function Expand-VerifiedArchive {
   param([string]$Archive, [string]$Destination)
   Add-Type -AssemblyName System.IO.Compression.FileSystem
-  New-Item $Destination -ItemType Directory -Force | Out-Null
-  $DestinationPrefix = [System.IO.Path]::GetFullPath($Destination).TrimEnd('\') + '\'
+  Initialize-PortableFileIO
+  [PangeaPortableFileIO]::EnsureDirectory($Destination)
   $Zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
   try {
     $Total=@($Zip.Entries | Where-Object { -not [string]::IsNullOrEmpty($_.Name) }).Count
     $Completed=0; $LastProgress=[DateTime]::UtcNow
     foreach ($Entry in $Zip.Entries) {
-      $Target = [System.IO.Path]::GetFullPath((Join-Path $Destination $Entry.FullName))
-      if (-not $Target.StartsWith($DestinationPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Archive entry escapes the update directory: $($Entry.FullName)"
-      }
+      $Relative = $Entry.FullName.TrimEnd([char[]]@('/', '\'))
+      $Target = [PangeaPortableFileIO]::Child($Destination, $Relative)
       if ([string]::IsNullOrEmpty($Entry.Name)) {
-        New-Item $Target -ItemType Directory -Force | Out-Null
+        [PangeaPortableFileIO]::EnsureDirectory($Target)
         continue
       }
-      $TargetParent = [System.IO.Path]::GetDirectoryName($Target)
-      New-Item $TargetParent -ItemType Directory -Force | Out-Null
-      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($Entry, $Target, $true)
+      Write-ZipEntryFile $Entry $Target
       $Completed++
       if (($Completed % 100 -eq 0) -or $Completed -eq $Total -or ([DateTime]::UtcNow-$LastProgress).TotalSeconds -ge 2) {
         Set-UpdateStage "正在解压新版本：$Completed / $Total 个文件" (42+[int](24*$Completed/[Math]::Max(1,$Total))) 'extract' $Completed $Total
@@ -823,12 +1037,15 @@ function Extract-ZipEntry {
   param($Zip, [string]$Path, [string]$Destination)
   $Entry = Get-ZipEntry $Zip $Path
   if ($null -eq $Entry) { throw "Patch entry is missing: $Path" }
-  $DestinationFull = [System.IO.Path]::GetFullPath($Destination)
-  $Parent = [System.IO.Path]::GetDirectoryName($DestinationFull)
-  New-Item $Parent -ItemType Directory -Force | Out-Null
+  Write-ZipEntryFile $Entry $Destination
+}
+
+function Write-ZipEntryFile {
+  param($Entry, [string]$Destination)
+  Initialize-PortableFileIO
   $ZipInput = $Entry.Open()
   try {
-    $Output = [System.IO.File]::Open($DestinationFull, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    $Output = [PangeaPortableFileIO]::Open($Destination, $true)
     try { $ZipInput.CopyTo($Output) } finally { $Output.Dispose() }
   } finally { $ZipInput.Dispose() }
 }
@@ -836,6 +1053,7 @@ function Extract-ZipEntry {
 function Apply-VerifiedPatch {
   param([string]$Archive, [string]$BaseRoot, [string]$Destination)
   Add-Type -AssemblyName System.IO.Compression.FileSystem
+  Initialize-PortableFileIO
   $Zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
   try {
     $Patch = Read-ZipEntryText $Zip 'pangea-patch-manifest.json' | ConvertFrom-Json
@@ -862,23 +1080,20 @@ function Apply-VerifiedPatch {
       if ($null -eq $Entry) { throw "Patch payload is missing: $($File.path)" }
     }
 
-    New-Item $Destination -ItemType Directory -Force | Out-Null
+    [PangeaPortableFileIO]::EnsureDirectory($Destination)
     $Completed = 0; $LastProgress=[DateTime]::UtcNow
     foreach ($File in $TargetManifest.files) {
       $Relative = [string]$File.path
-      $TargetPath = Join-Path $Destination ($Relative.Replace('/', '\'))
+      $TargetPath = [PangeaPortableFileIO]::Child($Destination, $Relative)
       $Key = $Relative.ToLowerInvariant()
       if ($Payload.ContainsKey($Key)) {
         Extract-ZipEntry $Zip ("payload/" + $Relative) $TargetPath
       } else {
-        $BasePath = Join-Path $BaseRoot ($Relative.Replace('/', '\'))
-        if (-not (Test-Path -LiteralPath $BasePath -PathType Leaf)) { throw "Base package is missing unchanged file: $Relative" }
-        $Parent = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($TargetPath))
-        New-Item $Parent -ItemType Directory -Force | Out-Null
-        Copy-Item -LiteralPath $BasePath -Destination $TargetPath -Force
+        $BasePath = [PangeaPortableFileIO]::Child($BaseRoot, $Relative)
+        if (-not [PangeaPortableFileIO]::IsFile($BasePath)) { throw "Base package is missing unchanged file: $Relative" }
+        [PangeaPortableFileIO]::Copy($BasePath, $TargetPath)
       }
-      if ((Get-Item -LiteralPath $TargetPath).Length -ne [long]$File.size) { throw "Patched file size mismatch: $Relative" }
-      if ((Get-FileHash -LiteralPath $TargetPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne ([string]$File.sha256)) { throw "Patched file hash mismatch: $Relative" }
+      [PangeaPortableFileIO]::Verify($TargetPath, [long]$File.size, [string]$File.sha256, $Relative)
       $Completed++
       if ($Completed % 100 -eq 0 -or $Completed -eq $TargetManifest.files.Count -or ([DateTime]::UtcNow-$LastProgress).TotalSeconds -ge 2) {
         Set-UpdateStage "正在重建并校验补丁：$Completed / $($TargetManifest.files.Count) 个文件" (42 + [int](24 * $Completed / $TargetManifest.files.Count)) 'rebuild' $Completed $TargetManifest.files.Count
@@ -923,11 +1138,8 @@ try {
 }
 if ($WatchUpdate) { Watch-UpdateWindow; exit 0 }
 
-$Leaf = [IO.Path]::GetFileName($InstallRoot.TrimEnd('\'))
-$Nonce = [Guid]::NewGuid().ToString('N')
-$CandidateRoot = Join-Path $InstallParent "$Leaf.update-$Nonce"
-$BackupRoot = Join-Path $InstallParent "$Leaf.previous-$Nonce"
-$FailedRoot = Join-Path $InstallParent "$Leaf.failed-$Nonce"
+$UpdateWorkspace = $null
+$CandidateRoot = $null; $BackupRoot = $null; $FailedRoot = $null
 $OriginalMoved = $false; $Swapped = $false; $NewProcess = $null
 $script:OwnedUpdateProcesses = @()
 $script:AutomaticUpdateCleanup = $Plan.PSObject.Properties['allow_owned_process_cleanup'] -and $Plan.allow_owned_process_cleanup -eq $true
@@ -992,6 +1204,13 @@ try {
   if ($ActualSha256 -ne $ExpectedSha256) { throw 'The downloaded update package no longer matches the signed release.' }
   if (-not $ExecutableName.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) { throw 'The portable executable name is invalid.' }
 
+  Initialize-PortableFileIO
+  $UpdateWorkspace = [PangeaPortableFileIO]::CreateWorkspace($InstallParent)
+  $CandidateRoot = Join-Path $UpdateWorkspace 'new'
+  $BackupRoot = Join-Path $UpdateWorkspace 'old'
+  $FailedRoot = Join-Path $UpdateWorkspace 'failed'
+  Write-UpdateLog "update directories: new=$CandidateRoot; backup=$BackupRoot"
+
   if ($PackageType -eq 'patch') {
     Set-UpdateStage '正在根据补丁重建新版本，并逐文件校验…' 42 'rebuild'
     if ([string]::IsNullOrWhiteSpace($ExpectedBaseVersion)) { throw 'Patch base version is missing.' }
@@ -1021,58 +1240,55 @@ try {
   $Swapped = $true
 
   $UpdatedExecutable = Join-Path $InstallRoot $ExecutableName
-  Remove-Item -LiteralPath $HealthMarker -Force -ErrorAction SilentlyContinue
-  $HealthArgument = "--pangea-update-health=`"$HealthMarker`""
+  $LaunchLog = Join-Path ([IO.Path]::GetDirectoryName($PlanPath)) 'desktop-start.log'
   Set-UpdateStage '正在启动新版本…' 82 'start-version'
-  $NewProcess = Start-Process -FilePath $UpdatedExecutable -ArgumentList $HealthArgument -PassThru
-  Write-UpdateLog "started PANGEA Desktop $ExpectedVersion as process $($NewProcess.Id)"
-  Set-UpdateStage '正在等待新版本健康检查，最长等待 150 秒…' 92 'health-check'
-  $Deadline = (Get-Date).AddSeconds(150)
-  $LastHealthProgress=[DateTime]::UtcNow
-  while ((Get-Date) -lt $Deadline) {
-    if (Test-Path -LiteralPath $HealthMarker -PathType Leaf) {
-      Write-UpdateLog "PANGEA Desktop $ExpectedVersion reported healthy"
-      Set-UpdateStage '新版健康检查通过，正在恢复资源管理器并清理备份…' 97 'cleanup'
-      $SuccessMessage='升级完成，新版本已通过健康检查并重新启动。'
-      try { Complete-ExplorerRecovery } catch { $SuccessMessage+=" 资源管理器恢复提示：$($_.Exception.Message)"; Write-UpdateLog $SuccessMessage }
-      if (Test-Path -LiteralPath $BackupRoot) {
-        try { Remove-PortableDirectory $BackupRoot } catch { $SuccessMessage+=" 旧版本备份暂未清理：$BackupRoot"; Write-UpdateLog $_.Exception.Message }
-      }
-      Write-UpdateResult 'success' $SuccessMessage
-      Write-UpdateProgress -State success -Stage 'complete' -Message $SuccessMessage -Percent 100
-      exit 0
-    }
-    if ($NewProcess.HasExited) { throw 'Updated PANGEA Desktop exited before reporting healthy.' }
-    if (([DateTime]::UtcNow-$LastHealthProgress).TotalSeconds -ge 5) {
-      $Remaining=[Math]::Max(0,[int]($Deadline-(Get-Date)).TotalSeconds)
-      Set-UpdateStage "正在等待新版本健康检查，超时回滚倒计时 $Remaining 秒…" 92 'health-check'
-      $LastHealthProgress=[DateTime]::UtcNow
-    }
-    Start-Sleep -Milliseconds 500
-    $NewProcess.Refresh()
+  $NewProcess = Start-PortableDesktop $UpdatedExecutable $HealthMarker $LaunchLog
+  Wait-PortableDesktopHealthy $NewProcess $HealthMarker $ExpectedVersion | Out-Null
+  Set-UpdateStage '新版健康检查通过，正在恢复资源管理器并清理备份…' 97 'cleanup'
+  $SuccessMessage='升级完成，新版本已通过健康检查并重新启动。'
+  try { Complete-ExplorerRecovery } catch { $SuccessMessage+=" 资源管理器恢复提示：$($_.Exception.Message)"; Write-UpdateLog $SuccessMessage }
+  if (Test-Path -LiteralPath $BackupRoot) {
+    try { Remove-PortableDirectory $BackupRoot } catch { $SuccessMessage+=" 旧版本备份暂未清理：$BackupRoot"; Write-UpdateLog $_.Exception.Message }
   }
-  throw 'Updated PANGEA Desktop did not report healthy before the rollback timeout.'
+  # Delete only an empty workspace; a retained backup must survive cleanup.
+  try { [IO.Directory]::Delete($UpdateWorkspace, $false) } catch { Write-UpdateLog "update directory retained: $UpdateWorkspace" }
+  Write-UpdateResult 'success' $SuccessMessage
+  Write-UpdateProgress -State success -Stage 'complete' -Message $SuccessMessage -Percent 100
+  exit 0
 } catch {
   $FailureMessage = $_.Exception.Message
   Write-UpdateLog "update failed: $FailureMessage"
   Write-UpdateLog "failed operation: $($_.InvocationInfo.PositionMessage)"
   Set-UpdateStage '升级失败，正在检查并恢复原版本，请勿关闭计算机…' 35 'rollback'
-  if ($NewProcess -and -not $NewProcess.HasExited) {
-    Stop-Process -Id $NewProcess.Id -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
+  if ($NewProcess) {
+    try {
+      $NewProcess.Refresh()
+      if (-not $NewProcess.HasExited) {
+        # Capture this attempted version's descendants before stopping its main
+        # process. Any remaining runtime holders can then be identity-checked
+        # by the same lock resolver during rollback, not guessed from a PID.
+        try { $script:OwnedUpdateProcesses += @(Get-OwnedUpdateProcesses $NewProcess.Id $UpdatedExecutable) }
+        catch { Write-UpdateLog "Could not snapshot new-version children: $($_.Exception.Message)" }
+        $NewIdentity = [pscustomobject]@{ Id=$NewProcess.Id; Created=$NewProcess.StartTime.ToUniversalTime().ToFileTimeUtc(); Executable=$UpdatedExecutable }
+        $script:OwnedUpdateProcesses += $NewIdentity
+        Initialize-HandleInspector
+        $Stopped = [PangeaUpdateHandles]::Stop($NewIdentity.Id, $NewIdentity.Created)
+        Write-UpdateLog "new-version process stopped before rollback: pid=$($NewIdentity.Id); stopped=$Stopped"
+      }
+    } catch { Write-UpdateLog "Could not stop new-version process: $($_.Exception.Message)" }
   }
   $Restored = -not $OriginalMoved
   $Rollback=if ($OriginalMoved) { 'failed' } else { 'not_needed' }
   try {
     if ($Swapped) {
-      if (Test-Path -LiteralPath $InstallRoot) { Move-UpdateDirectory $InstallRoot $FailedRoot }
+      if (Test-Path -LiteralPath $InstallRoot) { Move-UpdateDirectory $InstallRoot $FailedRoot -ResolveLocks }
       if (Test-Path -LiteralPath $BackupRoot) {
-        Move-UpdateDirectory $BackupRoot $InstallRoot
+        Move-UpdateDirectory $BackupRoot $InstallRoot -ResolveLocks
         $Restored=$true; $Rollback='restored'
         Write-UpdateLog 'previous PANGEA Desktop version restored'
       }
     } elseif ($OriginalMoved -and -not (Test-Path -LiteralPath $InstallRoot) -and (Test-Path -LiteralPath $BackupRoot)) {
-      Move-UpdateDirectory $BackupRoot $InstallRoot
+      Move-UpdateDirectory $BackupRoot $InstallRoot -ResolveLocks
       $Restored=$true; $Rollback='restored'
       Write-UpdateLog 'previous PANGEA Desktop directory restored'
     }
@@ -1083,14 +1299,36 @@ try {
   }
   if ($Restored) {
     foreach ($CleanupRoot in @($CandidateRoot,$FailedRoot)) {
-      if (Test-Path -LiteralPath $CleanupRoot) { try { Remove-PortableDirectory $CleanupRoot } catch { Write-UpdateLog $_.Exception.Message } }
+      if ($CleanupRoot -and (Test-Path -LiteralPath $CleanupRoot)) { try { Remove-PortableDirectory $CleanupRoot } catch { Write-UpdateLog $_.Exception.Message } }
     }
+    if ($UpdateWorkspace) { try { [IO.Directory]::Delete($UpdateWorkspace, $false) } catch { Write-UpdateLog "update directory retained: $UpdateWorkspace" } }
     if (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf) {
+      $RecoveryProcess = $null
+      $RecoveryLog = Join-Path ([IO.Path]::GetDirectoryName($PlanPath)) 'rollback-start.log'
+      $RecoveryMarker = "$PlanPath.rollback-healthy.json"
       try {
-        Start-Process -FilePath $InstalledExecutable | Out-Null
-        $FailureMessage+=' 原版本文件可用，已发出旧版启动请求。'
-        Write-UpdateLog 'working PANGEA Desktop version restart requested'
-      } catch { $FailureMessage+=" 原版本文件已保留，但启动失败：$($_.Exception.Message)"; Write-UpdateLog $FailureMessage }
+        $PreviousVersion = $ExpectedBaseVersion
+        $PreviousManifestPath = Join-Path $InstallRoot 'resources\pangea-manifest.json'
+        if (Test-Path -LiteralPath $PreviousManifestPath -PathType Leaf) {
+          try {
+            $RecordedVersion = [string]((Get-Content -LiteralPath $PreviousManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json).product.version)
+            if (-not [string]::IsNullOrWhiteSpace($RecordedVersion)) { $PreviousVersion = $RecordedVersion }
+          }
+          catch { Write-UpdateLog "Could not read restored version metadata: $($_.Exception.Message)" }
+        }
+        # Publish the failure before the restored Desktop loads its update status.
+        Write-UpdateResult 'failed' ("$FailureMessage 原版本文件已保留，正在确认工作台恢复启动。") $Rollback
+        Set-UpdateStage '原版本文件已保留，正在重新启动工作台…' 36 'rollback-start'
+        $RecoveryProcess = Start-PortableDesktop $InstalledExecutable $RecoveryMarker $RecoveryLog
+        Wait-PortableDesktopHealthy $RecoveryProcess $RecoveryMarker $PreviousVersion -Stage 'rollback-health' -Percent 36 | Out-Null
+        $FailureMessage+=' 原版本文件已保留，工作台已重新启动并确认就绪。'
+      } catch {
+        $FailureMessage+=" 原版本文件已保留，但工作台恢复启动未确认：$($_.Exception.Message) 启动日志：$RecoveryLog（另见 .stdout / .stderr）。"
+        Write-UpdateLog $FailureMessage
+      } finally {
+        # Never kill a restored Desktop that is still starting after the timeout.
+        if ($RecoveryProcess) { $RecoveryProcess.Dispose() }
+      }
     } else { $FailureMessage+=' 未找到可启动的原版本程序，请查看日志。' }
   }
   try { Complete-ExplorerRecovery } catch { $FailureMessage+=" 资源管理器恢复失败：$($_.Exception.Message)"; Write-UpdateLog $FailureMessage }

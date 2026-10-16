@@ -16,6 +16,8 @@ on:
       - scripts/verify-portable-update-progress.ps1
       - scripts/verify-portable-update-locks.ps1
       - scripts/verify-portable-patch-apply.ps1
+      - scripts/verify-portable-long-paths.ps1
+      - scripts/verify-portable-rollback-start.ps1
       - scripts/verify-portable-user-data.ps1
       - scripts/verify-portable-handle-resolution.ps1
       - scripts/verify-portable-batch-cleanup.ps1
@@ -38,6 +40,12 @@ jobs:
       - name: Verify patch reconstruction and user data preservation
         shell: powershell
         run: ./scripts/verify-portable-patch-apply.ps1
+      - name: Verify Windows PowerShell 5.1 long-path patch and full-package IO
+        shell: powershell
+        run: ./scripts/verify-portable-long-paths.ps1
+      - name: Verify rollback Desktop launch environment and health confirmation
+        shell: powershell
+        run: ./scripts/verify-portable-rollback-start.ps1
       - name: Verify long repository paths, links and copy failures
         shell: powershell
         run: ./scripts/verify-portable-user-data.ps1
