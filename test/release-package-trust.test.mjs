@@ -13,7 +13,7 @@ const SIGNATURE = `${MANIFEST}.sig`
 const keys = generateKeyPairSync('ed25519')
 const otherKeys = generateKeyPairSync('ed25519')
 const publicKey = keys.publicKey.export({ format: 'pem', type: 'spki' })
-const options = { version: '1.0.0', channel: 'stable', publicKey }
+const options = { version: '2.0.0', channel: 'stable', publicKey }
 const patchScript = fileURLToPath(new URL('../scripts/create-signed-portable-patch.mjs', import.meta.url))
 const hasUnzipper = await dependencyAvailable('unzipper')
 const hasArchiver = await dependencyAvailable('archiver')
@@ -50,7 +50,7 @@ async function writeManifest(root, manifest, { privateKey = keys.privateKey, com
   return bytes
 }
 
-async function writePackage(root, { version = '1.0.0', files = {}, ...manifestOptions } = {}) {
+async function writePackage(root, { version = '2.0.0', files = {}, ...manifestOptions } = {}) {
   const entries = {
     'PANGEA Desktop.exe': 'fixture executable',
     'resources/app/unchanged.js': 'export const safe = true\n',
@@ -123,7 +123,7 @@ for (const change of ['manifest', 'signature', 'signature encoding', 'file hash'
 for (const [name, change] of [
   ['schema', manifest => { manifest.schema_version = 2 }],
   ['product', manifest => { manifest.product = 'Another product' }],
-  ['version', manifest => { manifest.version = '1.0.1' }],
+  ['version', manifest => { manifest.version = '2.0.1' }],
   ['channel', manifest => { manifest.channel = 'test' }],
   ['timestamp', manifest => { manifest.published_at = 'invalid date' }],
   ['platform', manifest => { manifest.platform = 'linux' }],
@@ -169,7 +169,7 @@ for (const unsafe of unsafePaths) {
 
 test('accepts signed test-channel versions and rejects mismatched version formats', async t => {
   const root = await temporary(t)
-  const version = '1.0.0-test.42.abcdef1'
+  const version = '2.0.0-test.42.abcdef1'
   const { manifest } = await writePackage(root, { version })
   manifest.channel = 'test'
   await writeManifest(root, manifest)
@@ -274,12 +274,12 @@ async function patchFixture(t) {
   const base = path.join(root, 'base')
   const target = path.join(root, 'target')
   await writePackage(base, { files: { 'resources/old.txt': 'delete me' } })
-  const result = await writePackage(target, { version: '1.0.1', compact: true, files: { 'PANGEA Desktop.exe': 'new executable', 'resources/new.txt': 'add me' } })
+  const result = await writePackage(target, { version: '2.0.1', compact: true, files: { 'PANGEA Desktop.exe': 'new executable', 'resources/new.txt': 'add me' } })
   const key = path.join(root, 'key.pem')
   await writeFile(key, keys.privateKey.export({ format: 'pem', type: 'pkcs8' }))
   const run = output => spawnSync(process.execPath, [
     patchScript, '--base-dir', base, '--target-dir', target, '--private-key', key,
-    '--from-version', '1.0.0', '--to-version', '1.0.1', '--channel', 'stable', '--output', output
+    '--from-version', '2.0.0', '--to-version', '2.0.1', '--channel', 'stable', '--output', output
   ], { encoding: 'utf8' })
   return { root, base, target, run, ...result }
 }
@@ -375,3 +375,13 @@ function crc32(bytes) {
   }
   return (crc ^ 0xffffffff) >>> 0
 }
+
+test('direct patch generator rejects retired 1.x before reading package files', patchOptions, async () => {
+  const result = spawnSync(process.execPath, [
+    patchScript, '--base-dir', 'absent-base', '--target-dir', 'absent-target', '--private-key', 'absent-key',
+    '--from-version', '1.0.9', '--to-version', '2.0.13', '--channel', 'stable', '--output', 'absent-output.zip'
+  ], { encoding: 'utf8' })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /Patch base must be 2.0.0 or newer/)
+  assert.doesNotMatch(result.stderr, /ENOENT/)
+})

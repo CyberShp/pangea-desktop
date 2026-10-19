@@ -2,7 +2,7 @@ import { readdir, readFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { args, repository, gh, paginate, parseVersion, fullName, patchName, downloadAsset, downloadPair, checkChecksum } from './historical-release-lib.mjs'
+import { args, repository, gh, paginate, parseVersion, fullName, patchName, downloadAsset, downloadPair, checkChecksum, isSupportedPatchBase } from './historical-release-lib.mjs'
 import { sha256 } from './release-package-trust.mjs'
 
 export function publicationNames(version, report) {
@@ -11,7 +11,7 @@ export function publicationNames(version, report) {
   const names = new Set()
   for (const row of report.bases) {
     if (row.status !== 'verified') continue
-    if (!parseVersion(row.version) || row.patch !== patchName(version, row.version) || !/^[a-f0-9]{64}$/.test(row.patch_sha256)) throw new Error('Invalid verified patch record')
+    if (!isSupportedPatchBase(row.version) || row.patch !== patchName(version, row.version) || !/^[a-f0-9]{64}$/.test(row.patch_sha256)) throw new Error('Invalid verified patch record')
     names.add(row.patch); names.add(`${row.patch}.sha256`)
   }
   return [...names].sort()

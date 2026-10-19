@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { paginate, parseVersion, olderVersion, classifyRelease, assetPair, args, patchName, uniqueReleases } from '../scripts/historical-release-lib.mjs'
+import { paginate, parseVersion, olderVersion, classifyRelease, assetPair, args, patchName, uniqueReleases, isSupportedPatchBase } from '../scripts/historical-release-lib.mjs'
 import { publicationNames } from '../scripts/publish-release-additions.mjs'
 test('history exhausts pagination without a baseline cap', async () => {
   const urls = []
@@ -67,4 +67,26 @@ test('concurrent pagination duplicates do not build a baseline twice and ambigui
   assert.throws(() => uniqueReleases([release, { id: 2, tag_name: release.tag_name }]), /Ambiguous/)
   assert.throws(() => uniqueReleases([release, { id: 1, tag_name: 'v1.0.1' }]), /Ambiguous/)
   assert.throws(() => uniqueReleases([{ tag_name: 'v1.0.0' }]), /Invalid/)
+})
+
+test('retires every pre-2.0 baseline before download eligibility, in both channels', () => {
+  for (const version of ['0.1.6', '1.0.3', '1.99.99', '1.99.99-test.999.abcdef0']) {
+    assert.equal(isSupportedPatchBase(version), false)
+    const channel = parseVersion(version).channel
+    const target = channel === 'stable' ? '2.0.13' : '2.0.13-test.1.abcdef0'
+    const row = classifyRelease({ tag_name: `v${version}` }, target, channel)
+    assert.equal(row.status, 'unsupported')
+    assert.match(row.reason, /minimum supported patch baseline 2.0.0/)
+  }
+  assert.equal(isSupportedPatchBase('2.0.0'), true)
+  assert.equal(isSupportedPatchBase('2.0.0-test.1.abcdef0'), true)
+  assert.equal(classifyRelease({tag_name:'v2.0.0'}, '2.0.13', 'stable').status, 'pending')
+})
+
+test('publisher rejects a stale report advertising a retired 1.x upgrade', () => {
+  assert.throws(() => publicationNames('2.0.13', {
+    target:'2.0.13', discovery_complete:true, bases:[{
+      version:'1.0.9', status:'verified', patch:patchName('2.0.13','1.0.9'), patch_sha256:'a'.repeat(64)
+    }]
+  }), /Invalid verified patch record/)
 })

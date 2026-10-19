@@ -30,12 +30,18 @@ export function olderVersion(source, target) {
   for (let i = 0; i < 3; i++) if (a.parts[i] !== b.parts[i]) return a.parts[i] < b.parts[i]
   return a.run < b.run
 }
+export const MINIMUM_PATCH_BASE_VERSION = '2.0.0'
+export function isSupportedPatchBase(version) {
+  const parsed = parseVersion(version)
+  return Boolean(parsed && parsed.parts[0] >= 2n)
+}
 export function classifyRelease(release, target, channel) {
   const version = release.tag_name?.replace(/^v/, '')
   if (!release.tag_name?.startsWith('v')) return { version, status: 'unsupported', reason: 'noncanonical release tag (expected v<version>)' }
   if (release.draft) return { version, status: 'unsupported', reason: 'draft release' }
   const parsed = parseVersion(version)
   if (!parsed) return { version, status: 'unsupported', reason: 'unsupported version format' }
+  if (!isSupportedPatchBase(version)) return { version, status: 'unsupported', reason: `below minimum supported patch baseline ${MINIMUM_PATCH_BASE_VERSION}; 1.x and older upgrade paths are retired` }
   if (parsed.channel !== channel) return { version, status: 'unsupported', reason: 'different channel' }
   if (!olderVersion(version, target)) return { version, status: 'unsupported', reason: 'not older than target' }
   return { version, status: 'pending' }

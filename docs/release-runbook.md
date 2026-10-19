@@ -21,6 +21,8 @@ Start `Build Windows package` (`release.yml`) on the approved source branch with
 | `channel` | `release` for stable, or `test` | Channel of the existing target release |
 | `version` | Base SemVer, such as `2.0.1` | Exact existing target version, such as `2.0.1` or `2.0.1-test.42.abcdef0` |
 
+The minimum supported patch baseline is **2.0.0** (including the 2.x test channel). **1.x and older upgrade paths are retired.** They are excluded before asset lookup, download, trust checks, or patch generation. Historical Releases and installers are retained; this policy does not delete them. Direct patch generation and backfill publication also reject retired 1.x sources.
+
 There is no manual `patch_from_version` input. Both modes discover release history automatically and produce a direct patch from each compatible historical base to the target. No intermediate release needs to be installed when a verified patch exists for the user's exact installed version.
 
 ### Build a new target
@@ -77,7 +79,7 @@ Run retries in a clean output directory (GitHub-hosted jobs provide a fresh work
 
 ## Historical coverage and verification
 
-The release tooling paginates through the entire GitHub Release history and its assets. It considers canonical `v<version>` tags, older target-compatible versions in the same channel, with the expected Windows x64 portable ZIP and checksum. Bases are processed serially and their temporary directories are cleaned up between versions; there is no arbitrary “last N releases” limit.
+The release tooling paginates through the entire GitHub Release history and its assets. It considers canonical `v<version>` tags, older target-compatible versions at or above 2.0.0 in the same channel, with the expected Windows x64 portable ZIP and checksum. Bases are processed serially and their temporary directories are cleaned up between versions; there is no arbitrary “last N releases” limit.
 
 Patch generation and offline/manual import remain separate: this workflow does not add automatic client update discovery or selection.
 
@@ -113,7 +115,7 @@ pangea-desktop-<version>-patch-report-<content-hash>.json
 
 The complete ZIP contains the application and its signed file manifest. Each patch contains only changed files plus the target manifest. Every imported package must have a version greater than the currently running application. Test and stable channels never cross. A patch must match the exact installed base version, but it may advance directly over multiple intermediate versions.
 
-The first build that introduces patch support must be installed as a complete ZIP. For example, users on `0.1.7-test.43.faea7da` must first install a complete migration build. A complete ZIP is also the fallback whenever no verified patch matches the installed version, or when reinstalling manually.
+No 1.x or older in-app upgrade path is supported. Users of retired versions must install a current complete package separately; this workflow does not validate migration from their old installation. For supported 2.x versions, the complete ZIP remains the fallback when no verified patch matches the installed version or when reinstalling manually.
 
 1. Find the installed version in the application and open the target GitHub Release's patch report.
 2. Download the matching exact-base patch and its `.sha256`. If no verified entry matches, download the complete ZIP and its `.sha256`. For a short-lived test build, use the workflow artifact from the completed GitHub Actions run.
@@ -124,10 +126,6 @@ The first build that introduces patch support must be installed as a complete ZI
 
 Users import one ZIP only. Keep prior versioned full ZIPs in the shared location when rollback or manual reinstallation may be needed.
 
-## 1.0.4 Archify repair (historical example)
+## Retired release history
 
-If `1.0.4` has never been published, dispatch `release.yml` on `langgraph` with `mode=build`, `channel=release`, `version=1.0.4`. Release history automatically supplies `1.0.3` and any other compatible older stable bases. If `1.0.4` already exists and only patch coverage is missing, dispatch `mode=backfill` for the exact target `1.0.4`. Keep the existing signing key and never replace an existing version with new bytes.
-
-This repair consumes the existing source-first records and source manifest. It requires neither `内部索引/工作台投影.json` nor rerunning historical analysis. The Agent workflow and Run schema remain unchanged. Only derived Archify views are written. Existing codetalks projection-backed views remain supported.
-
-The user imports the matching patch ZIP and selects **Restart and update**. The application becomes `1.0.4`; this is a restart-required update, not a hot patch. Historical Run IDs remain unchanged. New Run allocation still uses the existing object/date prefix and first unused directory number. Viewing historical Runs and resuming an unfinished analysis are separate compatibility requirements.
+The former 1.x Archify repair/backfill instructions are retired. Do not dispatch new 1.x upgrade paths or advertise old 1.x patch assets as supported. Existing historical release assets remain untouched.
