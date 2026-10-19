@@ -8,8 +8,8 @@ export async function assertReleaseVersionAvailable({
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? '')) {
     throw new Error('A valid GITHUB_REPOSITORY (owner/repo) is required.')
   }
-  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version ?? '')) {
-    throw new Error('Release version must be an exact SemVer such as 2.0.1.')
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-test\.(0|[1-9]\d*)\.[0-9a-f]{7})?$/.test(version ?? '')) {
+    throw new Error('Release version must be exact, such as 2.0.1 or 2.0.1-test.42.abcdef0.')
   }
   if (!token) throw new Error('GH_TOKEN is required to check release availability.')
   const base = new URL(apiUrl)

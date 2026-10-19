@@ -79,7 +79,7 @@ describe('PANGEA Desktop release contract', () => {
     expect(workflow).toContain('-RequireCurrentComponentHeads')
     expect(workflow).toContain('actions/upload-artifact@v4')
     expect(workflow).toContain('PANGEA_PACKAGE_CHANNEL')
-    expect(workflow).toContain('gh release upload')
+    expect(workflow).toContain('publish-release-additions.mjs')
     expect(workflow).not.toContain('PANGEA_ARTIFACT_')
     expect(workflow).not.toContain('sftp')
   })

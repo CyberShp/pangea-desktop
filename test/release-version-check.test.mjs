@@ -44,6 +44,26 @@ for (const [release, tag] of [[200, 200], [200, 404], [404, 200]]) {
   })
 }
 
+test('an unused exact test version is checked against both release and tag', async () => {
+  const f = fixture([200, 404, 404])
+  const version = '2.0.1-test.42.abcdef0'
+  assert.deepEqual(await assertReleaseVersionAvailable({ ...input, version, request: f.request }), {
+    repository: input.repository, tag: `v${version}`, available: true,
+  })
+  assert.ok(f.calls[1].url.endsWith(`/releases/tags/v${version}`))
+  assert.ok(f.calls[2].url.endsWith(`/git/ref/tags/v${version}`))
+})
+
+for (const [release, tag] of [[200, 200], [200, 404], [404, 200]]) {
+  test(`blocks occupied test versions too (${release}/${tag})`, async () => {
+    const f = fixture([200, release, tag])
+    await assert.rejects(assertReleaseVersionAvailable({
+      ...input, version: '2.0.1-test.42.abcdef0', request: f.request,
+    }), /Release version already exists: v2\.0\.1-test\.42\.abcdef0/)
+    assert.ok(f.calls.every(call => call.options.method === 'GET'))
+  })
+}
+
 for (const status of [401, 403, 404, 429, 500]) {
   test(`repository access failure HTTP ${status} cannot be mistaken for an unused version`, async () => {
     const f = fixture([status])
@@ -76,6 +96,8 @@ test('invalid input fails before network access', async () => {
   for (const patch of [
     { repository: '' }, { repository: '../repo/name' }, { token: '' },
     { version: '02.0.1' }, { version: 'v2.0.1' }, { version: '2.0.1-test.1' },
+    { version: '2.0.1-test.01.abcdef0' }, { version: '2.0.1-test.1.ABCDEF0' },
+    { version: '2.0.1-test.1.abcdef01' }, { version: '2.0.1-rc.1' },
     { apiUrl: 'http://api.github.com' }, { apiUrl: 'https://user:secret@api.github.com' },
   ]) {
     const f = fixture([])

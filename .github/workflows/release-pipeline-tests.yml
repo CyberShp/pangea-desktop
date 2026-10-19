@@ -1,0 +1,43 @@
+name: Release pipeline regression
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release*.yml
+      - scripts/*release*.mjs
+      - scripts/*historical*.mjs
+      - scripts/create-signed-portable-patch.mjs
+      - test/*release*.mjs
+      - test/*historical*.mjs
+      - test/release.test.ts
+      - test/portable-patch*.test.ts
+  push:
+    branches: [langgraph]
+    paths:
+      - .github/workflows/release*.yml
+      - scripts/*release*.mjs
+      - scripts/*historical*.mjs
+      - scripts/create-signed-portable-patch.mjs
+      - test/*release*.mjs
+      - test/*historical*.mjs
+      - test/release.test.ts
+      - test/portable-patch*.test.ts
+permissions:
+  contents: read
+jobs:
+  tooling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.9.0
+          cache: npm
+      - name: Install locked test dependencies without package lifecycle scripts
+        run: npm ci --ignore-scripts --legacy-peer-deps
+      - name: Verify trust, discovery, retry and immutable publication logic
+        # gh and pwsh are mocked by CLI tests; this job cannot publish a release.
+        run: node --test test/release-version-check.test.mjs test/historical-releases.test.mjs test/release-package-trust.test.mjs test/publish-release-additions.test.mjs test/build-historical-patches.test.mjs
+      - name: Verify existing package and patch contracts
+        run: npx --no-install vitest run test/release.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts
