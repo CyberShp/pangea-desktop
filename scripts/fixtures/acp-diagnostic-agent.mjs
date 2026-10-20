@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 const mode = process.env.PANGEA_FIXTURE_MODE ?? 'ok'
 if (process.argv.includes('--version')) { process.stdout.write('acp-fixture 1.0\n'); process.exit(0) }
 const send = value => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...value })}\n`)
-let sessionId = 'remote-fixture', pendingPrompt
+let sessionId = 'remote-fixture', pendingPrompt, promptCount = 0
 const update = value => send({ method: 'session/update', params: { sessionId, update: value } })
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line)
@@ -41,6 +41,39 @@ createInterface({ input: process.stdin }).on('line', line => {
     return
   }
   const text = request.params.prompt.map(block => block.text ?? '').join('')
+  promptCount++
+  if (mode.startsWith('lifecycle-')) {
+    const pending = (toolCallId, extra = {}) => update({ sessionUpdate: 'tool_call', toolCallId, title: 'Terminal', kind: 'execute', status: 'pending', rawInput: {}, ...extra })
+    if (mode === 'lifecycle-empty-pending') {
+      pending('chatcmpl-tool-a873a78f7e539d5e')
+      pending('chatcmpl-tool-9e4b74cbae3ac799')
+      pending('completed-tool', { status: 'in_progress', rawInput: { command: 'PRIVATE_COMMAND_BODY' } })
+      update({ sessionUpdate: 'tool_call_update', toolCallId: 'completed-tool', status: 'completed', rawOutput: { stdout: 'PRIVATE_OUTPUT_BODY', exitCode: 0 } })
+    } else if (mode === 'lifecycle-invalid-final') {
+      pending('invalid-final-tool')
+      // Invalid status/content can be silently defaulted by ACP SDK 0.25.1.
+      // An invalid title type reliably fails that same SDK notification schema.
+      update({ sessionUpdate: 'tool_call_update', toolCallId: 'invalid-final-tool', status: 'completed', title: { invalid: 'PRIVATE_INVALID_TITLE' }, rawOutput: { stdout: 'PRIVATE_OUTPUT_BODY', exitCode: 0 } })
+    } else if (mode === 'lifecycle-bounded') {
+      for (let index = 0; index < 320; index++) pending(`bounded-${index}`)
+      for (let index = 0; index < 20; index++) update({ sessionUpdate: 'tool_call_update', toolCallId: 'bounded-0', status: 'completed', title: { invalid: 'PRIVATE_INVALID_TITLE' } })
+    } else if (mode === 'lifecycle-cross-request') {
+      if (promptCount === 1) pending('old-tool')
+      else {
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'old-tool', title: 'late metadata' })
+        send({ method: 'session/update', params: { sessionId: 'foreign-fixture', update: { sessionUpdate: 'tool_call', toolCallId: 'foreign-tool', title: 'Terminal', kind: 'execute', status: 'pending', rawInput: {} } } })
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'foreign-tool', status: 'completed' })
+      }
+    } else {
+      pending('lifecycle-tool', { title: 'PRIVATE_TITLE_BODY', rawInput: { command: 'PRIVATE_COMMAND_BODY', token: 'PRIVATE_TOKEN_BODY' } })
+      update({ sessionUpdate: 'tool_call_update', toolCallId: 'lifecycle-tool', status: 'in_progress' })
+      update({ sessionUpdate: 'tool_call_update', toolCallId: 'lifecycle-tool', content: [{ type: 'content', content: { type: 'text', text: 'PRIVATE_PARTIAL_OUTPUT' } }] })
+      if (mode === 'lifecycle-normal') update({ sessionUpdate: 'tool_call_update', toolCallId: 'lifecycle-tool', status: 'completed', rawOutput: { stdout: 'PRIVATE_OUTPUT_BODY', exitCode: 0 } })
+    }
+    reply({ stopReason: 'end_turn' })
+    if (mode === 'lifecycle-late') setTimeout(() => update({ sessionUpdate: 'tool_call_update', toolCallId: 'lifecycle-tool', status: 'completed', rawOutput: { stdout: 'PRIVATE_LATE_OUTPUT', exitCode: 0 } }), 40)
+    return
+  }
   const init = text.split('Initialization arguments (JSON): ')[1]
   if (init) {
     const [command, ...args] = JSON.parse(init)

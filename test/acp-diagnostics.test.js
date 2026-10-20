@@ -2,7 +2,7 @@ import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { apply, Config } from '@deepseek-ai/dsh-subagent-acp'
 import { LocalSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-local'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 
 async function fixtureRun(mode, prompt, inspect, config = {}, request = {}) {
   const context = new Context()
@@ -51,6 +51,131 @@ it('isolates observer mutation, synchronous exceptions and asynchronous rejectio
     if (event.update) event.update.status = 'pending'
     return Promise.reject(new Error('observer async failure'))
   } })
+})
+
+it('summarizes the exact two empty pending Terminal calls without inferring execution or completion', async () => {
+  const events = []
+  await fixtureRun('lifecycle-empty-pending', 'inspect', (run, result) => {
+    expect(result).toMatchObject({ stopReason: 'completed', protocolStopReason: 'end_turn' })
+    const lifecycle = run.readDiagnostics().toolLifecycle
+    const prompt = events.find(event => event.type === 'prompt')
+    expect(lifecycle).toMatchObject({ schema_version: 1, request_id: prompt.request_id, remote_session_id: run.remoteSessionId,
+      unclosed_count: 2, pending_count: 2, in_progress_count: 0, unknown_count: 0, tools_truncated: false,
+      received_tool_events: 4, accepted_tool_events: 4, unaccepted_tool_events: 0, validation_error_count: 0, observer_error_count: 0 })
+    expect(lifecycle.captured_at_ms).toBeGreaterThanOrEqual(Date.parse(events.find(event => event.type === 'turn_end').at))
+    expect(lifecycle.tools.map(tool => tool.tool_id)).toEqual(['chatcmpl-tool-a873a78f7e539d5e', 'chatcmpl-tool-9e4b74cbae3ac799'])
+    for (const tool of lifecycle.tools) {
+      expect(tool).toMatchObject({ status: 'pending', kind: 'execute', request_id: prompt.request_id, remote_session_id: run.remoteSessionId,
+        seen_in_progress: false, input_observed: true, input_nonempty: false, output_observed: false,
+        received_update_count: 1, accepted_update_count: 1, last_received_status: 'pending' })
+      expect(tool.first_seen_at_ms).toBeLessThanOrEqual(tool.last_update_at_ms)
+    }
+    expect(events.find(event => event.type === 'tool_lifecycle').tool_lifecycle).toMatchObject({ unclosed_count: 2, pending_count: 2 })
+    const raw = events.filter(event => event.type === 'acp_tool_transport')
+    expect(raw).toHaveLength(4)
+    expect(raw.every(event => event.phase === 'received' && event.schema_valid)).toBe(true)
+    expect(events.indexOf(raw[0])).toBeLessThan(events.findIndex(event => event.type === 'session_update'))
+  }, {}, { onSessionEvent: event => events.push(event) })
+})
+
+it('retains received terminal metadata when the real SDK rejects the notification before its callback', async () => {
+  const events = [], sdkErrors = vi.spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    await fixtureRun('lifecycle-invalid-final', 'inspect', (run, result) => {
+      expect(result.stopReason).toBe('completed')
+      expect(sdkErrors).toHaveBeenCalledWith('Error handling notification', expect.anything(), expect.anything())
+      const lifecycle = run.readDiagnostics().toolLifecycle
+      expect(lifecycle).toMatchObject({ unclosed_count: 1, pending_count: 1, received_tool_events: 2, accepted_tool_events: 1,
+        unaccepted_tool_events: 1, validation_error_count: 1, validation_errors_truncated: false })
+      expect(lifecycle.tools[0]).toMatchObject({ status: 'pending', last_received_status: 'completed', output_observed: true,
+        received_update_count: 2, accepted_update_count: 1 })
+      expect(lifecycle.validation_errors[0]).toMatchObject({ tool_id: 'invalid-final-tool', code: 'invalid_union', path: ['update'] })
+      expect(events.filter(event => event.type === 'session_update' && event.update.toolCallId === 'invalid-final-tool')).toHaveLength(1)
+      expect(events.find(event => event.type === 'acp_tool_transport' && event.status === 'completed')).toMatchObject({ schema_valid: false })
+      expect(JSON.stringify([lifecycle, ...events.filter(event => ['acp_tool_transport', 'tool_lifecycle'].includes(event.type))])).not.toContain('PRIVATE_')
+    }, {}, { onSessionEvent: event => events.push(event) })
+  } finally { sdkErrors.mockRestore() }
+})
+
+it('keeps successful complete lifecycles quiet and observes partial input/output without storing bodies', async () => {
+  const events = []
+  await fixtureRun('lifecycle-normal', 'inspect', run => {
+    expect(run.readDiagnostics().toolLifecycle).toMatchObject({ unclosed_count: 0, tools: [], received_tool_events: 4, accepted_tool_events: 4, unaccepted_tool_events: 0 })
+    expect(events.some(event => event.type === 'tool_lifecycle')).toBe(false)
+  }, {}, { onSessionEvent: event => events.push(event) })
+  await fixtureRun('lifecycle-partial', 'inspect', run => {
+    const lifecycle = run.readDiagnostics().toolLifecycle
+    expect(lifecycle).toMatchObject({ unclosed_count: 1, in_progress_count: 1, received_tool_events: 3, accepted_tool_events: 3 })
+    expect(lifecycle.tools[0]).toMatchObject({ status: 'in_progress', seen_in_progress: true, input_observed: true,
+      input_nonempty: true, output_observed: true, last_received_status: 'in_progress' })
+    expect(JSON.stringify(lifecycle)).not.toContain('PRIVATE_')
+    lifecycle.tools[0].status = 'completed'
+    lifecycle.tools[0].input_observed = false
+    lifecycle.validation_errors.push({ code: 'observer mutation' })
+    expect(run.readDiagnostics().toolLifecycle.tools[0]).toMatchObject({ status: 'in_progress', input_observed: true })
+    expect(run.readDiagnostics().toolLifecycle.validation_errors).toEqual([])
+  }, {}, { onDiagnostic: diagnostic => {
+    if (diagnostic.toolLifecycle.tools[0]) diagnostic.toolLifecycle.tools[0].status = 'completed'
+    throw new Error('diagnostic observer failure')
+  }, onSessionEvent: event => {
+    if (event.type === 'tool_lifecycle') event.tool_lifecycle.tools[0].status = 'completed'
+    if (event.type === 'acp_tool_transport') { event.status = 'completed'; throw new Error('transport observer failure') }
+    return Promise.reject(new Error('event observer failure'))
+  } })
+  expect(JSON.stringify(events.filter(event => event.type === 'acp_tool_transport'))).not.toContain('PRIVATE_')
+})
+
+it('continues observing late terminal updates and preserves the earlier end-of-turn snapshot', async () => {
+  const events = []
+  let notifyLate
+  const late = new Promise(resolve => { notifyLate = resolve })
+  await fixtureRun('lifecycle-late', 'inspect', async run => {
+    const paused = events.find(event => event.type === 'tool_lifecycle')
+    expect(paused.tool_lifecycle).toMatchObject({ unclosed_count: 1, in_progress_count: 1 })
+    await late
+    expect(run.readDiagnostics().toolLifecycle).toMatchObject({ unclosed_count: 0, received_tool_events: 4, accepted_tool_events: 4 })
+    expect(paused.tool_lifecycle.unclosed_count).toBe(1)
+    const ingress = events.find(event => event.type === 'acp_tool_transport' && event.status === 'completed')
+    expect(ingress.request_id).toBe(paused.request_id)
+    expect(events.indexOf(ingress)).toBeGreaterThan(events.findIndex(event => event.type === 'turn_end'))
+  }, {}, { onSessionEvent: event => { events.push(event); if (event.type === 'session_update' && event.update.status === 'completed') notifyLate() } })
+})
+
+it('retains prior request and actual remote session provenance without changing existing active-tool policy', async () => {
+  const events = []
+  await fixtureRun('lifecycle-cross-request', 'inspect', async run => {
+    await run.continuePrompt([{ type: 'text', text: 'next request' }])
+    const prompts = events.filter(event => event.type === 'prompt')
+    const lifecycle = run.readDiagnostics().toolLifecycle
+    expect(lifecycle.request_id).toBe(prompts[1].request_id)
+    // The existing execution map still resets statuses each turn. This change
+    // reports that behavior and the original owner; it does not silently fix it.
+    expect(lifecycle.tools[0]).toMatchObject({ tool_id: 'old-tool', status: 'unknown', request_id: prompts[0].request_id,
+      remote_session_id: 'remote-fixture', received_update_count: 2, accepted_update_count: 2 })
+    const foreign = events.filter(event => event.type === 'acp_tool_transport' && event.tool_id === 'foreign-tool')
+    expect(foreign).toEqual([
+      expect.objectContaining({ remote_session_id: 'foreign-fixture', request_id: prompts[1].request_id, status: 'pending' }),
+      expect.objectContaining({ remote_session_id: 'remote-fixture', request_id: null, status: 'completed' }),
+    ])
+  }, {}, { onSessionEvent: event => events.push(event) })
+})
+
+it('bounds retained evidence and summaries while keeping totals and old unresolved tools', async () => {
+  const sdkErrors = vi.spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    await fixtureRun('lifecycle-bounded', 'inspect', run => {
+      const lifecycle = run.readDiagnostics().toolLifecycle
+      expect(lifecycle).toMatchObject({ unclosed_count: 320, pending_count: 320, tools_truncated: true,
+        received_tool_events: 340, accepted_tool_events: 320, unaccepted_tool_events: 20,
+        validation_error_count: 20, validation_errors_truncated: true })
+      expect(lifecycle.tools).toHaveLength(50)
+      expect(lifecycle.validation_errors).toHaveLength(16)
+      expect(lifecycle.evidence_evicted_count).toBeGreaterThan(0)
+      expect(lifecycle.tools[0]).toMatchObject({ tool_id: 'bounded-0', status: 'pending', received_update_count: 21, accepted_update_count: 1, last_received_status: 'completed' })
+      expect(lifecycle.tools.some(tool => tool.evidence_missing)).toBe(false)
+      expect(JSON.stringify(lifecycle)).not.toContain('PRIVATE_')
+    })
+  } finally { sdkErrors.mockRestore() }
 })
 
 it('retains thought updates and actual permission decisions', async () => {
