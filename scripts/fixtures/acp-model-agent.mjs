@@ -1,7 +1,12 @@
 import { createInterface } from 'node:readline'
-import { appendFileSync } from 'node:fs'
-const mode = process.env.PANGEA_FIXTURE_MODE
-let model = 'fixture/default'
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
+const fixtureMode = process.env.PANGEA_FIXTURE_MODE
+const mode = fixtureMode.replace('-drift', '')
+// Discovery and analysis use separate processes. Simulate a changed Agent default
+// between them to verify that the host freezes the discovered model ID.
+const defaultStatePath = process.env.PANGEA_FIXTURE_DEFAULT_STATE
+let model = fixtureMode.endsWith('-drift') && existsSync(defaultStatePath) ? 'fixture/selected' : 'fixture/default'
+if (fixtureMode.endsWith('-drift')) writeFileSync(defaultStatePath, model)
 let pendingPrompt, promptCount = 0
 const options = () => [{ id: 'llm', name: 'Model', category: 'model', type: 'select', currentValue: model,
   options: [{ group: 'fixture', name: 'Fixture', options: [

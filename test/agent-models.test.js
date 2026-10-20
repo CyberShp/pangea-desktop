@@ -16,7 +16,7 @@ async function withProvider(mode, test) {
     resolveExecutable: (...args) => subprocess.resolveExecutable(...args) },
   subagents: { registerProvider(value) { provider = value } } }, Config({
     command: process.execPath, args: [path.resolve('scripts/fixtures/acp-model-agent.mjs')],
-    env: { PANGEA_FIXTURE_MODE: mode, PANGEA_FIXTURE_LOG: log }, disposeEofGraceMs: 100, disposeGraceMs: 100,
+    env: { PANGEA_FIXTURE_MODE: mode, PANGEA_FIXTURE_LOG: log, PANGEA_FIXTURE_DEFAULT_STATE: path.join(root, 'default-state') }, disposeEofGraceMs: 100, disposeGraceMs: 100,
   }))
   try {
     await test(provider, async () => (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse))
@@ -28,6 +28,7 @@ for (const mode of ['config', 'legacy', 'none']) {
     await withProvider(mode, async (provider, requests) => {
       const result = await provider.discoverModels({ cwd: process.cwd(), signal: new AbortController().signal })
       expect(result.models.map(item => item.id)).toEqual(mode === 'none' ? [] : ['fixture/default', 'fixture/selected'])
+      expect(result.current_model).toBe(mode === 'none' ? null : 'fixture/default')
       expect((await requests()).map(item => item.method)).toEqual(['initialize', 'session/new'])
     })
   })
@@ -43,6 +44,31 @@ for (const mode of ['config', 'legacy']) {
         expect(run.readDiagnostics().model).toBe('fixture/selected')
         expect((await requests()).map(item => item.method)).toEqual(['initialize', 'session/new',
           mode === 'legacy' ? 'session/set_model' : 'session/set_config_option', 'session/prompt', 'session/prompt'])
+      } finally { await run.dispose() }
+    })
+  })
+}
+for (const mode of ['config', 'legacy', 'config-drift', 'legacy-drift']) {
+  it(`freezes the discovered ${mode} default before planning and retains it in the same session`, async () => {
+    await withProvider(mode, async (provider, requests) => {
+      const catalog = await provider.discoverModels({ cwd: process.cwd(), signal: new AbortController().signal })
+      const resolvedDefault = catalog.models.find(item => item.id === catalog.current_model)?.id
+      expect(resolvedDefault).toBe('fixture/default')
+      const run = await provider.start({ parent: { session: { header: { cwd: process.cwd() } } },
+        signal: new AbortController().signal, prompt: [{ type: 'text', text: 'ready' }], agentOptions: { model: resolvedDefault } })
+      try {
+        expect((await run.result).output[0].text).toBe(resolvedDefault)
+        expect((await run.continuePrompt([{ type: 'text', text: 'planning' }])).output[0].text).toBe(resolvedDefault)
+        expect((await run.continuePrompt([{ type: 'text', text: 'continue planning' }])).output[0].text).toBe(resolvedDefault)
+        expect(run.readDiagnostics().model).toBe(resolvedDefault)
+        const calls = await requests()
+        const setMethod = mode.startsWith('legacy') ? 'session/set_model' : 'session/set_config_option'
+        expect(calls.map(item => item.method)).toEqual(['initialize', 'session/new', 'initialize', 'session/new',
+          setMethod, 'session/prompt', 'session/prompt', 'session/prompt'])
+        const selected = calls.find(item => item.method === setMethod)
+        expect(selected.params.value ?? selected.params.modelId).toBe(resolvedDefault)
+        expect(calls.filter(item => item.method === 'session/prompt').map(item => item.params.sessionId))
+          .toEqual([selected.params.sessionId, selected.params.sessionId, selected.params.sessionId])
       } finally { await run.dispose() }
     })
   })
