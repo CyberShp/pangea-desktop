@@ -35,6 +35,64 @@ function openCodeEditAction(configured, override, file) {
 }
 
 describe('patched ACP provider launch', () => {
+  for (const providerName of ['pangea-nga', 'pangea-codeagent', 'pangea-opencode']) {
+    it(`marks only explicit Desktop CLI workers for ${providerName}, including original-session recovery`, async () => {
+      const root = await mkdtemp(path.join(tmpdir(), 'pangea-cli-transport-'))
+      const context = new Context()
+      const runs = []
+      let provider
+      const env = { PANGEA_TEST_APP_ROOT: projectRoot, PANGEA_TEST_SCRATCH: '1', PANGEA_TEST_KEEP: 'preserved',
+        PANGEA_WORKER_TRANSPORT: 'standalone-custom',
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: 'configured/model', permission: { bash: 'ask', edit: 'deny' } }),
+        OPENCODE_PERMISSION: JSON.stringify({ bash: 'ask' }) }
+      const originalEnv = { ...env }
+      const before = process.env.PANGEA_WORKER_TRANSPORT
+      applyAcpProvider({ logger: { warn() {} }, subprocess: new LocalSubprocessRuntime(context),
+        subagents: { registerProvider(value) { provider = value } } }, {
+        providerName, command: process.execPath, args: [fixture], cwd: projectRoot, permission: 'allow', env,
+        disposeEofGraceMs: 1000, disposeGraceMs: 1000,
+      })
+      const request = (scratchDirectory, pangeaCliWorker) => ({ scratchDirectory, pangeaCliWorker,
+        prompt: [{ type: 'text', text: 'REPORT_WORKER_TRANSPORT' }],
+        parent: { session: { header: { cwd: root } } }, signal: new AbortController().signal })
+      const report = result => JSON.parse(result.output.map(item => item.type === 'text' ? item.text : '').join(''))
+      try {
+        const attempts = await Promise.allSettled([true, false, undefined, 'true'].map(async (flag, index) => {
+          const scratchDirectory = path.join(root, `worker-${index}`)
+          const run = await provider.start(request(scratchDirectory, flag))
+          runs.push(run)
+          return { run, scratchDirectory, value: report(await run.result) }
+        }))
+        for (const attempt of attempts) expect(attempt.status, attempt.reason?.message).toBe('fulfilled')
+        const [worker, ...others] = attempts.map(attempt => attempt.value)
+        expect(worker.value.transport).toBe('desktop-cli')
+        for (const item of others) {
+          expect(item.value.transport).toBe('standalone-custom')
+          expect(item.value.cwd).toBe(worker.value.cwd)
+          expect(item.value.keep).toBe('preserved')
+          expect(item.value.config).toBe(worker.value.config)
+          expect(item.value.permission).toBe(worker.value.permission)
+        }
+        expect(worker.value.config).toBe(env.OPENCODE_CONFIG_CONTENT)
+        expect(worker.value.permission).toBe(providerName === 'pangea-opencode'
+          ? JSON.stringify({ bash: 'ask', edit: 'deny' }) : env.OPENCODE_PERMISSION)
+        await worker.run.dispose()
+        const resumed = await provider.start({ ...request(worker.scratchDirectory, true), prompt: [],
+          resume: { taskId: worker.run.id, remoteSessionId: worker.run.remoteSessionId } })
+        runs.push(resumed)
+        expect(resumed.id).toBe(worker.run.id)
+        const restored = report(await resumed.continuePrompt([{ type: 'text', text: 'REPORT_WORKER_TRANSPORT' }]))
+        expect(restored).toEqual(worker.value)
+        expect(process.env.PANGEA_WORKER_TRANSPORT).toBe(before)
+        expect(env).toEqual(originalEnv)
+      } finally {
+        await Promise.allSettled(runs.map(run => run.dispose()))
+        await context.fiber.dispose()
+        await rm(root, { recursive: true, force: true })
+      }
+    }, 15000)
+  }
+
   it('isolates concurrent worker temp directories and restores the original session without changing cwd or config', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'pangea-acp-scratch-'))
     const directories = [path.join(root, 'worker one'), path.join(root, "worker's 二")]

@@ -506,7 +506,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
  	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
  });
-@@ -331,24 +638,71 @@
+@@ -331,24 +638,79 @@
  		this.ctx = ctx;
  		this.config = config;
  	}
@@ -516,6 +516,14 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
 +	async start(request) {
 +		const cwd = resolveCwd(this.config.cwd, request);
 +		const env = { ...this.config.env };
++		// Desktop CLI workers use the host's Graph identity, not the standalone
++		// OpenCode plugin dispatcher. Scope this marker to this child only.
++		if (request.pangeaCliWorker === true) {
++			if (process.platform === "win32") for (const key of Object.keys(env)) {
++				if (key.toUpperCase() === "PANGEA_WORKER_TRANSPORT") delete env[key];
++			}
++			env.PANGEA_WORKER_TRANSPORT = "desktop-cli";
++		}
 +		if (request.scratchDirectory !== void 0) {
 +			const scratch = request.scratchDirectory;
 +			if (typeof scratch !== "string" || !isAbsolute(scratch)) throw new Error("subagent-acp: scratchDirectory must be an absolute path");
@@ -586,10 +594,10 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modu
  	assertPositiveFinite("disposeGraceMs", resolved.disposeGraceMs);
  	if (resolved.cwd === "") throw new Error("subagent-acp: config cwd must not be empty — omit the key to inherit the parent session cwd");
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
-index 76b04b9..157335b 100644
+index 76b04b9..76e43ec 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/index.d.ts
-@@ -9,6 +9,12 @@
+@@ -9,6 +9,14 @@
  import type { Context } from '@deepseek-ai/cordis';
  import z from '@deepseek-ai/schemastery';
  import { type PermissionPolicy } from './run.ts';
@@ -597,12 +605,14 @@ index 76b04b9..157335b 100644
 +    interface SubagentStartRequest {
 +        /** Host-owned absolute temporary directory for this worker, preserved on resume. Not a filesystem sandbox. */
 +        readonly scratchDirectory?: string;
++        /** Desktop worker uses the host-bound Python CLI, not standalone PANGEA plugin tools. */
++        readonly pangeaCliWorker?: boolean;
 +    }
 +}
  export declare const name = "subagent-acp";
  export declare const inject: string[];
  /** Config: how to spawn and drive the child ACP agent process. */
-@@ -17,6 +23,8 @@ export interface Config {
+@@ -17,6 +25,8 @@ export interface Config {
      providerName: string;
      /** The executable to spawn for each run (the child ACP agent). */
      command: string;
@@ -611,7 +621,7 @@ index 76b04b9..157335b 100644
      /** Arguments passed to {@link command}. */
      args: string[];
      /**
-@@ -40,6 +48,8 @@ export interface Config {
+@@ -40,6 +50,8 @@ export interface Config {
       * ambient secrets do not leak implicitly.
       */
      env: Record<string, string>;

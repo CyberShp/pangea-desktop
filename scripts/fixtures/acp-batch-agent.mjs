@@ -54,6 +54,11 @@ class FixtureAgent {
     let content = scratchTest && promptText === 'REPORT_SCRATCH'
       ? JSON.stringify({ cwd: process.cwd(), sessionId, env: Object.fromEntries(['TEMP', 'TMP', 'TMPDIR', 'PANGEA_WORKER_SCRATCH', 'PANGEA_TEST_KEEP', 'OPENCODE_CONFIG_CONTENT', 'OPENCODE_PERMISSION'].map(name => [name, process.env[name]])) })
       : `ACP_BATCH_READY turn=${turn} ${JSON.stringify(process.argv.slice(2))} shell=${process.env.CODEAGENT3_WINDOWS_SHELL_TYPE ?? 'unset'}`
+    if (promptText === 'REPORT_WORKER_TRANSPORT') {
+      content = JSON.stringify({ cwd: process.cwd(), sessionId, transport: process.env.PANGEA_WORKER_TRANSPORT ?? null,
+        keep: process.env.PANGEA_TEST_KEEP ?? null, config: process.env.OPENCODE_CONFIG_CONTENT ?? null,
+        permission: process.env.OPENCODE_PERMISSION ?? null })
+    }
     if (promptText.startsWith('PERMISSION ')) {
       const request = JSON.parse(promptText.slice('PERMISSION '.length))
       const result = await this.connection.requestPermission({ sessionId,
