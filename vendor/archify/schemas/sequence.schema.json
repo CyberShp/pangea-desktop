@@ -49,7 +49,10 @@
         },
         "column_fit": {
           "description": "Horizontal participant layout. Omit this field or use fixed for the stable 86px boxes and 108px gap. Use spread when a wide viewBox would leave unused horizontal space or meaningful participant labels do not fit the fixed boxes; spread derives wider boxes and gaps from the viewBox without changing participant order or message semantics.",
-          "enum": ["fixed", "spread"]
+          "enum": [
+            "fixed",
+            "spread"
+          ]
         },
         "views": {
           "$ref": "common.schema.json#/$defs/guidedViews"
@@ -58,16 +61,28 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "mode": { "$ref": "common.schema.json#/$defs/legendMode" },
+            "mode": {
+              "$ref": "common.schema.json#/$defs/legendMode"
+            },
             "entries": {
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "default": { "$ref": "common.schema.json#/$defs/legendEntry" },
-                "emphasis": { "$ref": "common.schema.json#/$defs/legendEntry" },
-                "security": { "$ref": "common.schema.json#/$defs/legendEntry" },
-                "dashed": { "$ref": "common.schema.json#/$defs/legendEntry" },
-                "return": { "$ref": "common.schema.json#/$defs/legendEntry" }
+                "default": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                },
+                "emphasis": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                },
+                "security": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                },
+                "dashed": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                },
+                "return": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                }
               }
             }
           }
@@ -218,6 +233,64 @@
     },
     "cards": {
       "$ref": "common.schema.json#/$defs/cards"
+    },
+    "fragments": {
+      "description": "PANGEA optional combined fragments. alt operands are mutually exclusive; loop and opt have one guarded operand. Non-overlapping top-level fragments only.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "from",
+          "to",
+          "operands"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/id"
+          },
+          "kind": {
+            "enum": [
+              "alt",
+              "loop",
+              "opt"
+            ]
+          },
+          "from": {
+            "type": "number",
+            "minimum": 142
+          },
+          "to": {
+            "type": "number"
+          },
+          "label": {
+            "type": "string"
+          },
+          "operands": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "from",
+                "condition"
+              ],
+              "properties": {
+                "from": {
+                  "type": "number"
+                },
+                "condition": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

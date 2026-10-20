@@ -336,6 +336,7 @@ if (-not $SkipTests) {
     'test/acp-runtime-settings.test.ts',
     'test/acp-provider-launch.test.js',
     'test/archify-workflow.test.js',
+    'test/archify-sequence.test.js',
     'test/external-agent-provider-patches.test.ts',
     'test/pangea-product.test.ts',
     'test/pangea-product-runtime.test.js',

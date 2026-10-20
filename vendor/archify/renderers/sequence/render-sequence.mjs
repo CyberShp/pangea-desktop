@@ -81,10 +81,12 @@ function messageGeometry(message) {
   const from = participants.get(message.from);
   const to = participants.get(message.to);
   if (!from || !to || typeof message.y !== 'number') return null;
+  if (from.id === to.id) return { start: from.cx + 7, end: from.cx + 7, center: from.cx + 30, self: true,
+    points: [[from.cx + 7, message.y], [from.cx + 42, message.y], [from.cx + 42, message.y + 24], [from.cx + 7, message.y + 24]] };
   const direction = to.cx > from.cx ? 1 : -1;
   const start = from.cx + direction * 7;
   const end = to.cx - direction * 7;
-  return { start, end, center: (start + end) / 2 };
+  return { start, end, center: (start + end) / 2, points: [[start, message.y], [end, message.y]] };
 }
 
 function messageLabelBox(message, relationIndex = null) {
@@ -108,8 +110,8 @@ function messageRouteBox(message) {
   return {
     x: Math.min(geometry.start, geometry.end),
     y: message.y - 2,
-    width: Math.abs(geometry.end - geometry.start),
-    height: 4,
+    width: geometry.self ? 35 : Math.abs(geometry.end - geometry.start),
+    height: geometry.self ? 28 : 4,
   };
 }
 
@@ -126,7 +128,7 @@ function segmentLabelBox(segment) {
   return label;
 }
 
-const compositionFrames = asArray(sequence.segments).map((segment, index) => ({
+const compositionFrames = [...asArray(sequence.segments), ...asArray(sequence.fragments)].map((segment, index) => ({
   id: index,
   label: segment.label,
   kind: 'segment',
@@ -138,11 +140,12 @@ const compositionFrames = asArray(sequence.segments).map((segment, index) => ({
 }));
 
 function messagePath(message) {
-  return {
-    points: participants.has(message.from) && participants.has(message.to)
-      ? [[participants.get(message.from).cx, message.y], [participants.get(message.to).cx, message.y]]
-      : []
-  };
+  return { points: messageGeometry(message)?.points ?? [] };
+}
+
+function fragmentLabelBoxes(fragment) {
+  return asArray(fragment.operands).map(operand => ({ x: 62, y: operand.from + 5,
+    width: Math.max(34, textUnits(operand.condition) * 5.2 + 12), height: 18 }));
 }
 
 function validateSequence() {
@@ -174,13 +177,15 @@ function validateSequence() {
   for (const message of asArray(sequence.messages)) {
     if (!participants.has(message.from)) problems.push(`Message "${message.label}" references unknown source "${message.from}".`);
     if (!participants.has(message.to)) problems.push(`Message "${message.label}" references unknown target "${message.to}".`);
+    if (message.from === message.to && participants.has(message.from) && participants.get(message.from).cx + 48 > viewBox[0] - 40) problems.push(`Self message "${message.label}" needs 48px to the right of its participant.`);
+    if (message.from === message.to && message.y + 24 > layout.lifelineBottom - 18) problems.push(`Self message "${message.label}" extends below the readable timeline.`);
     if (typeof message.y !== 'number') problems.push(`Message "${message.label}" must provide a numeric y.`);
     if (message.y < layout.lifelineTop + 18 || message.y > layout.lifelineBottom - 18) {
       problems.push(`Message "${message.label}" sits outside the readable timeline — keep y between ${layout.lifelineTop + 18} and ${layout.lifelineBottom - 18}.`);
     }
     if (participants.has(message.from) && participants.has(message.to)) {
       const distance = Math.abs(participants.get(message.to).cx - participants.get(message.from).cx);
-      if (distance < 60) problems.push(`Message "${message.label}" spans ${Math.round(distance)}px (minimum 60px) — give its participants more column distance.`);
+      if (message.from !== message.to && distance < 60) problems.push(`Message "${message.label}" spans ${Math.round(distance)}px (minimum 60px) — give its participants more column distance.`);
     }
   }
 
@@ -291,6 +296,36 @@ function validateSequence() {
     }
   }
 
+  const fragments = asArray(sequence.fragments);
+  const fragmentIds = new Set();
+  for (const fragment of fragments) {
+    const operands = asArray(fragment.operands);
+    if (!fragment.id || fragmentIds.has(fragment.id)) problems.push('Fragment ids must be present and unique.');
+    fragmentIds.add(fragment.id);
+    if (!['alt', 'loop', 'opt'].includes(fragment.kind)) problems.push(`Fragment "${fragment.id}" has unsupported kind; use alt, loop or opt.`);
+    if (!isFinitePoint(fragment.from, fragment.to) || fragment.to <= fragment.from || fragment.from < layout.lifelineTop || fragment.to > layout.lifelineBottom) problems.push(`Fragment "${fragment.id}" has invalid timeline bounds.`);
+    if ((fragment.kind === 'alt' && operands.length < 2) || (fragment.kind !== 'alt' && operands.length !== 1)) problems.push(`Fragment "${fragment.id}" requires ${fragment.kind === 'alt' ? 'at least two' : 'one'} guarded operand(s).`);
+    const fragmentTitle = `${fragment.kind}${fragment.label ? ' · ' + fragment.label : ''}`;
+    if (textUnits(fragmentTitle) * 6 + 20 > viewBox[0] - 120) problems.push(`Fragment "${fragment.id}" title exceeds its frame; shorten the title or widen the canvas.`);
+    for (let i = 0; i < operands.length; i++) {
+      const operand = operands[i], end = operands[i + 1]?.from ?? fragment.to;
+      for (const message of asArray(sequence.messages)) {
+        if (message.from === message.to && message.y >= operand.from && message.y < end && message.y + 24 >= end - 4) problems.push(`Fragment "${fragment.id}" self message "${message.label}" crosses its operand boundary; keep the whole return leg inside the same operand.`);
+      }
+      if (!Number.isFinite(operand.from) || operand.from < fragment.from + 24 || end - operand.from < 45 || !String(operand.condition ?? '').trim()) problems.push(`Fragment "${fragment.id}" operand ${i + 1} requires an ordered start, condition and at least 45px of space.`);
+      const box = fragmentLabelBoxes(fragment)[i];
+      if (box.x + box.width > viewBox[0] - 55) problems.push(`Fragment "${fragment.id}" guard label exceeds its frame.`);
+      for (const message of asArray(sequence.messages)) {
+        const label = messageLabelBox(message), route = messageRouteBox(message);
+        if (label && (rectsOverlap(box, label, 3) || rectsOverlap(box, route, 3))) problems.push(`Fragment "${fragment.id}" guard overlaps message "${message.label}"; leave at least 40px below the operand start.`);
+        if (message.y >= fragment.from && message.y < fragment.to && (message.y < operands[0]?.from + 38 || (i > 0 && Math.abs(message.y - operand.from) < 30))) problems.push(`Fragment "${fragment.id}" message "${message.label}" overlaps a fragment heading or else divider.`);
+      }
+    }
+  }
+  for (let i = 0; i < fragments.length; i++) for (let j = i + 1; j < fragments.length; j++) {
+    if (fragments[i].from < fragments[j].to && fragments[j].from < fragments[i].to) problems.push(`Fragments "${fragments[i].id}" and "${fragments[j].id}" overlap; nested fragments are not supported.`);
+  }
+
   for (const activation of asArray(sequence.activations)) {
     if (!participants.has(activation.participant)) problems.push(`Activation references unknown participant "${activation.participant}".`);
     if (activation.to <= activation.from) problems.push(`Activation for "${activation.participant}" has invalid time range — "to" must be greater than "from".`);
@@ -348,6 +383,24 @@ function renderSegmentLabel(segment, index) {
         </g>`;
 }
 
+function renderFragment(fragment) {
+  const title = `${fragment.kind}${fragment.label ? ' · ' + fragment.label : ''}`;
+  const tabWidth = Math.min(viewBox[0] - 120, Math.max(50, textUnits(title) * 6 + 20));
+  return `        <g data-sequence-fragment="${esc(fragment.id)}" data-fragment-kind="${esc(fragment.kind)}" aria-label="${esc(title)}">
+          <rect x="48" y="${fragment.from}" width="${viewBox[0] - 96}" height="${fragment.to - fragment.from}" class="c-lane" stroke-width="1.2"/>
+          <path d="M 48 ${fragment.from} h ${tabWidth} v 17 l -8 7 H 48 Z" class="c-mask" stroke="currentColor" stroke-width="0.8"/>
+          <text x="58" y="${fragment.from + 16}" class="t-primary" font-size="10" font-weight="600">${esc(title)}</text>
+          ${asArray(fragment.operands).map((operand, i) => `<g data-sequence-operand="${i}">${i ? `<path d="M 48 ${operand.from} H ${viewBox[0] - 48}" class="a-default" stroke-dasharray="6 4" stroke-width="1"/>` : ''}</g>`).join('')}
+        </g>`;
+}
+
+function renderFragmentLabels(fragment) {
+  return asArray(fragment.operands).map((operand, i) => {
+    const box = fragmentLabelBoxes(fragment)[i];
+    return `<g data-graph-role="fragment-guard"><rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" rx="3" class="c-mask"/><text x="${box.x + 6}" y="${box.y + 13}" class="t-primary" font-size="9">${esc(operand.condition)}</text></g>`;
+  }).join('\n');
+}
+
 function renderActivation(activation) {
   const participant = participants.get(activation.participant);
   const fill = componentFill[activation.type] || componentFill[participant.type] || 'c-external';
@@ -376,7 +429,9 @@ function messageLabel(message, x1, x2) {
 }
 
 function renderMessage(message, index) {
-  const { start, end } = messageGeometry(message);
+  const geometry = messageGeometry(message);
+  const { start, end } = geometry;
+  const route = geometry.points.map((point, i) => `${i ? 'L' : 'M'} ${point[0]} ${point[1]}`).join(' ');
   const [cls, marker] = arrowClass[message.variant || 'default'] || arrowClass.default;
   const strokeWidth = message.variant === 'emphasis' ? 1.8 : 1.4;
   const dash = message.variant === 'return' ? ' stroke-dasharray="3,5"' : '';
@@ -384,7 +439,7 @@ function renderMessage(message, index) {
     ? `\n        <text data-detail="fine" x="${Math.min(start, end) + 12}" y="${message.y + 18}" class="t-dim" font-size="7">${esc(message.note)}</text>`
     : '';
   return `        <g ${focusEdgeAttrs(message.from, message.to, message.label, index, message.id)}>
-          <path data-composition-edge-from="${esc(message.from)}" data-composition-edge-to="${esc(message.to)}"${message.id ? ` data-composition-edge-id="${esc(message.id)}"` : ''} data-composition-points="${routePointsValue([[start, message.y], [end, message.y]])}" d="M ${start} ${message.y} L ${end} ${message.y}" class="${cls}"${animateAttr(sequence.meta, 'edge', index)} stroke-width="${strokeWidth}"${dash} marker-end="url(#${marker})"/>
+          <path data-composition-edge-from="${esc(message.from)}" data-composition-edge-to="${esc(message.to)}"${message.id ? ` data-composition-edge-id="${esc(message.id)}"` : ''} data-composition-points="${routePointsValue(geometry.points)}" d="${route}" class="${cls}"${animateAttr(sequence.meta, 'edge', index)} stroke-width="${strokeWidth}"${dash} marker-end="url(#${marker})"/>
 ${messageLabel(message, start, end)}${note}
         </g>`;
 }
@@ -433,6 +488,9 @@ ${renderDefinitions()}
         <!-- Time Segments -->
 ${asArray(sequence.segments).map(renderSegment).join('\n\n')}
 
+        <!-- Combined fragments: operands are alternatives, not consecutive execution -->
+${asArray(sequence.fragments).map(renderFragment).join('\n')}
+
         <!-- Lifelines -->
 ${participantList.map(renderLifeline).join('\n')}
 
@@ -444,6 +502,8 @@ ${asArray(sequence.messages).map(renderMessage).join('\n\n')}
 
         <!-- Segment Labels -->
 ${asArray(sequence.segments).map(renderSegmentLabel).join('\n')}
+
+${asArray(sequence.fragments).map(renderFragmentLabels).join('\n')}
 
         <!-- Participants -->
 ${participantList.map(renderParticipant).join('\n\n')}
