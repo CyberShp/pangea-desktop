@@ -57,14 +57,16 @@ import {
 } from './window-raise'
 import {
   importPortableUpdatePackage,
+  handleInterruptedPortableUpdate,
   registerUpdateHandlers,
   startUpdateManager,
   stopUpdateManager
 } from './update/update-manager'
 import {
-  markPortableUpdateHealthy,
+  createPortableHealthReporter,
   portableUpdateHealthMarker
 } from './update/portable-update-health'
+import { acquirePortableUpdateAdmission } from './update/portable-update-admission'
 import type { RuntimeSnapshot } from '../shared/contracts'
 import { resolveHarnessLocale } from './application-locale'
 import { installContextMenu } from './context-menu'
@@ -1365,18 +1367,17 @@ async function showMobilePairing(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   if (process.platform === 'darwin') app.dock?.setIcon(desktopIconPath())
+  const updateHealthMarker = portableUpdateHealthMarker(process.argv, app.getPath('userData'))
+  if (await handleInterruptedPortableUpdate(updateHealthMarker)) return
   launchDirectory = await ensureLaunchRoot(app.getPath('userData'))
   await configurePangeaProduct()
   process.env.PANGEA_DESKTOP_PROVENANCE = JSON.stringify(desktopRuntimeIdentity(app.getAppPath(), app.getVersion()))
   registerUpdateHandlers()
   nativeTheme.themeSource = harnessThemePreference()
   createWindow()
-  const updateHealthMarker = portableUpdateHealthMarker(process.argv, app.getPath('userData'))
-  let updateHealthReported = false
+  const writeUpdateHealth = createPortableHealthReporter(updateHealthMarker, app.getVersion())
   const reportUpdateHealth = (): void => {
-    if (updateHealthReported) return
-    updateHealthReported = true
-    void markPortableUpdateHealthy(updateHealthMarker, app.getVersion()).catch((error) => {
+    void writeUpdateHealth().catch((error) => {
       console.warn('[portable-updater] failed to report product readiness', error)
     })
   }
@@ -1529,8 +1530,15 @@ async function bootstrap(): Promise<void> {
   if (!developmentBuild) {
     startUpdateManager({
       prepareToInstall: async () => {
-        if (await mobileBridge.hasRunningSessions()) {
-          throw new Error('当前仍有分析会话运行，请等待任务结束后再重启升级。')
+        const release = await acquirePortableUpdateAdmission(runtime.snapshot().url)
+        try {
+          if (await mobileBridge.hasRunningSessions()) {
+            throw new Error('当前仍有分析会话运行，请等待任务结束后再重启升级。')
+          }
+          return release
+        } catch (error) {
+          await release()
+          throw error
         }
       }
     })

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import type { UpdateInstallResult, UpdateStatus } from '../../shared/contracts'
@@ -10,6 +10,7 @@ import { initialUpdateStatus, reduceUpdateStatus, type UpdateStateEvent } from '
 import { launchPortableHelper } from './launch-portable-helper'
 import { stageUpdateHelper } from './stage-update-helper'
 import { canImportPortableUpdate } from './update-capability'
+import { isAuthorizedPortableHealthLaunch, readPendingPortableTransaction } from './portable-update-recovery'
 
 interface LoadedUpdateConfig {
   publicKeyPem: string
@@ -27,7 +28,8 @@ interface PortableUpdateResult {
 const LAST_UPDATE_RESULT = 'last-update-result.json'
 
 let status = initialUpdateStatus(app.getVersion())
-let prepareToInstall: (() => Promise<void>) | undefined
+type ReleaseUpdateAdmission = () => Promise<void>
+let prepareToInstall: (() => Promise<void | ReleaseUpdateAdmission>) | undefined
 let handlersRegistered = false
 let importing = false
 let installing = false
@@ -49,10 +51,43 @@ export function registerUpdateHandlers(): void {
   ipcMain.handle('updates:install', () => installImportedUpdate())
 }
 
-export function startUpdateManager(options: { prepareToInstall: () => Promise<void> }): void {
+export function startUpdateManager(options: { prepareToInstall: () => Promise<void | ReleaseUpdateAdmission> }): void {
   prepareToInstall = options.prepareToInstall
   loadedConfig = loadUpdateConfig()
   restoreLastUpdateFailure()
+}
+
+/** Run before profile/workspace migration, so a normal launch cannot alter an
+ * interrupted transaction's shared data. Only the live updater's verified child
+ * can proceed while a new version is awaiting its health confirmation. */
+export async function handleInterruptedPortableUpdate(healthMarker?: string): Promise<boolean> {
+  if (!app.isPackaged || process.platform !== 'win32') return false
+  const pending = await readPendingPortableTransaction(dirname(process.execPath), app.getPath('userData'))
+  if (!pending) return false
+  if (await isAuthorizedPortableHealthLaunch(pending, healthMarker, app.getVersion())) return false
+  const result = await dialog.showMessageBox({
+    type: 'warning', title: '上次升级尚未完成',
+    message: '检测到未完成的版本切换，需要先恢复工作台。',
+    detail: '若升级窗口仍在运行，请等待它完成。恢复操作会先检查升级是否仍在进行，并保留原版本和用户数据。',
+    buttons: ['恢复上次升级', '退出'], defaultId: 0, cancelId: 1, noLink: true
+  })
+  if (result.response === 0) {
+    const updateRoot = await mkdtemp(join(app.getPath('userData'), 'updates', 'run-'))
+    const helperPath = join(updateRoot, 'apply-update.ps1')
+    const planPath = join(updateRoot, 'update-plan.json')
+    await copyFile(join(process.resourcesPath, 'update', 'apply-portable-update.ps1'), helperPath)
+    await writeFile(planPath, JSON.stringify({
+      ...pending.plan, schema_version: 2, parent_pid: process.pid,
+      handoff_required: true, allow_owned_process_cleanup: true,
+      user_data_root: app.getPath('userData'),
+      health_marker: join(updateRoot, 'healthy.json'),
+      log_path: join(updateRoot, 'apply-update.log'),
+      result_path: join(app.getPath('userData'), 'updates', LAST_UPDATE_RESULT)
+    }, null, 2), 'utf8')
+    await launchPortableHelper(helperPath, planPath, { requireUiReady: true, recoverOnly: true })
+  }
+  app.quit()
+  return true
 }
 
 export async function importPortableUpdatePackage(): Promise<UpdateStatus> {
@@ -73,13 +108,20 @@ export async function importPortableUpdatePackage(): Promise<UpdateStatus> {
     properties: ['openFile'],
     filters: [{ name: 'PANGEA Desktop ZIP', extensions: ['zip'] }]
   }
-  const result = window
-    ? await dialog.showOpenDialog(window, dialogOptions)
-    : await dialog.showOpenDialog(dialogOptions)
-  const sourcePath = result.filePaths[0]
-  if (result.canceled || !sourcePath) return getUpdateStatus()
-
   importing = true
+  let result
+  try {
+    result = window
+      ? await dialog.showOpenDialog(window, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions)
+  } catch (error) {
+    importing = false
+    transition({ type: 'error', message: errorMessage(error) }, true)
+    return getUpdateStatus()
+  }
+  const sourcePath = result.filePaths[0]
+  if (result.canceled || !sourcePath) { importing = false; return getUpdateStatus() }
+
   transition({ type: 'check', manual: true, packageName: basename(sourcePath) })
   try {
     await clearStagedPackage()
@@ -130,15 +172,21 @@ export async function installImportedUpdate(): Promise<UpdateInstallResult> {
   const imported = stagedPackage
   if (status.phase !== 'downloaded' || !imported || installing) return { helperLaunched: false }
   installing = true
+  let releaseAdmission: void | ReleaseUpdateAdmission = undefined
   try {
-    await prepareToInstall?.()
+    releaseAdmission = await prepareToInstall?.()
     await launchPortableUpdateHelper(imported)
     // Let the IPC reply render the confirmed handoff before Desktop exits.
     setTimeout(() => app.quit(), 1000)
     return { helperLaunched: true }
   } catch (error) {
+    let message = errorMessage(error)
+    if (releaseAdmission) {
+      try { await releaseAdmission() }
+      catch { message += ' 任务保护解除未确认，请重新启动工作台后继续使用。' }
+    }
     installing = false
-    transition({ type: 'install-error', message: errorMessage(error) }, true)
+    transition({ type: 'install-error', message }, true)
     return { helperLaunched: false }
   }
 }
@@ -176,6 +224,8 @@ async function launchPortableUpdateHelper(imported: StagedImport): Promise<void>
     expected_sha256: imported.packageSha256,
     health_marker: healthMarker,
     result_path: resultPath,
+    user_data_root: app.getPath('userData'),
+    startup_health_timeout_seconds: 300,
     log_path: join(updateRoot, 'apply-update.log')
   }, null, 2), 'utf8')
 

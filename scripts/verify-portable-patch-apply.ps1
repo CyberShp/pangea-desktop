@@ -13,6 +13,7 @@ $Candidate = Join-Path $Root 'candidate [98]'
 $ArchiveRoot = Join-Path $Root 'zip'
 $LogPath = Join-Path $Root 'apply.log'
 $script:UpdateForm = $null
+$script:PortableIOWorker = $true
 $ExpectedBaseVersion = '1.0.0'
 $ExpectedVersion = '1.0.1'
 $Plan = @{ package_channel = 'stable' }

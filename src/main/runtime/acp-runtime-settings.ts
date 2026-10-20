@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { normalizeAcpLaunchArgs } from '../../../packages/dsh-pangea-product/acp-launch-args.js'
 import {
   AgentCommandResolutionError,
   resolveAgentCommandWithPowerShell,
@@ -13,8 +14,7 @@ export const ACP_RUNTIME_CONFIG_ENV = 'PANGEA_ACP_RUNTIME_CONFIG'
 const PROVIDERS = [
   { id: 'pangea-nga', command: 'nga', args: ['acp'] },
   { id: 'pangea-codeagent', command: 'codeagent', args: ['acp'] },
-  { id: 'pangea-opencode', command: 'opencode', args: ['acp'] },
-  { id: 'pangea-claude-code', command: 'DSH Claude Code Provider', args: [], builtin: true }
+  { id: 'pangea-opencode', command: 'opencode', args: ['acp'] }
 ] as const
 
 type CommandResolver = (command: string, environment: NodeJS.ProcessEnv) => ResolvedAgentCommand
@@ -52,19 +52,9 @@ export function withAcpRuntimeEnvironment(
       typeof override.command === 'string' && override.command.trim()
         ? override.command.trim()
         : defaults.command
-    const args = Array.isArray(override.args) ? override.args : defaults.args
+    const args = normalizeAcpLaunchArgs(defaults.id, Array.isArray(override.args) ? override.args : defaults.args)
     const { models: _legacyModels, ...runtimeOverride } = override
     const base = { ...runtimeOverride, command, args }
-    if ('builtin' in defaults && defaults.builtin) {
-      providers[defaults.id] = {
-        ...base,
-        available: true,
-        resolution_status: 'built-in',
-        version: 'Claude Agent SDK（内置）',
-        login_status: 'not_checked'
-      }
-      continue
-    }
     if (platform !== 'win32') {
       providers[defaults.id] = {
         ...base,

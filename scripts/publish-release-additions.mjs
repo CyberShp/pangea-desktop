@@ -2,24 +2,22 @@ import { readdir, readFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { args, repository, gh, paginate, parseVersion, fullName, patchName, downloadAsset, downloadPair, checkChecksum, isSupportedPatchBase } from './historical-release-lib.mjs'
+import { args, repository, gh, paginate, parseVersion, fullName, patchName, downloadAsset, downloadPair, checkChecksum, isSupportedPatchBase, olderVersion } from './historical-release-lib.mjs'
 import { sha256 } from './release-package-trust.mjs'
 
 export function publicationNames(version, report) {
-  if (report.target !== version || !report.discovery_complete || report.error || !Array.isArray(report.bases)) throw new Error('Invalid or unfinished coverage report')
+  if (!parseVersion(version) || report.target !== version || !report.discovery_complete || report.error || !Array.isArray(report.bases)) throw new Error('Invalid or unfinished coverage report')
   if (report.bases.some(row => !['verified', 'unsupported', 'missing'].includes(row.status))) throw new Error('Coverage contains unverified or failed baselines')
   const names = new Set()
   for (const row of report.bases) {
     if (row.status !== 'verified') continue
-    if (!isSupportedPatchBase(row.version) || row.patch !== patchName(version, row.version) || !/^[a-f0-9]{64}$/.test(row.patch_sha256)) throw new Error('Invalid verified patch record')
+    if (!isSupportedPatchBase(row.version) || !olderVersion(row.version, version) || row.patch !== patchName(version, row.version) || !/^[a-f0-9]{64}$/.test(row.patch_sha256)) throw new Error('Invalid verified patch record')
     names.add(row.patch); names.add(`${row.patch}.sha256`)
   }
   return [...names].sort()
 }
-export async function main() {
-  const options = args(), version = options.version
+export async function localPublication(version, directory) {
   if (!parseVersion(version)) throw new Error('--version must be an exact supported version')
-  const repo = repository(), directory = path.resolve(options.directory ?? 'dist')
   const reports = (await readdir(directory)).filter(name => new RegExp(`^pangea-desktop-${version.replaceAll('.', '\\.')}-patch-report-[a-f0-9]{12}\\.json$`).test(name))
   if (reports.length !== 1) throw new Error('Expected exactly one final content-addressed coverage report')
   const reportName = reports[0], report = JSON.parse(await readFile(path.join(directory, reportName), 'utf8'))
@@ -30,6 +28,13 @@ export async function main() {
   for (const row of report.bases.filter(row => row.status === 'verified')) {
     if (await checkChecksum(path.join(directory, row.patch), path.join(directory, `${row.patch}.sha256`)) !== row.patch_sha256) throw new Error('Patch differs from verified report')
   }
+  return { report, names }
+}
+export async function main() {
+  const options = args(), version = options.version
+  const directory = path.resolve(options.directory ?? 'dist')
+  const { report, names } = await localPublication(version, directory)
+  const repo = repository()
   const release = JSON.parse(gh(['api', `repos/${repo}/releases/tags/v${version}`]))
   if (release.draft || release.tag_name !== `v${version}`) throw new Error('Target must be the exact published release')
   const assets = await paginate(`repos/${repo}/releases/${release.id}/assets`)

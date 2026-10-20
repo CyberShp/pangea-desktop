@@ -1,5 +1,7 @@
 import { createPublicKey, verify } from 'node:crypto'
+import upgradePolicy from '../../../build/portable-update-policy.json'
 
+export const MINIMUM_PORTABLE_UPGRADE_SOURCE = upgradePolicy.minimum_source_version
 export const PORTABLE_UPDATE_SCHEMA_VERSION = 1
 export const PORTABLE_UPDATE_PRODUCT = 'PANGEA Desktop'
 export const PORTABLE_UPDATE_CHANNEL = 'stable'
@@ -222,6 +224,23 @@ export function normalizePortableEntryPath(value: unknown): string {
     throw new Error(`Package entry path is unsafe: ${value}`)
   }
   return parts.join('/')
+}
+
+/** Eligibility is separate from signature parsing: old signed metadata remains verifiable. */
+export function assertSupportedPortableUpgradeSource(version: string): void {
+  const channel = portableUpdateChannelForVersion(version)
+  const current = comparableVersion(version, channel)?.slice(0, 3)
+  const minimum = MINIMUM_PORTABLE_UPGRADE_SOURCE.split('.').map(Number)
+  if (current) {
+    for (let index = 0; index < 3; index++) {
+      const actual = current[index]!
+      const required = minimum[index]!
+      if (actual > required) return
+      if (actual < required) break
+      if (index === 2) return
+    }
+  }
+  throw new Error(`当前版本 ${version} 已停止支持应用内升级，最低支持版本为 ${MINIMUM_PORTABLE_UPGRADE_SOURCE}。请在独立目录安装新版完整包，并保留原安装目录和用户数据。`)
 }
 
 export function portableUpdateChannelForVersion(version: string): PortableUpdateChannel {

@@ -3,7 +3,7 @@ import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto
 import { createReadStream, createWriteStream } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { isSupportedPatchBase, MINIMUM_PATCH_BASE_VERSION } from './historical-release-lib.mjs'
+import { isSupportedPatchBase, MINIMUM_PATCH_BASE_VERSION, olderVersion } from './historical-release-lib.mjs'
 import { verifyPackage } from './release-package-trust.mjs'
 
 const baseDirectory = path.resolve(required('--base-dir'))
@@ -20,8 +20,8 @@ const TARGET_MANIFEST = 'target/resources/update/pangea-package-manifest.json'
 const TARGET_SIGNATURE = `${TARGET_MANIFEST}.sig`
 
 if (!['stable', 'test'].includes(channel)) throw new Error(`Unsupported patch channel: ${channel}`)
-if (!isSupportedPatchBase(fromVersion)) throw new Error(`Patch base must be ${MINIMUM_PATCH_BASE_VERSION} or newer; 1.x support is retired`)
-if (!fromVersion || !toVersion || fromVersion === toVersion) throw new Error('Patch versions are invalid')
+if (!isSupportedPatchBase(fromVersion)) throw new Error(`Patch base must be ${MINIMUM_PATCH_BASE_VERSION} or newer; older upgrade sources are retired`)
+if (!olderVersion(fromVersion, toVersion)) throw new Error('Patch target must be a newer version in the same channel')
 const privateKey = createPrivateKey({
   key: await readFile(privateKeyPath, 'utf8'),
   format: 'pem',

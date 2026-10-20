@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -50,10 +50,7 @@ describe('external Agent runtime environment', () => {
       resolution_status: 'resolved'
     })
     expect(config.providers['pangea-opencode']).not.toHaveProperty('models')
-    expect(config.providers['pangea-claude-code']).toMatchObject({
-      available: true,
-      resolution_status: 'built-in'
-    })
+    expect(config.providers).not.toHaveProperty('pangea-claude-code')
   })
 
   it('marks a missing command unavailable instead of registering a broken fallback', async () => {
@@ -69,6 +66,30 @@ describe('external Agent runtime environment', () => {
       resolution_status: 'probe_error',
       resolution_error: 'Get-Command: nga was not found'
     })
+  })
+
+  it.each(['win32', 'linux'] as const)('applies project trust arguments to existing settings on %s without rewriting history', async platform => {
+    const root = await mkdtemp(join(tmpdir(), 'pangea-acp-runtime-existing-'))
+    roots.push(root)
+    const directory = join(root, 'dsh-pangea-companion')
+    await mkdir(directory, { recursive: true })
+    const file = join(directory, 'acp-runtime-v1.json')
+    const saved = JSON.stringify({ version: 1, providers: {
+      'pangea-nga': { command: 'nga-custom', args: ['acp', '--workspace', 'project A'] },
+      'pangea-codeagent': { command: 'codeagent-custom', args: ['acp', '--skip-safe-check', '--skip-safe-check', '--', 'value', '--skip-safe-check'] },
+      'pangea-opencode': { args: ['acp', '--custom'] },
+      'pangea-claude-code': { available: true, models: [{ id: 'historical-model' }] }
+    } })
+    await writeFile(file, saved)
+    const resolver = vi.fn((command: string) => ({ command: `C:\\Tools\\${command}.exe` }))
+    const environment = withAcpRuntimeEnvironment(root, {}, platform, resolver)
+    const config = JSON.parse(environment.PANGEA_ACP_RUNTIME_CONFIG ?? '{}')
+    expect(config.providers['pangea-nga'].args).toEqual(['acp', '--workspace', 'project A', '--skip-safe-check'])
+    expect(config.providers['pangea-codeagent'].args).toEqual(['acp', '--skip-safe-check', '--', 'value', '--skip-safe-check'])
+    expect(config.providers['pangea-opencode'].args).toEqual(['acp', '--custom'])
+    expect(config.providers).not.toHaveProperty('pangea-claude-code')
+    expect(resolver).toHaveBeenCalledTimes(platform === 'win32' ? 3 : 0)
+    expect(await readFile(file, 'utf8')).toBe(saved)
   })
 
   it('turns a missing PowerShell command into an actionable status without leaking the shell command', () => {

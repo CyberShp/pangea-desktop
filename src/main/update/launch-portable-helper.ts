@@ -11,6 +11,7 @@ const encoded = (value: string): string => Buffer.from(value, 'utf16le').toStrin
 export interface PortableHelperLaunchOptions {
   requireUiReady?: boolean
   timeoutMs?: number
+  recoverOnly?: boolean
 }
 
 export async function launchPortableHelper(
@@ -24,7 +25,7 @@ export async function launchPortableHelper(
   if (options.requireUiReady && !(await readFile(helperPath, 'utf8')).includes('# PANGEA_UPDATE_MONITOR_PROTOCOL=1')) {
     throw new Error('升级包中的更新器不支持可跟踪升级，请使用包含新版更新器的升级包。')
   }
-  const invocation = encoded(`& ${psString(helperPath)} -PlanPath ${psString(planPath)}`)
+  const invocation = encoded(`& ${psString(helperPath)} -PlanPath ${psString(planPath)}${options.recoverOnly ? ' -RecoverOnly' : ''}`)
   // Start-Process gives PowerShell an independent hidden console. Node's Windows
   // DETACHED_PROCESS skips the script; an attached console dies with Electron.
   const launcher = `$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';

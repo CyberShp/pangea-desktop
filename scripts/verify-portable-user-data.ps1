@@ -10,6 +10,7 @@ $Candidate = Join-Path $Root ('installed.update-' + [guid]::NewGuid().ToString('
 $External = Join-Path $Root 'external-repository'
 $LogPath = Join-Path $Root 'apply.log'
 $script:UpdateForm = $null
+$script:PortableIOWorker = $true # Exercise copy/verification directly; worker lifetime has a separate integration test.
 $Held = $null
 New-Item -ItemType Directory -Path $Root -Force | Out-Null
 $Fixture = Join-Path $Root 'fixture.cjs'
@@ -45,10 +46,18 @@ if (mode === 'create') {
 try {
   & node $Fixture create $Source $Candidate $External
   if ($LASTEXITCODE -ne 0) { throw 'Could not create long-path repository fixture.' }
-  Copy-PortableUserData $Source $Candidate
+  $Snapshot = Copy-PortableUserData $Source $Candidate
+  Assert-PortableUserDataUnchanged $Source $Candidate $Snapshot
   & node $Fixture verify $Source $Candidate $External
   if ($LASTEXITCODE -ne 0) { throw 'User data copy mismatch.' }
   Write-Output 'PASS: long paths, Unicode, bracket names, empty directories, Run and skill preserved'
+  $Changed=Join-Path $Source 'launch-root\changed-after-copy.txt'
+  [IO.File]::WriteAllText($Changed,'changed after copy')
+  $Rejected=$false
+  try { Assert-PortableUserDataUnchanged $Source $Candidate $Snapshot } catch { $Rejected=$_.Exception.Message -like '*changed after copy*' }
+  if (-not $Rejected) { throw 'A post-copy writer must block the version switch.' }
+  [IO.File]::Delete($Changed)
+  Write-Output 'PASS: source mutation after copy blocks version switch'
   Remove-PortableDirectory $Candidate
   & node $Fixture cleanup $Source $Candidate $External
   if ($LASTEXITCODE -ne 0) { throw 'Cleanup followed a junction or modified original data.' }

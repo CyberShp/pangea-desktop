@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto'
-import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir, stat } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
-import { Transform } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
 import unzipper from 'unzipper'
+import { copyAndHashPackage } from './portable-package-io'
 import {
+  assertSupportedPortableUpgradeSource,
   isNewerPortableVersion,
   normalizePortableEntryPath,
   PORTABLE_PATCH_MANIFEST_PATH,
@@ -63,6 +62,7 @@ export async function stagePortablePatch(options: {
   currentVersion: string
   onProgress?: (percent: number) => void
 }): Promise<StagedPortablePatch> {
+  assertSupportedPortableUpgradeSource(options.currentVersion)
   if (!basename(options.sourcePath).toLowerCase().endsWith('.zip')) {
     throw new Error('请选择 PANGEA Desktop 补丁 ZIP 升级包。')
   }
@@ -71,7 +71,7 @@ export async function stagePortablePatch(options: {
     throw new Error('补丁包文件大小无效。')
   }
   await mkdir(dirname(options.destinationPath), { recursive: true })
-  const packageSha256 = await copyAndHash(
+  const packageSha256 = await copyAndHashPackage(
     options.sourcePath,
     options.destinationPath,
     source.size,
@@ -149,21 +149,6 @@ export async function stagePortablePatch(options: {
     packageSize: source.size,
     packageSha256
   }
-}
-
-async function copyAndHash(source: string, destination: string, size: number, onProgress: (percent: number) => void): Promise<string> {
-  const digest = createHash('sha256')
-  let copied = 0
-  const hashingStream = new Transform({
-    transform(chunk, _encoding, callback) {
-      digest.update(chunk)
-      copied += chunk.length
-      onProgress((copied / size) * 100)
-      callback(null, chunk)
-    }
-  })
-  await pipeline(createReadStream(source), hashingStream, createWriteStream(destination, { flags: 'wx' }))
-  return digest.digest('hex')
 }
 
 function requiredEntry(entries: Map<string, unzipper.File>, path: string): unzipper.File {

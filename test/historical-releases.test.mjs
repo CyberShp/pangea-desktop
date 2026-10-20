@@ -69,24 +69,26 @@ test('concurrent pagination duplicates do not build a baseline twice and ambigui
   assert.throws(() => uniqueReleases([{ tag_name: 'v1.0.0' }]), /Invalid/)
 })
 
-test('retires every pre-2.0 baseline before download eligibility, in both channels', () => {
-  for (const version of ['0.1.6', '1.0.3', '1.99.99', '1.99.99-test.999.abcdef0']) {
+test('retires every pre-2.0.7 baseline before download eligibility, in both channels', () => {
+  for (const version of ['0.1.6', '1.0.3', '1.99.99', '1.99.99-test.999.abcdef0', '2.0.0', '2.0.1', '2.0.6', '2.0.6-test.999.abcdef0']) {
     assert.equal(isSupportedPatchBase(version), false)
     const channel = parseVersion(version).channel
     const target = channel === 'stable' ? '2.0.13' : '2.0.13-test.1.abcdef0'
     const row = classifyRelease({ tag_name: `v${version}` }, target, channel)
     assert.equal(row.status, 'unsupported')
-    assert.match(row.reason, /minimum supported patch baseline 2.0.0/)
+    assert.match(row.reason, /minimum supported patch baseline 2.0.7/)
   }
-  assert.equal(isSupportedPatchBase('2.0.0'), true)
-  assert.equal(isSupportedPatchBase('2.0.0-test.1.abcdef0'), true)
-  assert.equal(classifyRelease({tag_name:'v2.0.0'}, '2.0.13', 'stable').status, 'pending')
+  assert.equal(isSupportedPatchBase('2.0.7'), true)
+  assert.equal(isSupportedPatchBase('2.0.7-test.1.abcdef0'), true)
+  assert.equal(classifyRelease({tag_name:'v2.0.7'}, '2.0.13', 'stable').status, 'pending')
 })
 
-test('publisher rejects a stale report advertising a retired 1.x upgrade', () => {
-  assert.throws(() => publicationNames('2.0.13', {
-    target:'2.0.13', discovery_complete:true, bases:[{
-      version:'1.0.9', status:'verified', patch:patchName('2.0.13','1.0.9'), patch_sha256:'a'.repeat(64)
-    }]
-  }), /Invalid verified patch record/)
+test('publisher rejects stale reports advertising retired sources despite a verified status', () => {
+  for (const version of ['1.0.9', '2.0.0', '2.0.6', '2.0.6-test.99.abcdef0']) {
+    assert.throws(() => publicationNames('2.0.13', {
+      target:'2.0.13', discovery_complete:true, bases:[{
+        version, status:'verified', patch:patchName('2.0.13',version), patch_sha256:'a'.repeat(64)
+      }]
+    }), /Invalid verified patch record/)
+  }
 })

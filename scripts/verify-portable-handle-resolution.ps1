@@ -13,6 +13,7 @@ $LogPath=Join-Path $Root 'update.log'
 $PlanPath=Join-Path $Root 'plan.json'
 $script:UpdaterScriptPath=$Updater
 $script:UpdateForm=$null
+$script:PortableIOWorker=$true
 $script:OwnedUpdateProcesses=@()
 $script:ProtectedUpdateProcesses=@($PID)
 $script:AutomaticUpdateCleanup=$false

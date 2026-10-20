@@ -10,7 +10,7 @@ if ($ParseErrors.Count) { throw ($ParseErrors | Out-String) }
 
 # Exercise real state functions on every platform. In particular, a monitor
 # holding an older running snapshot must not overwrite a worker's final result.
-$Names = @('Write-UpdateLog','Write-AtomicUpdateJson','Write-UpdateResult','Write-UpdateProgress','Read-UpdateProgress','Test-UpdateWorkerIdentity','Set-InterruptedUpdateFailure','Wait-UpdateHandoff')
+$Names = @('Write-UpdateLog','Write-AtomicUpdateJson','Write-UpdateResult','Write-UpdateProgress','Read-UpdateProgress','Test-UpdateWorkerIdentity','Set-InterruptedUpdateFailure','Wait-UpdateHandoff','Test-PortableIOWorker','Publish-PortableIOProgress')
 foreach ($Definition in $Ast.FindAll({ param($Node) $Node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
   if ($Definition.Name -in $Names) { Invoke-Expression $Definition.Extent.Text }
 }
@@ -33,6 +33,24 @@ try {
   }
   if (-not (Test-UpdateWorkerIdentity $Second)) { throw 'Serializing progress lost the original worker creation time.' }
   Write-Output 'PASS: progress updates atomically replace previous status and preserve process identity'
+
+  $script:PortableIOWorker=$true
+  $script:PortableIOControl=Join-Path $StateRoot 'io-fixture'
+  $script:PortableIOProgressSequence=0
+  Write-UpdateProgress -Stage extract -Message 'child-extract' -Percent 60 -FilesCompleted 30 -FilesTotal 100
+  Write-UpdateResult failed 'child must not publish a terminal result'
+  if ((Read-UpdateProgress "$PlanPath.progress.json").message -ne 'second-progress' -or [IO.File]::Exists($ResultPath)) { throw 'An IO child changed the monitor progress or terminal result.' }
+  $script:PortableIOWorker=$false
+  $Sequence=Publish-PortableIOProgress $script:PortableIOControl
+  $Forwarded=Read-UpdateProgress "$PlanPath.progress.json"
+  if ($Sequence -ne 1 -or $Forwarded.message -ne 'child-extract' -or $Forwarded.files_completed -ne 30 -or
+      $Forwarded.worker_pid -ne $PID -or $Forwarded.worker_started_at -ne $Second.worker_started_at -or
+      $Forwarded.state -ne 'running' -or -not (Test-UpdateWorkerIdentity $Forwarded)) {
+    throw 'Forwarded child progress lost the live supervisor identity.'
+  }
+  [IO.File]::Delete("$script:PortableIOControl.progress")
+  if ((Publish-PortableIOProgress $script:PortableIOControl $Sequence) -ne $Sequence -or (Read-UpdateProgress "$PlanPath.progress.json").state -ne 'running') { throw 'Child exit falsely marked the live supervisor as failed.' }
+  Write-Output 'PASS: IO child progress stays isolated; forwarding preserves supervisor PID and child exit cannot publish failure'
 
   $Now = [DateTime]::UtcNow.ToString('o')
   $StaleRunning = [pscustomobject]@{

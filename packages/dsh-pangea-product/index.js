@@ -1,5 +1,5 @@
 import * as acpSubagent from '@deepseek-ai/dsh-subagent-acp'
-import * as claudeCodeSubagent from '@deepseek-ai/dsh-subagent-claude-code'
+import { normalizeAcpLaunchArgs } from './acp-launch-args.js'
 
 export const name = 'dsh-pangea-product'
 export const inject = ['subagents', 'subprocess']
@@ -32,8 +32,7 @@ export function configuredProviderPlugins(env = process.env, platform = process.
     const command = typeof value.resolved_command === 'string' && value.resolved_command.trim()
       ? value.resolved_command.trim()
       : configuredCommand
-    const args = [...(Array.isArray(value.args) ? value.args : defaults.args)]
-    if (args.some(item => typeof item !== 'string')) throw new Error(`${defaults.providerName} ACP args must be strings`)
+    const args = normalizeAcpLaunchArgs(defaults.providerName, Array.isArray(value.args) ? value.args : defaults.args)
     if (defaults.providerName === 'pangea-opencode' && args.includes('acp')) {
       if (!args.includes('--print-logs')) args.push('--print-logs')
       if (!args.some(arg => arg === '--log-level' || arg.startsWith('--log-level='))) args.push('--log-level', 'ERROR')
@@ -62,12 +61,6 @@ export function configuredProviderPlugins(env = process.env, platform = process.
       env: providerEnv
     }])
   }
-  const claude = configured['pangea-claude-code'] ?? {}
-  if (claude.available !== false) entries.push([claudeCodeSubagent, {
-    providerName: 'pangea-claude-code',
-    permissionMode: 'bypassPermissions',
-    env: {}
-  }])
   return entries
 }
 

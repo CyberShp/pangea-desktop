@@ -7,6 +7,15 @@ on:
       - scripts/*release*.mjs
       - scripts/*historical*.mjs
       - scripts/create-signed-portable-patch.mjs
+      - build/portable-update-policy.json
+      - build/apply-portable-update.ps1
+      - scripts/*portable*.ps1
+      - src/main/update/**
+      - packages/dsh-pangea-product/update-admission.js
+      - test/portable-*.test.ts
+      - src/main/update/portable-update.ts
+      - src/main/update/portable-*-validator.ts
+      - test/portable-upgrade-policy.test.ts
       - test/*release*.mjs
       - test/*historical*.mjs
       - test/release.test.ts
@@ -18,6 +27,15 @@ on:
       - scripts/*release*.mjs
       - scripts/*historical*.mjs
       - scripts/create-signed-portable-patch.mjs
+      - build/portable-update-policy.json
+      - build/apply-portable-update.ps1
+      - scripts/*portable*.ps1
+      - src/main/update/**
+      - packages/dsh-pangea-product/update-admission.js
+      - test/portable-*.test.ts
+      - src/main/update/portable-update.ts
+      - src/main/update/portable-*-validator.ts
+      - test/portable-upgrade-policy.test.ts
       - test/*release*.mjs
       - test/*historical*.mjs
       - test/release.test.ts
@@ -38,6 +56,41 @@ jobs:
         run: npm ci --ignore-scripts --legacy-peer-deps
       - name: Verify trust, discovery, retry and immutable publication logic
         # gh and pwsh are mocked by CLI tests; this job cannot publish a release.
-        run: node --test test/release-version-check.test.mjs test/historical-releases.test.mjs test/release-package-trust.test.mjs test/publish-release-additions.test.mjs test/build-historical-patches.test.mjs
+        run: npm run test:release-tools
       - name: Verify existing package and patch contracts
-        run: npx --no-install vitest run test/release.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts
+        run: npx --no-install vitest run test/release.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts test/portable-upgrade-policy.test.ts
+  windows-updater:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.9.0
+          cache: npm
+      - name: Install locked test dependencies
+        run: npm ci --ignore-scripts --legacy-peer-deps
+      - name: Verify Windows PowerShell 5.1 recovery, data and process boundaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($Script in @(
+            'scripts/verify-portable-update-transactions.ps1',
+            'scripts/verify-portable-io-protection.ps1',
+            'scripts/verify-portable-profile-rollback.ps1',
+            'scripts/verify-portable-batch-cleanup.ps1',
+            'scripts/verify-portable-update-locks.ps1',
+            'scripts/verify-portable-patch-apply.ps1',
+            'scripts/verify-portable-handle-resolution.ps1',
+            'scripts/verify-explorer-recovery.ps1',
+            'scripts/verify-portable-user-data.ps1',
+            'scripts/verify-portable-long-paths.ps1',
+            'scripts/verify-portable-rollback-start.ps1'
+          )) {
+            & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $Script
+            if ($LASTEXITCODE -ne 0) { throw "Windows updater regression failed: $Script" }
+          }
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/verify-portable-update-progress.ps1 -FunctionsOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Updater progress ownership regression failed.' }
+      - name: Verify import, health, recovery and task admission
+        run: npx --no-install vitest run test/portable-update-health.test.ts test/portable-package-io.test.ts test/portable-update-recovery.test.ts test/portable-update-admission.test.ts test/portable-upgrade-policy.test.ts

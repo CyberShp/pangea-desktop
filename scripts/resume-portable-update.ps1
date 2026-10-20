@@ -1,8 +1,10 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$InstallRoot,
-  [string]$TargetVersion = '1.0.4',
-  [string]$PlanPath
+  [Parameter(Mandatory = $true)][string]$TargetVersion,
+  [string]$PlanPath,
+  [string]$UserDataRoot,
+  [switch]$RecoverOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -10,9 +12,12 @@ Set-StrictMode -Version Latest
 # Recovery for a package already imported and signature-verified by Desktop.
 # Never change signed files or the package. Old plans cannot establish ownership;
 # verified runtime/terminal holders still use the updater's automatic cleanup.
-$InstallRoot = (Resolve-Path -LiteralPath $InstallRoot).Path.TrimEnd('\')
+$InstallRoot = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
 $Prefix = $InstallRoot + '\'
-$UpdateRoot = Join-Path $env:APPDATA 'pangea-desktop\updates'
+if (-not $UserDataRoot) {
+  $UserDataRoot=if ($env:PANGEA_USER_DATA_DIR) { $env:PANGEA_USER_DATA_DIR } else { Join-Path $env:APPDATA 'pangea-desktop' }
+}
+$UpdateRoot = Join-Path ([IO.Path]::GetFullPath($UserDataRoot)) 'updates'
 $Helper = Join-Path $PSScriptRoot 'apply-portable-update.ps1'
 if (-not (Test-Path -LiteralPath $Helper -PathType Leaf)) {
   $Helper = Join-Path $PSScriptRoot '..\build\apply-portable-update.ps1'
@@ -46,13 +51,17 @@ if (-not $PlanPath.StartsWith(([IO.Path]::GetFullPath($UpdateRoot).TrimEnd('\') 
   throw 'Use the original Desktop update plan from its profile updates directory.'
 }
 $Plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($Plan.schema_version -ne 2 -or [string]$Plan.package_type -ne 'patch' -or
+$PackageType=if ($Plan.PSObject.Properties['package_type']) { [string]$Plan.package_type } else { 'full' }
+if ($Plan.schema_version -notin @(1,2) -or $PackageType -notin @('patch','full') -or
+    ($PackageType -eq 'patch' -and $Plan.schema_version -ne 2) -or
     [string]$Plan.expected_version -ne $TargetVersion -or
     [IO.Path]::GetFullPath([string]$Plan.install_root).TrimEnd('\') -ine $InstallRoot) {
-  throw 'The saved patch plan does not match this recovery request.'
+  throw 'The saved update plan does not match this recovery request.'
 }
-$BaseManifest = Get-Content -LiteralPath (Join-Path $InstallRoot 'resources\update\pangea-package-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-if ([string]$BaseManifest.version -ne [string]$Plan.expected_base_version) { throw 'The installed version no longer matches the saved patch base.' }
+# The helper owns the installation-scoped lock before reading current version
+# or recovering an interrupted rename. The installation may be absent here.
+# It recovers a pending transaction and restarts the old version only; applying
+# the verified patch then requires a fresh retry. It enforces source >= 2.0.7.
 # Keep the original plan, including its verified package hash, for diagnosis.
 # The old PID may have been reused; do not wait for an unrelated process.
 $Plan.parent_pid = 0
@@ -68,6 +77,8 @@ for ($Number = 1; $Number -le 9999; $Number++) {
     throw
   }
   try {
+    $Plan.health_marker="$CandidatePlan.healthy.json"
+    $Plan.log_path="$CandidatePlan.log"
     $Bytes = (New-Object Text.UTF8Encoding($false)).GetBytes(($Plan | ConvertTo-Json -Depth 10))
     $Stream.Write($Bytes, 0, $Bytes.Length)
     $ResumePlan = $CandidatePlan
@@ -75,11 +86,11 @@ for ($Number = 1; $Number -le 9999; $Number++) {
   break
 }
 if (-not $ResumePlan) { throw 'No unused recovery plan filename is available.' }
-Write-Output "Resuming verified patch $($Plan.expected_base_version) -> $TargetVersion for $InstallRoot"
+Write-Output "Recovering or retrying the verified $PackageType update to $TargetVersion for $InstallRoot"
 Write-Output "Log: $($Plan.log_path)"
 # Both PowerShell's provider location and the native working directory must be
 # outside the installation before attempting a Windows directory rename.
 Set-Location -LiteralPath $env:TEMP
 [Environment]::CurrentDirectory = $env:TEMP
-& $Helper -PlanPath $ResumePlan
+& $Helper -PlanPath $ResumePlan -RecoverOnly:$RecoverOnly
 exit $LASTEXITCODE

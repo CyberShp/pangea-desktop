@@ -15,13 +15,12 @@ afterEach(async () => {
 
 describe('signed portable Windows package', () => {
   it('uses one ZIP for extraction and in-app package import', async () => {
-    const packageVersion = process.env.RELEASE_VERSION ??
-      JSON.parse(await readFile('package.json', 'utf8')).version as string
+    const packageVersion = process.env.RELEASE_VERSION ?? '2.0.14'
     const packageChannel = process.env.PANGEA_PACKAGE_CHANNEL ??
       (packageVersion.includes('-test.') ? 'test' : 'stable')
     const currentVersion = packageChannel === 'test'
-      ? `${packageVersion.split('-')[0]}-test.0.0000000`
-      : '0.0.9'
+      ? '2.0.7-test.0.0000000'
+      : '2.0.7'
     const root = await mkdtemp(path.join(tmpdir(), 'pangea-portable-package-'))
     temporaryRoots.push(root)
     const appDirectory = path.join(root, 'win-unpacked')
@@ -100,10 +99,10 @@ describe('signed portable Windows package', () => {
     expect(manager).toContain('expected_size: imported.packageSize')
     expect(manager).toContain('expected_sha256: imported.packageSha256')
     expect(manager).toContain('result_path: resultPath')
-    expect(helper).toContain('Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256')
+    expect(helper).toContain('Invoke-PortableIOWorker -Operation ValidatePackage -Arguments @{ Path=$PackagePath; Size=$ExpectedSize; Sha256=$ExpectedSha256 }')
     // Rollback uses the same exact-directory rename and lock retry as installation.
     // Real lock/rollback behavior is exercised by verify-portable-update-locks.ps1.
-    expect(helper).toContain('Move-UpdateDirectory $BackupRoot $InstallRoot')
+    expect(helper).toContain('Restore-PortableUpdateTransaction $TransactionContext $Transaction $UserDataRoot')
     expect(helper).toContain("Write-UpdateResult 'failed' $FailureMessage")
     expect(helper).toContain('Start-PortableDesktop $InstalledExecutable $RecoveryMarker $RecoveryLog')
     // PowerShell accepts both the full System namespace and its shorthand.

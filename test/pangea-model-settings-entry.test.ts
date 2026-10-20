@@ -30,7 +30,7 @@ describe('PANGEA model settings entry', () => {
     expect(pkg.dsh?.client?.platform).toBe('web')
     expect(pkg.dsh?.client?.inject).toContain('@deepseek-ai/dsh-client-runtime')
     expect(pkg.dependencies?.['@deepseek-ai/dsh-subagent-acp']).toBe('0.1.1-rc.2')
-    expect(pkg.dependencies?.['@deepseek-ai/dsh-subagent-claude-code']).toBe('0.1.1-rc.2')
+    expect(pkg.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-claude-code')
     expect(patch).toContain('id: pangea-product-shell')
     expect(patch).toContain('name: dsh-pangea-product')
     expect(patch).not.toContain('id: pangea-jobs-local')

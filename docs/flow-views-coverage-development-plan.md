@@ -12,7 +12,7 @@
 | dsh-pangea | 83e2e12921ad736b0fc3e986b22168c56c0b7774 | 资产选择交互、外部 Agent 模型发现与新建分析选择 |
 | pangea-desktop | 495a48b0b5b7f5afe86809e2e707e7fda5c8b046 | Agent 模型选择产品入口与 Windows 测试包集成 |
 
-本次包括：业务流程阅读器、主干/分支投影、按需 Archify 图、独立覆盖率分析 Skill、内部查询 Skill 本地接入、文件输入和相应工作台。运行环境沿用用户选择的内置 API 或 nga/opencode/codeagent/Claude Code。
+本次包括：业务流程阅读器、主干/分支投影、按需 Archify 图、独立覆盖率分析 Skill、内部查询 Skill 本地接入、文件输入和相应工作台。运行环境沿用用户选择的内置 API 或 nga/opencode/codeagent。
 
 原 Codetalks 的模块分析保持五阶段，不恢复 Graph/action/settle，不继续在本分支重构资产管理和模型发现。涉及原 Skill 的更改仅限本次需要的流程投影约定。覆盖率分析从基线 Skill 复制并独立维护。
 

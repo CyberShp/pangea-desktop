@@ -5,11 +5,12 @@ $Tokens = $null
 $ParseErrors = $null
 $Ast = [System.Management.Automation.Language.Parser]::ParseFile($Updater, [ref]$Tokens, [ref]$ParseErrors)
 if ($ParseErrors.Count) { throw ($ParseErrors | Out-String) }
-$Function = $Ast.Find({ param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq 'Copy-PortableUserData' }, $true)
-if (-not $Function) { throw 'Migration helper missing' }
-Invoke-Expression $Function.Extent.Text
+foreach ($Function in $Ast.FindAll({ param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) { Invoke-Expression $Function.Extent.Text }
+$script:PortableIOWorker = $true
+$script:UpdateForm = $null
 function Write-UpdateLog { param([string]$Message) }
 $Root = Join-Path ([System.IO.Path]::GetTempPath()) ('pangea-skills-' + [guid]::NewGuid())
+$LogPath = Join-Path $Root 'apply.log'
 try {
   $Old = Join-Path $Root 'old'
   $Candidate = Join-Path $Root 'candidate'

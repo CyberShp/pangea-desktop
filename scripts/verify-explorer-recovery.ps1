@@ -6,6 +6,7 @@ $Ast=[Management.Automation.Language.Parser]::ParseFile($Updater,[ref]$Tokens,[r
 if ($Errors.Count) { throw ($Errors | Out-String) }
 $Definitions=@($Ast.FindAll({param($Node) $Node -is [Management.Automation.Language.FunctionDefinitionAst]},$true))
 foreach ($Function in $Definitions) { Invoke-Expression $Function.Extent.Text }
+$script:PortableIOWorker=$true
 $Session=[Diagnostics.Process]::GetCurrentProcess().SessionId
 $Fake=[pscustomobject]@{Id=99999;Created=1;Name='explorer';Executable="$env:SystemRoot\explorer.exe";SameUser=$true;Critical=$false;Session=$Session}
 if ((Get-UpdateHolderPolicy $Fake @() @() @($Fake.Id)) -ne 'explorer') { throw 'Current-user Explorer exception was not recognized.' }

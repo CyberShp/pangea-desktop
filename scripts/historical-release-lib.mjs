@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import upgradePolicy from '../build/portable-update-policy.json' with { type: 'json' }
 import { readFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { sha256 } from './release-package-trust.mjs'
@@ -30,10 +31,15 @@ export function olderVersion(source, target) {
   for (let i = 0; i < 3; i++) if (a.parts[i] !== b.parts[i]) return a.parts[i] < b.parts[i]
   return a.run < b.run
 }
-export const MINIMUM_PATCH_BASE_VERSION = '2.0.0'
+export const MINIMUM_PATCH_BASE_VERSION = upgradePolicy.minimum_source_version
 export function isSupportedPatchBase(version) {
   const parsed = parseVersion(version)
-  return Boolean(parsed && parsed.parts[0] >= 2n)
+  const minimum = parseVersion(MINIMUM_PATCH_BASE_VERSION)
+  if (!parsed || !minimum) return false
+  for (let index = 0; index < 3; index++) {
+    if (parsed.parts[index] !== minimum.parts[index]) return parsed.parts[index] > minimum.parts[index]
+  }
+  return true
 }
 export function classifyRelease(release, target, channel) {
   const version = release.tag_name?.replace(/^v/, '')
@@ -41,7 +47,7 @@ export function classifyRelease(release, target, channel) {
   if (release.draft) return { version, status: 'unsupported', reason: 'draft release' }
   const parsed = parseVersion(version)
   if (!parsed) return { version, status: 'unsupported', reason: 'unsupported version format' }
-  if (!isSupportedPatchBase(version)) return { version, status: 'unsupported', reason: `below minimum supported patch baseline ${MINIMUM_PATCH_BASE_VERSION}; 1.x and older upgrade paths are retired` }
+  if (!isSupportedPatchBase(version)) return { version, status: 'unsupported', reason: `below minimum supported patch baseline ${MINIMUM_PATCH_BASE_VERSION}; older upgrade paths are retired` }
   if (parsed.channel !== channel) return { version, status: 'unsupported', reason: 'different channel' }
   if (!olderVersion(version, target)) return { version, status: 'unsupported', reason: 'not older than target' }
   return { version, status: 'pending' }

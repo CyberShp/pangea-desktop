@@ -45,7 +45,6 @@ const runtimeConfig = {
     'pangea-nga': { command: 'nga', resolved_command: resolvedCommands['pangea-nga'].command, args: launchArgs },
     'pangea-codeagent': { command: 'codeagent', resolved_command: resolvedCommands['pangea-codeagent'].command, args: launchArgs },
     'pangea-opencode': { command: 'opencode', resolved_command: resolvedCommands['pangea-opencode'].command, args: launchArgs },
-    'pangea-claude-code': { available: false },
   },
 }
 const environment = {
@@ -67,7 +66,7 @@ const results = []
 try {
   for (const [plugin, config] of entries) plugin.apply(ctx, plugin.Config({ ...config, cwd: shimDirectory }))
   for (const providerName of ['pangea-nga', 'pangea-codeagent', 'pangea-opencode']) {
-    const providerArgs = providerName === 'pangea-opencode' ? [...expectedArgs, '--print-logs', '--log-level', 'ERROR'] : expectedArgs
+    const providerArgs = providerName === 'pangea-opencode' ? [...expectedArgs, '--print-logs', '--log-level', 'ERROR'] : [...expectedArgs, '--skip-safe-check']
     const provider = providers.get(providerName)
     assert.ok(provider, `${providerName} was not registered`)
     const controller = new AbortController()

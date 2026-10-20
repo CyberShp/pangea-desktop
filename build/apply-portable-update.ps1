@@ -1,6 +1,6 @@
 ﻿# PANGEA_UPDATE_MONITOR_PROTOCOL=1
 [CmdletBinding()]
-param([string]$PlanPath, [switch]$ScanLocks, [string]$ScanRoot, [string]$ScanOutput, [string]$WatchExplorer, [switch]$WatchUpdate)
+param([string]$PlanPath, [switch]$ScanLocks, [string]$ScanRoot, [string]$ScanOutput, [string]$WatchExplorer, [switch]$WatchUpdate, [switch]$RecoverOnly, [string]$IOWorker)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -9,7 +9,374 @@ $UpdateForm = $null
 $UpdateLabel = $null
 $UpdateProgress = $null
 
+function Initialize-PortableWorkerJob {
+  if ('PangeaPortableWorkerJob' -as [type]) { return }
+  Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading;
+public sealed class PangeaPortableWorkerJob : IDisposable {
+  [StructLayout(LayoutKind.Sequential)] struct Limits {
+    public long ProcessTime, JobTime; public uint Flags;
+    public UIntPtr MinWorkingSet, MaxWorkingSet; public uint ActiveLimit;
+    public UIntPtr Affinity; public uint Priority, Scheduling;
+  }
+  [StructLayout(LayoutKind.Sequential)] struct Io { public ulong A,B,C,D,E,F; }
+  [StructLayout(LayoutKind.Sequential)] struct ExtendedLimits {
+    public Limits Basic; public Io Counters; public UIntPtr ProcessMemory, JobMemory, PeakProcess, PeakJob;
+  }
+  [StructLayout(LayoutKind.Sequential)] struct Accounting {
+    public long User, Kernel, PeriodUser, PeriodKernel; public uint Faults, Total, Active, Terminated;
+  }
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr security, string name);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job, int type, ref ExtendedLimits data, uint length);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job, int type, out Accounting data, uint length, IntPtr returned);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateJobObject(IntPtr job, uint code);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  IntPtr handle;
+  public PangeaPortableWorkerJob() {
+    handle=CreateJobObject(IntPtr.Zero,null);
+    if(handle==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+    var limits=new ExtendedLimits(); limits.Basic.Flags=0x2000; // KILL_ON_JOB_CLOSE, no breakaway
+    if(!SetInformationJobObject(handle,9,ref limits,(uint)Marshal.SizeOf(typeof(ExtendedLimits)))) {
+      int error=Marshal.GetLastWin32Error(); Dispose(); throw new Win32Exception(error);
+    }
+  }
+  public void Attach(Process process) {
+    if(!AssignProcessToJobObject(handle,process.Handle)) throw new Win32Exception(Marshal.GetLastWin32Error());
+  }
+  public bool StopAndWait(int milliseconds) {
+    if(!TerminateJobObject(handle,1)) return false;
+    var timer=Stopwatch.StartNew();
+    do {
+      Accounting state;
+      if(!QueryInformationJobObject(handle,1,out state,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero)) return false;
+      if(state.Active==0) return true;
+      Thread.Sleep(50);
+    } while(timer.ElapsedMilliseconds<milliseconds);
+    return false;
+  }
+  public void Dispose() { if(handle!=IntPtr.Zero) { CloseHandle(handle); handle=IntPtr.Zero; } }
+}
+'@
+}
+
+function Invoke-PortableIOWorker {
+  param([string]$Operation, [hashtable]$Arguments, [int]$TimeoutSeconds = 1800)
+  # Workers cannot touch application files before the parent attaches their
+  # entire process tree to a kill-on-close job. Parent death also ends robocopy.
+  Initialize-PortableWorkerJob
+  $Control = New-UpdateControlFile 'io'
+  $Context = @{}
+  foreach ($Name in @('PlanPath','Plan','LogPath','ExpectedVersion','ExpectedBaseVersion')) {
+    $Variable = Get-Variable -Name $Name -ErrorAction SilentlyContinue
+    if ($Variable) { $Context[$Name]=$Variable.Value }
+  }
+  $Config = @{ operation=$Operation; arguments=$Arguments; context=$Context }
+  [IO.File]::WriteAllText($Control, ($Config | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
+  $Quote = { param($Value) "'" + $Value.Replace("'", "''") + "'" }
+  $Command = '& ' + (& $Quote $script:UpdaterScriptPath) + ' -IOWorker ' + (& $Quote $Control)
+  $Encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Command))
+  $Job = New-Object PangeaPortableWorkerJob
+  $Worker = $null; $Attached=$false; $Stopped=$false; [long]$ProgressSequence=0
+  try {
+    $Worker = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$Encoded) -WorkingDirectory ([IO.Path]::GetDirectoryName($Control)) -WindowStyle Hidden -RedirectStandardOutput "$Control.stdout" -RedirectStandardError "$Control.stderr" -PassThru
+    $null=$Worker.Handle
+    $Job.Attach($Worker); $Attached=$true
+    Write-UpdateLog "IO worker started: operation=$Operation; pid=$($Worker.Id); limit=${TimeoutSeconds}s; control=$Control"
+    [IO.File]::WriteAllText("$Control.go", 'attached')
+    $Deadline=[DateTime]::UtcNow.AddSeconds([Math]::Max(1,$TimeoutSeconds))
+    $LastReport=[DateTime]::UtcNow
+    while (-not $Worker.WaitForExit(250)) {
+      $ProgressSequence=Publish-PortableIOProgress -Control $Control -LastSequence $ProgressSequence
+      if ([DateTime]::UtcNow -ge $Deadline) { throw "File operation timed out: $Operation (${TimeoutSeconds}s). Details: $Control.stderr" }
+      if (([DateTime]::UtcNow-$LastReport).TotalSeconds -ge 15) {
+        Write-UpdateLog "IO worker still running: operation=$Operation; pid=$($Worker.Id); remaining=$([int]($Deadline-[DateTime]::UtcNow).TotalSeconds)s"
+        $LastReport=[DateTime]::UtcNow
+      }
+    }
+    $ProgressSequence=Publish-PortableIOProgress -Control $Control -LastSequence $ProgressSequence
+    # Even on success, confirm no helper descendant is left writing a path.
+    $Stopped=$Job.StopAndWait(5000)
+    if (-not $Stopped) { throw "IO worker descendants did not exit: $Operation" }
+    if (-not [IO.File]::Exists("$Control.result")) { throw "IO worker failed: $Operation (exit $($Worker.ExitCode)). Details: $Control.stderr" }
+    $Result=[IO.File]::ReadAllText("$Control.result",[Text.Encoding]::UTF8) | ConvertFrom-Json
+    if (-not $Result.ok) { throw [string]$Result.error }
+    if ($Worker.ExitCode -ne 0) { throw "IO worker failed: $Operation (exit $($Worker.ExitCode)). Details: $Control.stderr" }
+    return $Result.value
+  } finally {
+    if ($Worker -and -not $Stopped) {
+      if ($Attached) { $Stopped=$Job.StopAndWait(5000) } else {
+        # The gate was never opened: this unassigned child cannot write files.
+        try { if (-not $Worker.HasExited) { $Worker.Kill() }; $Stopped=$Worker.WaitForExit(5000) } catch { $Stopped=$false }
+      }
+      if (-not $Stopped) {
+        $script:UnsafeIOWorker=$true
+        Write-UpdateLog "UNSAFE IO worker exit unconfirmed: operation=$Operation; pid=$($Worker.Id). Directory changes and rollback must stop."
+      }
+    }
+    if ($Worker) { $Worker.Dispose() }
+    $Job.Dispose()
+  }
+}
+
+function Publish-PortableIOProgress {
+  param([string]$Control, [long]$LastSequence=0)
+  # Only the supervising updater owns the monitor's progress identity. A short
+  # lived IO worker reports stages through a separate private mailbox.
+  try {
+    if (-not [IO.File]::Exists("$Control.progress")) { return $LastSequence }
+    $Progress=[IO.File]::ReadAllText("$Control.progress",[Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ($Progress.schema_version -ne 1 -or [long]$Progress.sequence -le $LastSequence) { return $LastSequence }
+    $Parameters=@{State='running';Stage=[string]$Progress.stage;Message=[string]$Progress.message;Percent=[int]$Progress.percent}
+    if ($Progress.PSObject.Properties['files_completed']) { $Parameters.FilesCompleted=[int]$Progress.files_completed }
+    if ($Progress.PSObject.Properties['files_total']) { $Parameters.FilesTotal=[int]$Progress.files_total }
+    Write-UpdateProgress @Parameters
+    return [long]$Progress.sequence
+  } catch { return $LastSequence }
+}
+
+function Invoke-PortableIOWorkerEntry {
+  param([string]$Control)
+  $Config=[IO.File]::ReadAllText($Control,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  $Deadline=[DateTime]::UtcNow.AddSeconds(30)
+  while (-not [IO.File]::Exists("$Control.go")) {
+    if ([DateTime]::UtcNow -ge $Deadline) { throw 'IO worker was not attached to its supervisor; refusing file operations.' }
+    Start-Sleep -Milliseconds 50
+  }
+  foreach ($Property in $Config.context.PSObject.Properties) { Set-Variable -Name $Property.Name -Value $Property.Value -Scope Script }
+  $script:PortableIOWorker=$true
+  $script:PortableIOControl=$Control
+  $script:PortableIOProgressSequence=0
+  $Arguments=@{}
+  foreach ($Property in $Config.arguments.PSObject.Properties) { $Arguments[$Property.Name]=$Property.Value }
+  try {
+    $Value = switch ([string]$Config.operation) {
+      'ValidatePackage' {
+        if ([long]$Arguments.Size -le 0 -or (Get-Item -LiteralPath $Arguments.Path).Length -ne [long]$Arguments.Size) { throw 'The downloaded update package size no longer matches the signed release.' }
+        if ([string]$Arguments.Sha256 -notmatch '^[0-9a-f]{64}$' -or (Get-FileHash -LiteralPath $Arguments.Path -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$Arguments.Sha256) { throw 'The downloaded update package no longer matches the signed release.' }
+      }
+      'Preflight' { Assert-PortableUpdatePreflight @Arguments }
+      'Patch' { Apply-VerifiedPatch @Arguments }
+      'Extract' { Expand-VerifiedArchive @Arguments }
+      'CopyUserData' { Copy-PortableUserData @Arguments }
+      'VerifyUserData' { Assert-PortableUserDataUnchanged @Arguments }
+      'RemoveDirectory' { Remove-PortableDirectory @Arguments }
+      'SnapshotProfile' { New-UpdateProfileSnapshot @Arguments }
+      'RestoreProfile' { Restore-UpdateProfileSnapshot @Arguments }
+      default { throw "Unsupported IO worker operation: $($Config.operation)" }
+    }
+    $Result=@{ok=$true;value=$Value}
+  } catch { $Result=@{ok=$false;error=$_.Exception.Message}; Write-UpdateLog "IO worker failed: $($Config.operation): $($_.Exception.Message)" }
+  [IO.File]::WriteAllText("$Control.result",($Result | ConvertTo-Json -Depth 20),(New-Object Text.UTF8Encoding($false)))
+}
+
+function Test-PortableIOWorker {
+  return (Get-Variable -Name PortableIOWorker -Scope Script -ErrorAction SilentlyContinue) -and $script:PortableIOWorker
+}
+
+function Get-PortableSpaceRequirement {
+  param([long]$CandidateBytes, [long]$UserBytes, [long]$EntryCount, [long]$AllocationUnit = 65536)
+  if ($CandidateBytes -lt 0 -or $UserBytes -lt 0 -or $EntryCount -lt 0 -or $AllocationUnit -le 0) { throw 'Invalid update space estimate.' }
+  # Free space already excludes the installed version and imported archive.
+  # Add the new full tree, a second copy of user data, allocation slack and a
+  # reserve; the old tree is renamed, not copied to another volume.
+  $Peak=[decimal]$CandidateBytes+[decimal]$UserBytes+([decimal]$EntryCount*$AllocationUnit)
+  $Reserve=[Math]::Max([decimal](256MB),[Math]::Ceiling($Peak/[decimal]10))
+  if ($Peak+$Reserve -gt [long]::MaxValue) { throw 'Update space estimate exceeds supported size.' }
+  return [long]($Peak+$Reserve)
+}
+
+function Get-PortableProtectedInventory {
+  param([string]$InstallRoot)
+  Initialize-PortableFileIO
+  $ManifestPath=Join-Path $InstallRoot 'resources\update\pangea-package-manifest.json'
+  if (-not [PangeaPortableFileIO]::IsFile($ManifestPath)) { throw 'Cannot protect custom installation files: installed package manifest is missing. Keep the original directory and restore its package manifest before retrying.' }
+  $Manifest=[IO.File]::ReadAllText($ManifestPath,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  if (-not $Manifest.PSObject.Properties['files'] -or -not @($Manifest.files).Count) { throw 'Installed package manifest has no file inventory; custom files cannot be safely classified.' }
+  $KnownFiles=@{}; $KnownDirectories=@{}
+  $Paths=@($Manifest.files | ForEach-Object { [string]$_.path }) + @('resources/update/pangea-package-manifest.json','resources/update/pangea-package-manifest.json.sig')
+  foreach ($Path in $Paths) {
+    $Normalized=$Path.Replace('\','/').ToLowerInvariant()
+    $null=[PangeaPortableFileIO]::Child($InstallRoot,$Normalized)
+    $KnownFiles[$Normalized]=$true
+    while ($Normalized.Contains('/')) { $Normalized=$Normalized.Substring(0,$Normalized.LastIndexOf('/')); $KnownDirectories[$Normalized]=$true }
+  }
+  $Entries=@([PangeaPortableTree]::Inventory($InstallRoot,$false))
+  $Unknown=[Collections.Generic.List[string]]::new(); [long]$UserBytes=0; [long]$UserCount=0
+  foreach ($Entry in $Entries) {
+    $Relative=$Entry.Path.Replace('\','/').ToLowerInvariant()
+    $Top=$Relative.Split('/')[0]
+    if ($Top -in @('local-skills','launch-root')) {
+      if ($Relative -eq $Top -and $Entry.Kind -ne 'directory') { throw "User-data root must be a real directory, not a file or link: $($Entry.Path). Original data is retained." }
+      $UserBytes += [long]$Entry.Length; $UserCount++; continue
+    }
+    if ($Entry.Kind -eq 'file' -and $KnownFiles.ContainsKey($Relative)) { continue }
+    if ($Entry.Kind -eq 'directory' -and $KnownDirectories.ContainsKey($Relative)) { continue }
+    # These are the only generated program files excluded by the package
+    # builder. Do not migrate arbitrary old binaries or ignore custom files.
+    if (($Entry.Kind -eq 'directory' -and $Relative -match '(^|/)__pycache__$') -or
+        ($Entry.Kind -eq 'file' -and $Relative -match '(^|/)__pycache__/[^/]+\.pyc$')) { continue }
+    if ($Unknown.Count -lt 20) { $Unknown.Add([string]$Entry.Path) }
+  }
+  if ($Unknown.Count) {
+    throw ('安装目录存在升级包清单外的文件或目录，升级已停止以避免丢失：' + ($Unknown -join '；') + '。请先将自建内容备份并移出安装目录，或放入 launch-root / local-skills；不要把旧程序残留迁入新版本。原目录未替换。')
+  }
+  return [pscustomobject]@{UserBytes=$UserBytes;UserCount=$UserCount}
+}
+
+function Assert-PortableUpdatePreflight {
+  param([string]$InstallRoot, [string]$PackagePath, [string]$PackageType)
+  if (-not (Test-PortableIOWorker)) {
+    return Invoke-PortableIOWorker -Operation Preflight -Arguments @{InstallRoot=$InstallRoot;PackagePath=$PackagePath;PackageType=$PackageType} -TimeoutSeconds 600
+  }
+  Initialize-PortableFileIO
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $Inventory=Get-PortableProtectedInventory $InstallRoot
+  [long]$UserBytes=$Inventory.UserBytes; [long]$UserCount=$Inventory.UserCount
+  [long]$CandidateBytes=0; [long]$CandidateCount=0
+  $Zip=[IO.Compression.ZipFile]::OpenRead($PackagePath)
+  try {
+    if ($PackageType -eq 'patch') {
+      $Target=Read-ZipEntryText $Zip 'target/resources/update/pangea-package-manifest.json' | ConvertFrom-Json
+      foreach ($File in $Target.files) {
+        if ([long]$File.size -lt 0) { throw 'Invalid target file size.' }
+        $CandidateBytes += [long]$File.size; $CandidateCount++
+      }
+      foreach ($Name in @('target/resources/update/pangea-package-manifest.json','target/resources/update/pangea-package-manifest.json.sig')) {
+        $Entry=Get-ZipEntry $Zip $Name
+        if (-not $Entry) { throw "Package metadata is missing: $Name" }
+        $CandidateBytes += [long]$Entry.Length; $CandidateCount++
+      }
+    } elseif ($PackageType -eq 'full') {
+      foreach ($Entry in $Zip.Entries) { $CandidateBytes += [long]$Entry.Length; $CandidateCount++ }
+    } else { throw "Unsupported package type: $PackageType" }
+  } finally { $Zip.Dispose() }
+  $Parent=[IO.Path]::GetDirectoryName($InstallRoot)
+  $Unit=[PangeaPortableTree]::AllocationUnit($Parent)
+  # Count another allocation unit for possible parent directories per file.
+  # Profile rollback retains both the original settings snapshot and the
+  # attempted-version settings, each bounded to 256 MiB by its own helper.
+  $Required=Get-PortableSpaceRequirement ($CandidateBytes+512MB) $UserBytes (($CandidateCount*2)+$UserCount) $Unit
+  $Available=[PangeaPortableTree]::AvailableBytes($Parent)
+  Write-UpdateLog "disk preflight: install=$InstallRoot; available=$Available; required=$Required; candidate=$CandidateBytes; user-data=$UserBytes; profile-rollback-budget=536870912; allocation=$Unit"
+  if ($Available -lt $Required) {
+    throw ("安装盘空间不足：需要额外 {0:N2} GiB（新版本、用户数据副本及余量），可用 {1:N2} GiB。原版本未替换。" -f ($Required/1GB),($Available/1GB))
+  }
+  return [pscustomobject]@{required_bytes=$Required;available_bytes=$Available;candidate_bytes=$CandidateBytes;user_bytes=$UserBytes}
+}
+
+function Stop-PortableOwnedWriters {
+  param([string]$InstallRoot, [int]$TimeoutSeconds=60)
+  if (-not $script:AutomaticUpdateCleanup -or -not @($script:OwnedUpdateProcesses).Count) { return }
+  Initialize-HandleInspector
+  $Deadline=[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  # The handoff snapshot predates Desktop exit. Refresh descendants while
+  # their captured parent identity is still provable, including writers whose
+  # executable lives outside the installation and has no directory handle.
+  $Rows=@(Get-CimInstance Win32_Process -OperationTimeoutSec (Get-UpdateServiceBudget $Deadline) -ErrorAction Stop)
+  $Known=@{}
+  foreach ($Owned in $script:OwnedUpdateProcesses) {
+    $Fresh=[PangeaUpdateHandles]::Inspect([int]$Owned.Id)
+    if ($Fresh -and $Fresh.Created -eq $Owned.Created -and $Fresh.Executable -ieq $Owned.Executable) { $Known[[int]$Fresh.Id]=$Fresh }
+  }
+  do {
+    $Added=$false
+    foreach ($Row in $Rows) {
+      $ChildId=[int]$Row.ProcessId; $OwnerId=[int]$Row.ParentProcessId
+      if ($Known.ContainsKey($ChildId) -or -not $Known.ContainsKey($OwnerId)) { continue }
+      $Child=[PangeaUpdateHandles]::Inspect($ChildId)
+      if (-not $Child -or $Child.Created -lt $Known[$OwnerId].Created) { continue }
+      $Known[$ChildId]=$Child; $Added=$true
+      $script:OwnedUpdateProcesses += [pscustomobject]@{Id=$Child.Id;Created=$Child.Created;Executable=$Child.Executable}
+    }
+  } while ($Added)
+  $Stopped=@{}
+  foreach ($Owned in $script:OwnedUpdateProcesses) {
+    if ($Stopped.ContainsKey([int]$Owned.Id)) { continue }
+    $Fresh=[PangeaUpdateHandles]::Inspect([int]$Owned.Id)
+    if (-not $Fresh) {
+      if (Get-Process -Id ([int]$Owned.Id) -ErrorAction SilentlyContinue) { throw "Cannot verify whether Desktop descendant PID $($Owned.Id) is still writing data; original data is retained." }
+      continue
+    }
+    if ($Fresh.Created -ne $Owned.Created -or $Fresh.Executable -ine $Owned.Executable) { continue }
+    $Services=@(Get-CimInstance Win32_Service -Filter "State='Running'" -OperationTimeoutSec (Get-UpdateServiceBudget $Deadline) -ErrorAction Stop | ForEach-Object { [int]$_.ProcessId })
+    $Policy=Get-UpdateHolderPolicy $Fresh $script:OwnedUpdateProcesses $Services $script:ProtectedUpdateProcesses
+    if ($Policy -ne 'owned') { throw "Cannot quiesce protected Desktop descendant before data copy: $($Fresh.Name) (PID $($Fresh.Id)); policy=$Policy. Original data is retained." }
+    if (($Deadline-[DateTime]::UtcNow).TotalSeconds -lt 5 -or -not (Stop-UpdateHolder $Fresh)) { throw "Could not stop verified Desktop writer before data copy: $($Fresh.Name) (PID $($Fresh.Id)). Original data is retained." }
+    $Stopped[[int]$Fresh.Id]=$true
+    Write-UpdateLog "stopped verified Desktop descendant before data copy: $($Fresh.Name); pid=$($Fresh.Id); executable=$($Fresh.Executable)"
+  }
+}
+
+function Assert-PortableUserDataQuiescent {
+  param([string]$PreviousRoot, [int]$TimeoutSeconds=60, [switch]$InspectOnly)
+  $Deadline=[DateTime]::UtcNow.AddSeconds([Math]::Max(1,$TimeoutSeconds))
+  foreach ($Name in @('local-skills','launch-root')) {
+    $Root=Join-Path $PreviousRoot $Name
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { continue }
+    # A FILE_SHARE_DELETE writer can survive a directory rename. Hash equality
+    # alone is not sufficient: inspect user-data handles before copying and
+    # again on both sides of the old-directory rename. Use the same verified
+    # cleanup policy as rename, then require a fresh, empty inspection.
+    $Holders=@(Get-UpdateLockHolders -Root $Root -TimeoutMilliseconds (Get-UpdateScanBudget $Deadline))
+    if (-not $Holders.Count) { continue }
+    if ($InspectOnly) {
+      $Resolution=[pscustomobject]@{Detail='数据验证期间出现了新的占用，请关闭写入程序后重试。'}
+      $Remaining=$Holders
+    } else {
+      Write-UpdateLog "user-data quiescence: $Name has $($Holders.Count) holders; resolving before copy/version switch"
+      $Resolution=Resolve-UpdateDirectoryLocks -Root $Root -Deadline $Deadline
+      $Remaining=@(Get-UpdateLockHolders -Root $Root -TimeoutMilliseconds (Get-UpdateScanBudget $Deadline))
+    }
+    if ($Remaining.Count) {
+      $Names=@($Remaining | ForEach-Object { "$($_.Name) (PID $($_.Id))" }) -join '、'
+      throw "用户数据目录仍被进程占用，复制或切换已停止：$Name；$Names。原数据及备份已保留。$($Resolution.Detail)"
+    }
+    Write-UpdateLog "user-data quiescence confirmed after cleanup: $Name"
+  }
+}
+
+function Assert-PortableUserDataUnchanged {
+  param([string]$PreviousRoot, [string]$CandidateRoot, $Snapshots=$null)
+  if (-not (Test-PortableIOWorker)) {
+    if (-not (Get-Variable -Name PortableUserDataSnapshot -Scope Script -ErrorAction SilentlyContinue)) { throw 'User-data verification snapshot is missing; refusing version switch.' }
+    Assert-PortableUserDataQuiescent -PreviousRoot $PreviousRoot
+    Invoke-PortableIOWorker -Operation VerifyUserData -Arguments @{PreviousRoot=$PreviousRoot;CandidateRoot=$CandidateRoot;Snapshots=$script:PortableUserDataSnapshot} | Out-Null
+    Assert-PortableUserDataQuiescent -PreviousRoot $PreviousRoot -InspectOnly
+    return
+  }
+  Initialize-PortableFileIO
+  # Repeat classification after copying and after the old-root rename: a user
+  # file created while rebuilding must not disappear with the old backup.
+  if ([PangeaPortableFileIO]::IsFile((Join-Path $PreviousRoot 'resources\update\pangea-package-manifest.json'))) {
+    Get-PortableProtectedInventory $PreviousRoot | Out-Null
+  }
+  foreach ($Name in @('local-skills','launch-root')) {
+    $Source=Join-Path $PreviousRoot $Name
+    $Target=Join-Path $CandidateRoot $Name
+    $Expected=[string]$Snapshots.$Name
+    $Actual=if (Test-Path -LiteralPath $Source -PathType Container) { [PangeaPortableTree]::Fingerprint($Source) } else { 'missing' }
+    if ($Actual -ne $Expected) { throw "User directory changed after copy: $Name. Version switch stopped; original data is retained." }
+    if ($Expected -ne 'missing' -and [PangeaPortableTree]::Fingerprint($Target) -ne $Expected) { throw "Candidate user directory changed after verification: $Name. Original data is retained." }
+  }
+}
+
 function Copy-PortableUserData([string]$PreviousRoot, [string]$CandidateRoot) {
+  if (-not (Test-PortableIOWorker)) {
+    Assert-PortableUserDataQuiescent -PreviousRoot $PreviousRoot
+    $script:PortableUserDataSnapshot = Invoke-PortableIOWorker -Operation CopyUserData -Arguments @{PreviousRoot=$PreviousRoot;CandidateRoot=$CandidateRoot}
+    Assert-PortableUserDataQuiescent -PreviousRoot $PreviousRoot -InspectOnly
+    return
+  }
+  Initialize-PortableFileIO
+  if ([PangeaPortableFileIO]::IsFile((Join-Path $PreviousRoot 'resources\update\pangea-package-manifest.json'))) {
+    Get-PortableProtectedInventory $PreviousRoot | Out-Null
+  }
+  $Snapshots=@{}
   # Keep the original intact until the new application reports healthy.
   foreach ($Name in @('local-skills', 'launch-root')) {
     $Source = Join-Path $PreviousRoot $Name
@@ -27,13 +394,20 @@ function Copy-PortableUserData([string]$PreviousRoot, [string]$CandidateRoot) {
       if ($CopyExit -lt 0 -or $CopyExit -ge 8) {
         throw "User directory copy failed: $Name (robocopy exit $CopyExit). Original data is unchanged. Details: $CopyLog"
       }
+      $Before=[PangeaPortableTree]::Fingerprint($Source)
+      $Copied=[PangeaPortableTree]::Fingerprint($Target)
+      $After=[PangeaPortableTree]::Fingerprint($Source)
+      if ($Before -ne $After -or $After -ne $Copied) { throw "User directory changed during copy or verification failed: $Name. Stop applications writing this data and retry; original data is retained." }
+      $Snapshots[$Name]=$After
       Write-UpdateLog "preserved user directory: $Name"
-    }
+    } else { $Snapshots[$Name]='missing' }
   }
+  return $Snapshots
 }
 
 function Remove-PortableDirectory {
   param([string]$Directory)
+  if (-not (Test-PortableIOWorker)) { Invoke-PortableIOWorker -Operation RemoveDirectory -Arguments @{Directory=$Directory} -TimeoutSeconds 300 | Out-Null; return }
   # Windows rd supports extended paths and unlinks junctions instead of walking
   # their targets. Pass the path through the environment, not cmd interpolation.
   $FullPath = [IO.Path]::GetFullPath($Directory).TrimEnd('\')
@@ -50,6 +424,199 @@ function Remove-PortableDirectory {
     $Cleanup.WaitForExit()
     if ($Cleanup.ExitCode -ne 0) { throw "Could not remove temporary update directory: $Directory" }
   } finally { $Cleanup.Dispose() }
+}
+
+function Get-UpdateProfileFiles {
+  # Only configuration touched by Desktop/Harness startup belongs to this
+  # transaction. Sessions, credentials, reports, plugins and repositories do not.
+  return @('package.json', 'cordis.patch.yml', 'cordis.yml', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', '.npmrc', '.install-complete') | ForEach-Object { 'harness/profiles/web/' + $_ }
+}
+
+function Assert-UpdateProfilePath {
+  param([string]$Path)
+  $Full = [IO.Path]::GetFullPath($Path)
+  $Cursor = $Full
+  while ($Cursor) {
+    $Attributes = $null
+    try { $Attributes = [IO.File]::GetAttributes($Cursor) }
+    catch [IO.FileNotFoundException] { }
+    catch [IO.DirectoryNotFoundException] { }
+    if ($null -ne $Attributes) {
+      if (($Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Profile transaction refuses a linked path: $Cursor"
+      }
+    }
+    $Next = [IO.Path]::GetDirectoryName($Cursor)
+    if ($Next -eq $Cursor) { break }
+    $Cursor = $Next
+  }
+  return $Full
+}
+
+function Test-UpdateProfileFile {
+  param([string]$Path)
+  # File.Exists hides access errors by returning false. A denied original must
+  # never be recorded as absent and deleted by a later rollback.
+  $Full = Assert-UpdateProfilePath $Path
+  try { $Attributes = [IO.File]::GetAttributes($Full) }
+  catch [IO.FileNotFoundException] { return $false }
+  catch [IO.DirectoryNotFoundException] { return $false }
+  if (($Attributes -band [IO.FileAttributes]::Directory) -ne 0) { throw "Expected a profile file, found a directory: $Full" }
+  return $true
+}
+
+function Get-UpdateProfileHash {
+  param([byte[]]$Bytes)
+  $Hash = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($Hash.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant() }
+  finally { $Hash.Dispose() }
+}
+
+function Read-UpdateProfileBytes {
+  param([string]$Path)
+  $Full = Assert-UpdateProfilePath $Path
+  if ([IO.Directory]::Exists($Full)) { throw "Expected a profile file, found a directory: $Full" }
+  $Stream = [IO.File]::Open($Full, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  try {
+    if ($Stream.Length -gt 64MB) { throw "Profile configuration exceeds the 64 MiB snapshot limit: $Full" }
+    $Memory = New-Object IO.MemoryStream
+    try {
+      $Stream.CopyTo($Memory)
+      if ($Memory.Length -gt 64MB) { throw "Profile configuration grew beyond its snapshot limit: $Full" }
+      return ,$Memory.ToArray()
+    } finally { $Memory.Dispose() }
+  } finally { $Stream.Dispose() }
+}
+
+function Write-UpdateProfileBytes {
+  param([string]$Path, [byte[]]$Bytes, [switch]$CreateOnly)
+  $Full = Assert-UpdateProfilePath $Path
+  if ([IO.Directory]::Exists($Full)) { throw "Expected a profile file, found a directory: $Full" }
+  [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Full)) | Out-Null
+  $Temporary = Join-Path ([IO.Path]::GetDirectoryName($Full)) ('.profile-' + [guid]::NewGuid().ToString('N') + '.tmp')
+  try {
+    $Stream = [IO.File]::Open($Temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $Stream.Write($Bytes, 0, $Bytes.Length); $Stream.Flush($true) } finally { $Stream.Dispose() }
+    Assert-UpdateProfilePath $Full | Out-Null
+    if ((Test-UpdateProfileFile $Full) -and -not $CreateOnly) { [IO.File]::Replace($Temporary, $Full, [NullString]::Value) }
+    else { [IO.File]::Move($Temporary, $Full) }
+  } finally {
+    if ([IO.File]::Exists($Temporary)) { [IO.File]::Delete($Temporary) }
+  }
+}
+
+function Assert-UpdateProfileQuiescent {
+  param([string]$UserDataRoot)
+  $ProfileRoot = Assert-UpdateProfilePath (Join-Path $UserDataRoot 'harness/profiles/web')
+  # External Node/Python executables can keep writing this profile without
+  # holding the application directory. Only captured and freshly verified
+  # Desktop descendants may be stopped; all other holders block restoration.
+  Stop-PortableOwnedWriters -InstallRoot $UserDataRoot -TimeoutSeconds 30
+  if (-not [IO.Directory]::Exists($ProfileRoot)) { return }
+  $Holders = @(Get-UpdateLockHolders -Root $ProfileRoot -TimeoutMilliseconds 15000)
+  if ($Holders.Count) {
+    $Details = @($Holders | ForEach-Object { "$($_.Name) (PID $($_.Id))" }) -join '、'
+    throw "外部用户配置仍被进程占用，配置快照或恢复已停止，原文件已保留：$Details。请关闭这些进程后重试恢复。"
+  }
+}
+
+function New-UpdateProfileSnapshot {
+  param([string]$UserDataRoot, [string]$SnapshotRoot)
+  if (-not (Test-PortableIOWorker)) {
+    Assert-UpdateProfileQuiescent -UserDataRoot $UserDataRoot
+    Invoke-PortableIOWorker -Operation SnapshotProfile -Arguments @{UserDataRoot=$UserDataRoot; SnapshotRoot=$SnapshotRoot} -TimeoutSeconds 180 | Out-Null
+    return
+  }
+  $UserRoot = (Assert-UpdateProfilePath $UserDataRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+  $Snapshot = Assert-UpdateProfilePath $SnapshotRoot
+  if ([IO.Directory]::Exists($Snapshot) -or [IO.File]::Exists($Snapshot)) { throw "Profile snapshot already exists: $Snapshot" }
+  [IO.Directory]::CreateDirectory($Snapshot) | Out-Null
+  # .npmrc and user patch layers can contain private connection settings. Do
+  # not inherit a broadly readable install-drive ACL for their backup copies.
+  if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+    $Acl = Get-Acl -LiteralPath $Snapshot
+    $Acl.SetAccessRuleProtection($true, $false)
+    $Inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $CurrentUser = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $SystemUser = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')
+    foreach ($Identity in @($CurrentUser, $SystemUser)) {
+      $Rule = New-Object Security.AccessControl.FileSystemAccessRule($Identity, [Security.AccessControl.FileSystemRights]::FullControl, $Inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
+      $Acl.AddAccessRule($Rule)
+    }
+    Set-Acl -LiteralPath $Snapshot -AclObject $Acl
+  }
+  $Entries = @(); $TotalBytes = [long]0
+  foreach ($Relative in @(Get-UpdateProfileFiles)) {
+    $Source = Assert-UpdateProfilePath (Join-Path $UserRoot $Relative)
+    if ([IO.Directory]::Exists($Source)) { throw "Expected a profile file, found a directory: $Source" }
+    $Exists = Test-UpdateProfileFile $Source
+    $Size = [long]0; $Sha256 = $null
+    if ($Exists) {
+      $Bytes = Read-UpdateProfileBytes $Source
+      $Size = $Bytes.LongLength; $TotalBytes += $Size
+      if ($TotalBytes -gt 256MB) { throw 'Profile configuration exceeds the 256 MiB total snapshot limit.' }
+      $Sha256 = Get-UpdateProfileHash $Bytes
+      Write-UpdateProfileBytes (Join-Path (Join-Path $Snapshot 'original') $Relative) $Bytes -CreateOnly
+    }
+    $Entries += @{ path=$Relative; existed=$Exists; size=$Size; sha256=$Sha256 }
+  }
+  $Manifest = @{ schema_version=1; user_data_root=$UserRoot; files=$Entries; created_at=[DateTime]::UtcNow.ToString('o') }
+  $Json = ConvertTo-Json -InputObject $Manifest -Depth 5
+  Write-UpdateProfileBytes (Join-Path $Snapshot 'profile.json') ([Text.Encoding]::UTF8.GetBytes($Json)) -CreateOnly
+  Write-UpdateLog "External profile configuration snapshot saved: $Snapshot"
+}
+
+function Restore-UpdateProfileSnapshot {
+  param([string]$UserDataRoot, [string]$SnapshotRoot)
+  if (-not (Test-PortableIOWorker)) {
+    Assert-UpdateProfileQuiescent -UserDataRoot $UserDataRoot
+    Invoke-PortableIOWorker -Operation RestoreProfile -Arguments @{UserDataRoot=$UserDataRoot; SnapshotRoot=$SnapshotRoot} -TimeoutSeconds 180 | Out-Null
+    return
+  }
+  $UserRoot = (Assert-UpdateProfilePath $UserDataRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+  $Snapshot = Assert-UpdateProfilePath $SnapshotRoot
+  $ManifestPath = Join-Path $Snapshot 'profile.json'
+  $Manifest = [Text.Encoding]::UTF8.GetString((Read-UpdateProfileBytes $ManifestPath)) | ConvertFrom-Json
+  if ($Manifest.schema_version -ne 1 -or [string]$Manifest.user_data_root -cne $UserRoot) { throw 'Profile snapshot identity does not match this user data directory.' }
+  $Allowed = @(Get-UpdateProfileFiles)
+  if (@($Manifest.files).Count -ne $Allowed.Count) { throw 'Profile snapshot has an incomplete file list.' }
+  $Validated = @(); $Seen = @{}; $TotalBytes = [long]0
+  # Validate every saved file before changing any live configuration.
+  foreach ($Entry in @($Manifest.files)) {
+    $Relative = [string]$Entry.path
+    if ($Relative -cnotin $Allowed -or $Seen.ContainsKey($Relative)) { throw 'Profile snapshot contains an unexpected or duplicate path.' }
+    if ($Entry.existed -isnot [bool]) { throw 'Profile snapshot has an invalid presence record.' }
+    $Seen[$Relative] = $true
+    $Target = Assert-UpdateProfilePath (Join-Path $UserRoot $Relative)
+    if ([IO.Directory]::Exists($Target)) { throw "Expected a profile file, found a directory: $Target" }
+    $Bytes = $null
+    if ($Entry.existed) {
+      if ([long]$Entry.size -lt 0 -or [long]$Entry.size -gt 64MB -or [string]$Entry.sha256 -notmatch '^[0-9a-f]{64}$') { throw 'Profile snapshot has invalid file metadata.' }
+      $Bytes = Read-UpdateProfileBytes (Join-Path (Join-Path $Snapshot 'original') $Relative)
+      $TotalBytes += $Bytes.LongLength
+      if ($TotalBytes -gt 256MB -or $Bytes.LongLength -ne [long]$Entry.size -or (Get-UpdateProfileHash $Bytes) -cne [string]$Entry.sha256) { throw "Profile snapshot integrity check failed: $Relative" }
+    } elseif ([long]$Entry.size -ne 0 -or $null -ne $Entry.sha256) { throw 'Profile snapshot has invalid absent-file metadata.' }
+    $Validated += [pscustomobject]@{ Relative=$Relative; Target=$Target; Existed=[bool]$Entry.existed; Bytes=$Bytes }
+  }
+  foreach ($File in $Validated) {
+    Assert-UpdateProfilePath $File.Target | Out-Null
+    # Preserve the failed version's first observed configuration before any
+    # replacement/deletion. A repeated interrupted rollback keeps this copy.
+    if (Test-UpdateProfileFile $File.Target) {
+      $Attempted = Join-Path (Join-Path $Snapshot 'attempted') $File.Relative
+      Assert-UpdateProfilePath $Attempted | Out-Null
+      if (-not (Test-UpdateProfileFile $Attempted)) {
+        Write-UpdateProfileBytes $Attempted (Read-UpdateProfileBytes $File.Target) -CreateOnly
+      }
+    }
+    if ($File.Existed) { Write-UpdateProfileBytes $File.Target $File.Bytes }
+    elseif (Test-UpdateProfileFile $File.Target) { [IO.File]::Delete($File.Target) }
+  }
+  # The new version may have altered node_modules. Restoring an old success
+  # fingerprint must not claim that those packages still match the old graph.
+  $InstallMarker = Assert-UpdateProfilePath (Join-Path $UserRoot 'harness/profiles/web/.install-complete')
+  if (Test-UpdateProfileFile $InstallMarker) { [IO.File]::Delete($InstallMarker) }
+  Write-UpdateLog "External profile configuration restored; failed-version configuration retained at $(Join-Path $Snapshot 'attempted')"
 }
 
 function Write-UpdateLog {
@@ -167,6 +734,20 @@ public static class PangeaUpdateHandles {
     } finally { if (data != IntPtr.Zero) Marshal.FreeHGlobal(data); CloseHandle(reference); }
   }
   // Hold a process handle throughout: a recycled PID must never target a new process.
+  public static PangeaHolder Inspect(int id) {
+    IntPtr handle=OpenProcess(0x1000,false,id);
+    if(handle==IntPtr.Zero) return null;
+    try {
+      long created,exited,kernel,user; bool critical;
+      if(!GetProcessTimes(handle,out created,out exited,out kernel,out user)) return null;
+      if(!IsProcessCritical(handle,out critical)) critical=true;
+      using(var process=Process.GetProcessById(id)) {
+        if(process.StartTime.ToUniversalTime().ToFileTimeUtc()!=created) return null;
+        return new PangeaHolder {Id=id,Created=created,Name=process.ProcessName,Executable=process.MainModule.FileName,
+          Path="",Critical=critical,SameUser=SameUser(handle),Session=process.SessionId};
+      }
+    } catch { return null; } finally {CloseHandle(handle);}
+  }
   public static bool Stop(int id, long expectedCreated) {
     IntPtr handle = OpenProcess(0x101001, false, id);
     if (handle == IntPtr.Zero) return false;
@@ -244,7 +825,7 @@ function New-UpdateControlFile {
 }
 
 function Get-UpdateLockHolders {
-  param([string]$Root)
+  param([string]$Root, [int]$TimeoutMilliseconds = 15000)
   # A remote filesystem handle query can block inside Windows. Isolate the scan
   # and bound its lifetime; only this diagnostic child may be killed on timeout.
   $Output = New-UpdateControlFile 'handles'
@@ -254,7 +835,7 @@ function Get-UpdateLockHolders {
   $Worker = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$Encoded) -WorkingDirectory ([IO.Path]::GetDirectoryName($PlanPath)) -WindowStyle Hidden -PassThru
   try {
     $null = $Worker.Handle
-    if (-not $Worker.WaitForExit(15000)) { $Worker.Kill(); throw 'Local handle inspection timed out; no occupying processes were stopped.' }
+    if (-not $Worker.WaitForExit([Math]::Max(1, $TimeoutMilliseconds))) { $Worker.Kill(); throw 'Local handle inspection timed out; no occupying processes were stopped.' }
     if ($Worker.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $Output)) { throw 'Local handle inspection unavailable; no occupying processes were stopped.' }
     # Windows PowerShell 5.1 emits a top-level JSON array as one pipeline
     # object. Wrapping that pipeline in @() nests the holders: member access
@@ -265,12 +846,54 @@ function Get-UpdateLockHolders {
   } finally { $Worker.Dispose(); Remove-Item -LiteralPath $Output -Force -ErrorAction SilentlyContinue }
 }
 
+function Get-RegisteredTortoiseGitCachePaths {
+  # TortoiseGit's installer records its exact cache executable in HKLM. Read
+  # both views so a 32-bit shell cannot miss a 64-bit installation (or vice versa).
+  foreach ($View in @([Microsoft.Win32.RegistryView]::Registry64, [Microsoft.Win32.RegistryView]::Registry32)) {
+    $Base = $null; $Key = $null
+    try {
+      $Base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $View)
+      $Key = $Base.OpenSubKey('Software\TortoiseGit')
+      if ($Key) {
+        $Path = [string]$Key.GetValue('CachePath', '')
+        if ($Path) { [IO.Path]::GetFullPath($Path) }
+      }
+    } catch { } finally {
+      if ($Key) { $Key.Dispose() }
+      if ($Base) { $Base.Dispose() }
+    }
+  }
+}
+
+function Get-UpdateExecutableVersionInfo {
+  param([string]$Path)
+  return [Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
+}
+
+function Test-TortoiseGitCacheExecutable {
+  param([string]$Executable)
+  try {
+    if ([string]::IsNullOrWhiteSpace($Executable)) { return $false }
+    $Path = [IO.Path]::GetFullPath($Executable)
+    if ([IO.Path]::GetFileName($Path) -ine 'TGitCache.exe') { return $false }
+    if (-not @((Get-RegisteredTortoiseGitCachePaths) | Where-Object { $_ -ieq $Path }).Count) { return $false }
+    $Version = Get-UpdateExecutableVersionInfo $Path
+    return $Version.ProductName -ieq 'TortoiseGit' -and $Version.OriginalFilename -ieq 'TGitCache.exe'
+  } catch { return $false }
+}
+
 function Get-UpdateHolderPolicy {
   param($Holder, $Owned, [int[]]$ServiceIds, [int[]]$ProtectedIds)
   if ($Holder.Critical -or -not $Holder.SameUser -or $Holder.Session -ne [Diagnostics.Process]::GetCurrentProcess().SessionId -or
       $Holder.Id -in $ServiceIds) { return 'protected' }
   if ($Holder.Name -ieq 'explorer' -and $Holder.Executable -ieq (Join-Path $env:SystemRoot 'explorer.exe')) { return 'explorer' }
   if ($Holder.Id -in $ProtectedIds) { return 'protected' }
+  # Only the installed TortoiseGit cache may release repository-watcher locks.
+  # A name match alone must never authorize stopping an unrelated program.
+  if ($Holder.Name -ieq 'TGitCache') {
+    if (Test-TortoiseGitCacheExecutable ([string]$Holder.Executable)) { return 'tortoisegit' }
+    return 'protected'
+  }
   # Exact descendant identity, not a short executable-name allowlist: Electron
   # helpers and shell wrappers can also retain this installation's handles.
   if (@($Owned | Where-Object { $_.Id -eq $Holder.Id -and $_.Created -eq $Holder.Created -and $_.Executable -ieq $Holder.Executable }).Count) { return 'owned' }
@@ -344,6 +967,7 @@ function Watch-ExplorerRecovery {
 }
 
 function Start-ExplorerRecovery {
+  param([int]$TimeoutMilliseconds = 15000)
   $WatchFile = New-UpdateControlFile 'explorer'
   $Self = Get-Process -Id $PID
   $Watch = @{ supervisor_pid=$PID; supervisor_created=$Self.StartTime.ToUniversalTime().ToFileTimeUtc(); session=$Self.SessionId }
@@ -355,9 +979,9 @@ function Start-ExplorerRecovery {
   # crashed updater. Do not terminate Explorer until the guard acknowledges.
   $Guard = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$Encoded) -WorkingDirectory $env:TEMP -WindowStyle Hidden -PassThru
   try {
-    $Deadline=(Get-Date).AddSeconds(15)
+    $Deadline=[DateTime]::UtcNow.AddMilliseconds([Math]::Max(1, $TimeoutMilliseconds))
     while (-not (Test-Path -LiteralPath "$WatchFile.ready")) {
-      if ($Guard.HasExited -or (Get-Date) -ge $Deadline) { throw 'Explorer recovery guard did not start; Explorer will not be terminated.' }
+      if ($Guard.HasExited -or [DateTime]::UtcNow -ge $Deadline) { throw 'Explorer recovery guard did not start; Explorer will not be terminated.' }
       Start-Sleep -Milliseconds 100
       $Guard.Refresh()
     }
@@ -375,22 +999,43 @@ function Complete-ExplorerRecovery {
   }
 }
 
+function Get-UpdateScanBudget {
+  param([DateTime]$Deadline)
+  $Remaining = [Math]::Floor(($Deadline - [DateTime]::UtcNow).TotalMilliseconds)
+  if ($Remaining -le 0) { throw 'Directory lock cleanup time limit reached.' }
+  return [int][Math]::Min([double]15000, $Remaining)
+}
+
+function Get-UpdateServiceBudget {
+  param([DateTime]$Deadline)
+  $Milliseconds = Get-UpdateScanBudget $Deadline
+  # CIM uses whole seconds; do not start a query with less than one second left.
+  if ($Milliseconds -lt 1000) { throw 'Directory lock cleanup time limit reached.' }
+  return [int][Math]::Min(5, [Math]::Floor($Milliseconds / 1000))
+}
+
 function Resolve-UpdateDirectoryLocks {
-  param([string]$Root)
+  param([string]$Root, [DateTime]$Deadline = [DateTime]::MaxValue)
   Set-UpdateStage '正在检查并自动释放安装目录占用…' 76 'directory-locks'
+  $Details = [Collections.Generic.List[string]]::new()
   try {
-    $Holders = @(Get-UpdateLockHolders $Root)
-    $ServiceIds = @(Get-CimInstance Win32_Service -Filter "State='Running'" -ErrorAction Stop | ForEach-Object { [int]$_.ProcessId })
+    $Holders = @(Get-UpdateLockHolders $Root -TimeoutMilliseconds (Get-UpdateScanBudget $Deadline))
+    $ServiceIds = @(Get-CimInstance Win32_Service -Filter "State='Running'" -OperationTimeoutSec (Get-UpdateServiceBudget $Deadline) -ErrorAction Stop | ForEach-Object { [int]$_.ProcessId })
     Initialize-HandleInspector
     $ManualHolders = @()
     $Candidates = @()
     $Seen = @{}
     foreach ($Holder in $Holders) {
       $Policy = Get-UpdateHolderPolicy $Holder $script:OwnedUpdateProcesses $ServiceIds $script:ProtectedUpdateProcesses
-      Write-UpdateLog "directory handle: $($Holder.Name) pid=$($Holder.Id); policy=$Policy"
-      if ($Policy -eq 'protected') { $ManualHolders += "$($Holder.Name) (PID $($Holder.Id))"; continue }
+      Write-UpdateLog "directory handle: $($Holder.Name) pid=$($Holder.Id); policy=$Policy; executable=$($Holder.Executable)"
+      if ($Policy -eq 'protected') {
+        $ManualHolders += "$($Holder.Name) (PID $($Holder.Id))"
+        $Details.Add("受保护占用：$($Holder.Name) (PID $($Holder.Id))")
+        continue
+      }
       if ($Policy -eq 'explorer' -and (Get-Variable -Name ExplorerRestartAttempted -Scope Script -ErrorAction SilentlyContinue) -and $script:ExplorerRestartAttempted) {
         Write-UpdateLog 'Explorer was already handled once; it will not be repeatedly terminated.'
+        $Details.Add("Explorer 仍占用目录 (PID $($Holder.Id))；本次升级已处理过一次")
         continue
       }
       $Key = Get-UpdateHolderIdentityKey $Root $Holder
@@ -400,39 +1045,59 @@ function Resolve-UpdateDirectoryLocks {
     }
     $Index = 0
     foreach ($Candidate in $Candidates) {
+      if ([DateTime]::UtcNow -ge $Deadline) { $Details.Add('目录占用清理已达到总时间上限'); break }
       $Index++
       Set-UpdateStage "正在自动释放目录占用：$Index / $($Candidates.Count)，$($Candidate.Holder.Name) (PID $($Candidate.Holder.Id))…" 76 'directory-locks'
-      if ($Candidate.Policy -eq 'explorer') {
-        if ((Get-Variable -Name ExplorerRestartAttempted -Scope Script -ErrorAction SilentlyContinue) -and $script:ExplorerRestartAttempted) { continue }
-        $script:ExplorerRestartAttempted=$true
-        Start-ExplorerRecovery
-        Close-InstallationExplorerWindows $Root
-        Start-Sleep -Milliseconds 500
+      try {
+        if ($Candidate.Policy -eq 'explorer') {
+          if ((Get-Variable -Name ExplorerRestartAttempted -Scope Script -ErrorAction SilentlyContinue) -and $script:ExplorerRestartAttempted) { continue }
+          $script:ExplorerRestartAttempted=$true
+          Start-ExplorerRecovery -TimeoutMilliseconds (Get-UpdateScanBudget $Deadline)
+          Close-InstallationExplorerWindows $Root
+          Start-Sleep -Milliseconds 500
+        }
+        # Re-scan before every termination. Automatic cleanup must still match
+        # PID, creation time, executable, directory AND fresh policy.
+        $StillHolding = @(Get-UpdateLockHolders $Root -TimeoutMilliseconds (Get-UpdateScanBudget $Deadline) | Where-Object { (Get-UpdateHolderIdentityKey $Root $_) -eq $Candidate.Key })
+        if (-not $StillHolding.Count) {
+          Write-UpdateLog "directory holder released or identity changed; skipping pid=$($Candidate.Holder.Id)"
+          continue
+        }
+        $Fresh = $StillHolding[0]
+        $FreshServices = @(Get-CimInstance Win32_Service -Filter "State='Running'" -OperationTimeoutSec (Get-UpdateServiceBudget $Deadline) -ErrorAction Stop | ForEach-Object { [int]$_.ProcessId })
+        $FreshPolicy = Get-UpdateHolderPolicy $Fresh $script:OwnedUpdateProcesses $FreshServices $script:ProtectedUpdateProcesses
+        if ($FreshPolicy -ne $Candidate.Policy) {
+          Write-UpdateLog "directory holder policy changed; skipping pid=$($Fresh.Id); policy=$FreshPolicy"
+          $Details.Add("占用身份或保护策略已变化：$($Fresh.Name) (PID $($Fresh.Id))")
+          continue
+        }
+        # Stop uses at most two seconds for a close request plus three for exit.
+        if (($Deadline - [DateTime]::UtcNow).TotalMilliseconds -lt 5000) { $Details.Add('目录占用清理已达到总时间上限'); break }
+        $Stopped = Stop-UpdateHolder $Fresh
+        Write-UpdateLog "release directory handle: $($Fresh.Name) pid=$($Fresh.Id); stopped=$Stopped"
+        if (-not $Stopped) { $Details.Add("未能释放占用：$($Fresh.Name) (PID $($Fresh.Id))") }
+      } catch {
+        # One inaccessible holder must not suppress cleanup of other proven
+        # holders. It remains protected and its failure appears in the result.
+        $Message = "处理 $($Candidate.Holder.Name) (PID $($Candidate.Holder.Id)) 失败：$($_.Exception.Message)"
+        $Details.Add($Message)
+        Write-UpdateLog "local lock resolution: $Message"
       }
-      # Re-scan before every termination. Automatic cleanup must still match
-      # PID, creation time, executable, directory AND fresh policy.
-      $StillHolding = @(Get-UpdateLockHolders $Root | Where-Object { (Get-UpdateHolderIdentityKey $Root $_) -eq $Candidate.Key })
-      if (-not $StillHolding.Count) {
-        Write-UpdateLog "directory holder released or identity changed; skipping pid=$($Candidate.Holder.Id)"
-        continue
-      }
-      $Fresh = $StillHolding[0]
-      $FreshServices = @(Get-CimInstance Win32_Service -Filter "State='Running'" -ErrorAction Stop | ForEach-Object { [int]$_.ProcessId })
-      $FreshPolicy = Get-UpdateHolderPolicy $Fresh $script:OwnedUpdateProcesses $FreshServices $script:ProtectedUpdateProcesses
-      if ($FreshPolicy -ne $Candidate.Policy) {
-        Write-UpdateLog "directory holder policy changed; skipping pid=$($Fresh.Id); policy=$FreshPolicy"
-        continue
-      }
-      $Stopped = Stop-UpdateHolder $Fresh
-      Write-UpdateLog "release directory handle: $($Fresh.Name) pid=$($Fresh.Id); stopped=$Stopped"
     }
     if ($ManualHolders.Count) {
       # Never block the rename timeout on an unattended modal dialog.
       Write-UpdateLog ('protected directory holders remain: ' + ($ManualHolders -join '; '))
       Set-UpdateStage ('自动清理已完成，仍有受保护的目录占用：' + ($ManualHolders -join '、') + '；正在重试版本切换…') 76 'directory-locks'
     }
-    if (-not $Holders.Count) { Write-UpdateLog 'No inspectable directory holders found; permissions or protected/inaccessible processes may prevent rename.' }
-  } catch { Write-UpdateLog "local lock resolution: $($_.Exception.Message)" }
+    if (-not $Holders.Count) {
+      Write-UpdateLog 'No inspectable directory holders found; permissions or protected/inaccessible processes may prevent rename.'
+      $Details.Add('未发现可读取的目录占用；仍可能是目录权限或不可读取的进程占用')
+    }
+  } catch {
+    Write-UpdateLog "local lock resolution: $($_.Exception.Message)"
+    $Details.Add("目录占用检查失败：$($_.Exception.Message)")
+  }
+  return [pscustomobject]@{ Detail = ($Details -join '；') }
 }
 
 function Write-InstallationProcesses {
@@ -449,11 +1114,17 @@ function Write-InstallationProcesses {
 }
 
 function Move-UpdateDirectory {
-  param([string]$Source, [string]$Destination, [int]$TimeoutSeconds = 30, [switch]$ResolveLocks)
+  param([string]$Source, [string]$Destination, [int]$TimeoutSeconds = 30, [switch]$ResolveLocks,
+    [int]$MaxCleanupPasses = 3, [int]$CleanupTimeoutSeconds = 60)
   Write-UpdateLog "renaming directory: $Source -> $Destination"
-  $Deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $Started = [DateTime]::UtcNow
+  $Deadline = $Started.AddSeconds([Math]::Max(0, $TimeoutSeconds))
+  $OverallDeadline = $Deadline
+  if ($ResolveLocks) { $OverallDeadline = $Deadline.AddSeconds([Math]::Max(0, $CleanupTimeoutSeconds)) }
   $Attempt = 0
-  $ResolutionAttempted = $false
+  $CleanupPasses = 0
+  $NextCleanup = $Started
+  $LockDetail = ''
   while ($true) {
     # Directory.Move is a rename, never Move-Item's move-inside-existing-directory.
     if (Test-Path -LiteralPath $Destination) { throw "Rename destination already exists: $Destination" }
@@ -468,14 +1139,22 @@ function Move-UpdateDirectory {
         Write-UpdateLog "directory rename blocked; waiting for handles to close: $Reason"
         Write-InstallationProcesses $Source
       }
-      if ($ResolveLocks -and -not $ResolutionAttempted) {
-        $ResolutionAttempted = $true
-        Resolve-UpdateDirectoryLocks $Source
-        $Deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+      if ($ResolveLocks -and $CleanupPasses -lt $MaxCleanupPasses -and
+          [DateTime]::UtcNow -ge $NextCleanup -and [DateTime]::UtcNow -lt $OverallDeadline) {
+        $CleanupPasses++
+        Write-UpdateLog "directory lock cleanup pass $CleanupPasses / $MaxCleanupPasses"
+        $Resolution = Resolve-UpdateDirectoryLocks $Source -Deadline $OverallDeadline
+        $LockDetail = $Resolution.Detail
+        # Recreated cache processes must be independently scanned and classified
+        # on a later pass; no new PID inherits a previous termination decision.
+        $NextCleanup = [DateTime]::UtcNow.AddMilliseconds(500)
+        $Deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(0, $TimeoutSeconds))
+        if ($Deadline -gt $OverallDeadline) { $Deadline = $OverallDeadline }
         continue
       }
-      if ((Get-Date) -ge $Deadline) {
-        throw "Cannot rename installation directory '$Source' to '$Destination'. Close applications and terminals using this directory, or check its permissions. See the local update log for handle detection and cleanup results. Details: $Reason"
+      if ([DateTime]::UtcNow -ge $Deadline) {
+        $Diagnostic = if ($LockDetail) { " 最近检查：$LockDetail。" } else { '' }
+        throw "Cannot rename installation directory '$Source' to '$Destination'.$Diagnostic 已执行 $CleanupPasses 次目录占用清理。请查看本机升级日志中的进程和权限检查结果。Details: $Reason"
       }
       $Attempt++
       Start-Sleep -Milliseconds 500
@@ -498,6 +1177,7 @@ function Write-AtomicUpdateJson {
 
 function Write-UpdateResult {
   param([ValidateSet('success', 'failed')][string]$Status, [string]$Message, [string]$Rollback = '')
+  if (Test-PortableIOWorker) { return }
   try {
     $Result = @{ schema_version=1; status=$Status; version=$ExpectedVersion; message=$Message; log_path=$LogPath }
     if ($Rollback) { $Result.rollback=$Rollback }
@@ -522,6 +1202,18 @@ function Read-UpdateProgress {
 function Write-UpdateProgress {
   param([ValidateSet('running','success','failed')][string]$State = 'running', [string]$Stage = 'prepare',
     [string]$Message, [int]$Percent = 0, [string]$Rollback = '', [int]$FilesCompleted = -1, [int]$FilesTotal = -1)
+  if (Test-PortableIOWorker) {
+    if (Get-Variable -Name PortableIOControl -Scope Script -ErrorAction SilentlyContinue) {
+      try {
+        $script:PortableIOProgressSequence++
+        $Progress=@{schema_version=1;sequence=$script:PortableIOProgressSequence;stage=$Stage;message=$Message;percent=$Percent}
+        if ($FilesCompleted -ge 0) { $Progress.files_completed=$FilesCompleted }
+        if ($FilesTotal -ge 0) { $Progress.files_total=$FilesTotal }
+        Write-AtomicUpdateJson "$script:PortableIOControl.progress" $Progress
+      } catch { Write-UpdateLog "could not persist IO progress: $($_.Exception.Message)" }
+    }
+    return
+  }
   # Also used by AST-based component tests that do not execute script globals.
   if (-not (Get-Variable -Name PlanPath -ErrorAction SilentlyContinue) -or -not $PlanPath) { return }
   try {
@@ -911,7 +1603,7 @@ function Start-PortableDesktop {
 }
 
 function Wait-PortableDesktopHealthy {
-  param($Process, [string]$Marker, [string]$Version, [int]$TimeoutSeconds = 150,
+  param($Process, [string]$Marker, [string]$Version, [int]$TimeoutSeconds = 300,
     [string]$Stage = 'health-check', [int]$Percent = 92)
   $Deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
   $LastProgress = [DateTime]::MinValue
@@ -1086,6 +1778,95 @@ public static class PangeaPortableFileIO {
     }
   }
 }
+public sealed class PangeaPortableEntry {
+  public string Path, Kind, Hash; public long Length;
+}
+public static class PangeaPortableTree {
+  [StructLayout(LayoutKind.Sequential)] struct FileTime { public uint Low, High; }
+  [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct FindData {
+    public uint Attributes; public FileTime Created, Accessed, Written;
+    public uint SizeHigh, SizeLow, Reserved0, Reserved1;
+    [MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)] public string Name;
+    [MarshalAs(UnmanagedType.ByValTStr,SizeConst=14)] public string Alternate;
+  }
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] static extern IntPtr FindFirstFileW(string pattern,out FindData data);
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] static extern bool FindNextFileW(IntPtr handle,out FindData data);
+  [DllImport("kernel32.dll")] static extern bool FindClose(IntPtr handle);
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] static extern uint GetFileAttributesW(string path);
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr security,uint mode,uint flags,IntPtr template);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool DeviceIoControl(SafeFileHandle handle,uint code,IntPtr input,uint inputLength,byte[] output,uint outputLength,out uint returned,IntPtr overlap);
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] static extern bool GetDiskFreeSpaceExW(string directory,out ulong available,out ulong total,out ulong free);
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] static extern bool GetDiskFreeSpaceW(string root,out uint sectors,out uint bytes,out uint free,out uint total);
+  static string Native(string path) {
+    return path.StartsWith(@"\\?\",StringComparison.Ordinal) ? path : path.StartsWith(@"\\",StringComparison.Ordinal) ? @"\\?\UNC\"+path.Substring(2) : @"\\?\"+path;
+  }
+  static IOException Error(string action,string path) { return new IOException(action+": "+path,new Win32Exception(Marshal.GetLastWin32Error())); }
+  static string Hex(byte[] bytes) { return BitConverter.ToString(bytes).Replace("-","").ToLowerInvariant(); }
+  public static long AvailableBytes(string directory) {
+    ulong available,total,free;
+    if(!GetDiskFreeSpaceExW(Native(directory),out available,out total,out free)) throw Error("Cannot inspect available installation space",directory);
+    return available>long.MaxValue ? long.MaxValue : (long)available;
+  }
+  public static long AllocationUnit(string directory) {
+    uint sectors,bytes,free,total;
+    if(!GetDiskFreeSpaceW(System.IO.Path.GetPathRoot(directory),out sectors,out bytes,out free,out total)) throw Error("Cannot inspect installation allocation unit",directory);
+    return Math.Max(65536L,checked((long)sectors*bytes));
+  }
+  static string LinkHash(string path) {
+    using(var handle=CreateFileW(Native(path),0,7,IntPtr.Zero,3,0x02200000,IntPtr.Zero)) {
+      if(handle.IsInvalid) throw Error("Cannot inspect user-data link",path);
+      byte[] buffer=new byte[16384]; uint length;
+      if(!DeviceIoControl(handle,0x000900A8,IntPtr.Zero,0,buffer,(uint)buffer.Length,out length,IntPtr.Zero)) throw Error("Cannot read user-data link",path);
+      using(var sha=SHA256.Create()) return Hex(sha.ComputeHash(buffer,0,(int)length));
+    }
+  }
+  static void Walk(string root,string relative,bool hashes,System.Collections.Generic.List<PangeaPortableEntry> entries,int depth) {
+    if(depth>1024 || entries.Count>1000000) throw new IOException("Installation inventory exceeds safe traversal limits; original data is retained.");
+    string directory=relative.Length==0 ? root : PangeaPortableFileIO.Child(root,relative);
+    FindData data; IntPtr search=FindFirstFileW(Native(directory.TrimEnd('\\')+"\\*"),out data);
+    if(search==new IntPtr(-1)) {
+      if(Marshal.GetLastWin32Error()==2) return;
+      throw Error("Cannot enumerate installation data",directory);
+    }
+    try {
+      do {
+        if(data.Name=="." || data.Name=="..") continue;
+        string child=relative.Length==0 ? data.Name : relative+"/"+data.Name;
+        string path=PangeaPortableFileIO.Child(root,child);
+        bool link=(data.Attributes&0x400)!=0, folder=(data.Attributes&16)!=0;
+        var entry=new PangeaPortableEntry {Path=child,Kind=link ? (folder ? "link-directory" : "link-file") : (folder ? "directory" : "file"),Length=folder ? 0 : checked(((long)data.SizeHigh<<32)+data.SizeLow),Hash=""};
+        if(link) { entry.Length=0; if(hashes) entry.Hash=LinkHash(path); }
+        else if(!folder && hashes) {
+          using(var stream=PangeaPortableFileIO.Open(path,false)) {
+            entry.Length=stream.Length;
+            using(var sha=SHA256.Create()) entry.Hash=Hex(sha.ComputeHash(stream));
+          }
+        }
+        entries.Add(entry);
+        if(folder && !link) Walk(root,child,hashes,entries,depth+1);
+      } while(FindNextFileW(search,out data));
+      if(Marshal.GetLastWin32Error()!=18) throw Error("Cannot finish installation inventory",directory);
+    } finally { FindClose(search); }
+  }
+  public static PangeaPortableEntry[] Inventory(string root,bool hashes) {
+    uint attributes=GetFileAttributesW(Native(root));
+    if(attributes==UInt32.MaxValue) throw Error("Cannot inspect installation data",root);
+    if((attributes&16)==0 || (attributes&0x400)!=0) throw new IOException("Data root must be a real directory, not a link: "+root);
+    var entries=new System.Collections.Generic.List<PangeaPortableEntry>();
+    Walk(root,"",hashes,entries,0);
+    entries.Sort(delegate(PangeaPortableEntry a,PangeaPortableEntry b) {return StringComparer.OrdinalIgnoreCase.Compare(a.Path,b.Path);});
+    return entries.ToArray();
+  }
+  public static string Fingerprint(string root) {
+    using(var sha=SHA256.Create()) {
+      foreach(var entry in Inventory(root,true)) {
+        byte[] data=Encoding.UTF8.GetBytes(entry.Kind+"\0"+entry.Path+"\0"+entry.Length+"\0"+entry.Hash+"\n");
+        sha.TransformBlock(data,0,data.Length,data,0);
+      }
+      sha.TransformFinalBlock(new byte[0],0,0); return Hex(sha.Hash);
+    }
+  }
+}
 '@
 }
 
@@ -1206,7 +1987,241 @@ function Apply-VerifiedPatch {
   } finally { $Zip.Dispose() }
 }
 
+function Initialize-PortableTransactionPaths {
+  if ('PangeaTransactionPaths' -as [type]) { return }
+  Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class PangeaTransactionPaths {
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint mode, uint flags, IntPtr template);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint size, uint flags);
+  public static string Parent(string path) {
+    if (Path.DirectorySeparatorChar != '\\') return Path.GetFullPath(path);
+    using (var handle=CreateFileW(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+      if (handle.IsInvalid) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Cannot canonicalize installation parent");
+      var result=new StringBuilder(32768);
+      uint length=GetFinalPathNameByHandleW(handle, result, (uint)result.Capacity, 0);
+      if (length==0 || length>=result.Capacity) throw new IOException("Cannot canonicalize installation parent");
+      string value=result.ToString();
+      if (value.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return @"\\"+value.Substring(8);
+      return value.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase) ? value.Substring(4) : value;
+    }
+  }
+}
+'@
+}
+
+function Assert-PortableTransactionPath {
+  param([string]$Path)
+  # Recovery never follows links in a mutable transaction path or its parents.
+  $Cursor = [IO.Path]::GetFullPath($Path)
+  while ($Cursor) {
+    $Item=$null
+    try { $Item=Get-Item -LiteralPath $Cursor -Force -ErrorAction Stop }
+    catch [System.Management.Automation.ItemNotFoundException] { }
+    if ($Item) {
+      if ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "Recovery refuses a linked path: $Cursor"
+      }
+    }
+    $Parent = [IO.Path]::GetDirectoryName($Cursor)
+    if (-not $Parent -or $Parent -eq $Cursor) { break }
+    $Cursor = $Parent
+  }
+}
+
+function Get-PortableTransactionContext {
+  param([string]$Root)
+  Initialize-PortableTransactionPaths
+  $Full = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+  $Parent = [IO.Path]::GetDirectoryName($Full)
+  if (-not $Parent -or -not [IO.Directory]::Exists($Parent)) { throw 'The installation must have an existing non-root parent directory.' }
+  $Parent = [PangeaTransactionPaths]::Parent($Parent)
+  $Canonical = Join-Path $Parent ([IO.Path]::GetFileName($Full))
+  Assert-PortableTransactionPath $Canonical
+  $Hasher = [Security.Cryptography.SHA256]::Create()
+  try { $Key = ([BitConverter]::ToString($Hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($Canonical.ToLowerInvariant())))).Replace('-', '').ToLowerInvariant() }
+  finally { $Hasher.Dispose() }
+  $Prefix = Join-Path $Parent ".pangea-update-$Key"
+  return [pscustomobject]@{ InstallRoot=$Canonical; Parent=$Parent; Journal="$Prefix.json"; LockPath="$Prefix.lock" }
+}
+
+function Enter-PortableUpdateLock {
+  param($Context)
+  Assert-PortableTransactionPath $Context.LockPath
+  try {
+    # A persistent file is intentional: deleting it after release could let two
+    # different file objects protect the same install. Process death releases it.
+    return [IO.File]::Open($Context.LockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+  } catch { throw "另一个升级或恢复进程正在使用此安装目录，或互斥文件不可写：$($Context.InstallRoot)。$($_.Exception.Message)" }
+}
+
+function Get-PortableTransactionOwner {
+  if ([IO.Path]::DirectorySeparatorChar -eq '\') { return [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+  return [Environment]::UserName
+}
+
+function Get-PortableTransactionWorkerIdentity {
+  $Process=[Diagnostics.Process]::GetCurrentProcess()
+  try { return [pscustomobject]@{ pid=$Process.Id; started_at=$Process.StartTime.ToUniversalTime().ToString('o') } }
+  finally { $Process.Dispose() }
+}
+
+function Write-PortableTransactionJson {
+  param([string]$Path, $Value)
+  Assert-PortableTransactionPath $Path
+  $Temporary = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+  $Stream = $null
+  try {
+    $Stream = New-Object IO.FileStream($Temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 4096, [IO.FileOptions]::WriteThrough)
+    $Bytes = [Text.Encoding]::UTF8.GetBytes(($Value | ConvertTo-Json -Depth 12))
+    $Stream.Write($Bytes, 0, $Bytes.Length)
+    $Stream.Flush($true); $Stream.Dispose(); $Stream=$null
+    if ([IO.File]::Exists($Path)) { [IO.File]::Replace($Temporary, $Path, [NullString]::Value) }
+    else { [IO.File]::Move($Temporary, $Path) }
+  } finally {
+    if ($Stream) { $Stream.Dispose() }
+    if ([IO.File]::Exists($Temporary)) { [IO.File]::Delete($Temporary) }
+  }
+}
+
+function Get-PortableRootIdentity {
+  param([string]$Root)
+  Assert-PortableTransactionPath $Root
+  $Relative = 'resources/pangea-manifest.json'
+  $Path = Join-Path $Root $Relative
+  Assert-PortableTransactionPath $Path
+  if (-not [IO.File]::Exists($Path)) { throw "Installation identity is missing: $Path" }
+  $Manifest = [IO.File]::ReadAllText($Path) | ConvertFrom-Json
+  if ([string]$Manifest.product.version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw "Invalid installation version: $Path" }
+  return [pscustomobject]@{ relative_path=$Relative; version=[string]$Manifest.product.version; sha256=(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+}
+
+function Test-PortableRootIdentity {
+  param([string]$Root, $Identity)
+  if (-not $Identity -or -not [IO.Directory]::Exists($Root)) { return $false }
+  if ([string]$Identity.relative_path -ne 'resources/pangea-manifest.json' -or [string]$Identity.sha256 -notmatch '^[a-f0-9]{64}$') { throw 'Invalid transaction installation identity.' }
+  $Actual = Get-PortableRootIdentity $Root
+  return $Actual.version -eq [string]$Identity.version -and $Actual.sha256 -eq [string]$Identity.sha256
+}
+
+function Assert-PortableUpgradeSourceVersion {
+  param([string]$Root, [string]$PackageKind, [string]$ExpectedBase)
+  # Keep in sync with build/portable-update-policy.json; the signed helper is a
+  # standalone file and cannot trust a separate policy file supplied at runtime.
+  $MinimumSourceVersion = '2.0.7'
+  $Identity = Get-PortableRootIdentity $Root
+  if ($Identity.version -notmatch '^(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?$' -or [version]$Matches[1] -lt [version]$MinimumSourceVersion) {
+    throw "当前版本 $($Identity.version) 低于最低可升级版本 $MinimumSourceVersion。请使用完整安装包迁移。"
+  }
+  if ($PackageKind -eq 'patch' -and ($ExpectedBase -ne $Identity.version)) { throw "Installed version $($Identity.version) does not match patch base $ExpectedBase." }
+  return $Identity
+}
+
+function Get-PortableStartupHealthTimeout {
+  param($UpdatePlan)
+  if (-not $UpdatePlan.PSObject.Properties['startup_health_timeout_seconds']) { return 300 }
+  $Value=[string]$UpdatePlan.startup_health_timeout_seconds
+  if ($Value -notmatch '^\d{2,3}$' -or [int]$Value -lt 30 -or [int]$Value -gt 600) { throw 'startup_health_timeout_seconds must be an integer from 30 through 600.' }
+  return [int]$Value
+}
+
+function New-PortableUpdateTransaction {
+  param($Context, [string]$Workspace, $BaseIdentity, [string]$TargetVersion, [string]$OriginalPlan, [string]$UserDataRoot)
+  $WorkerIdentity=Get-PortableTransactionWorkerIdentity
+  $Transaction = [pscustomobject]@{
+    schema_version=1; id=[guid]::NewGuid().ToString('N'); owner=(Get-PortableTransactionOwner)
+    install_root=$Context.InstallRoot; workspace=[IO.Path]::GetFullPath($Workspace)
+    plan_path=[IO.Path]::GetFullPath($OriginalPlan); user_data_root=[IO.Path]::GetFullPath($UserDataRoot)
+    base_version=$BaseIdentity.version; target_version=$TargetVersion; base_identity=$BaseIdentity; target_identity=$null
+    state='preparing'; profile_snapshot_ready=$false; new_version_started=$false
+    worker_pid=$WorkerIdentity.pid; worker_started_at=$WorkerIdentity.started_at
+    updated_at=[DateTime]::UtcNow.ToString('o')
+  }
+  Assert-PortableTransactionPath $Workspace
+  if ([IO.Path]::GetDirectoryName($Transaction.workspace) -ine $Context.Parent -or [IO.Path]::GetFileName($Transaction.workspace) -notmatch '^p-up-[1-9][0-9]*$') { throw 'Unsafe transaction workspace.' }
+  Write-PortableTransactionJson (Join-Path $Workspace '.pangea-update-owner.json') @{ schema_version=1; id=$Transaction.id; install_root=$Context.InstallRoot; owner=$Transaction.owner }
+  Write-PortableTransactionJson $Context.Journal $Transaction
+  return $Transaction
+}
+
+function Set-PortableTransactionState {
+  param($Context, $Transaction, [string]$State)
+  $Transaction.state=$State; $Transaction.updated_at=[DateTime]::UtcNow.ToString('o')
+  Write-PortableTransactionJson $Context.Journal $Transaction
+}
+
+function Read-PortableUpdateTransaction {
+  param($Context, [string]$UserDataRoot)
+  Assert-PortableTransactionPath $Context.Journal
+  if (-not [IO.File]::Exists($Context.Journal)) { return $null }
+  $Transaction = [IO.File]::ReadAllText($Context.Journal) | ConvertFrom-Json
+  if ($Transaction.schema_version -ne 1 -or $Transaction.id -notmatch '^[a-f0-9]{32}$' -or
+      [string]$Transaction.owner -ne (Get-PortableTransactionOwner) -or
+      [string]$Transaction.install_root -ine $Context.InstallRoot -or
+      [IO.Path]::GetFullPath([string]$Transaction.user_data_root) -ine [IO.Path]::GetFullPath($UserDataRoot) -or
+      $Transaction.profile_snapshot_ready -isnot [bool] -or $Transaction.new_version_started -isnot [bool] -or
+      $Transaction.state -notin @('preparing','candidate_ready','original_move_pending','original_moved','activate_pending','activated','rollback_pending','rollback_displaced','restored','committed')) { throw 'The interrupted update transaction has invalid identity or state; no files were moved.' }
+  $UpdatesPrefix=(Join-Path ([IO.Path]::GetFullPath($UserDataRoot)) 'updates') + [IO.Path]::DirectorySeparatorChar
+  if (-not [IO.Path]::GetFullPath([string]$Transaction.plan_path).StartsWith($UpdatesPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'The interrupted update plan is outside this user profile.' }
+  $Workspace = [IO.Path]::GetFullPath([string]$Transaction.workspace)
+  if ([IO.Path]::GetDirectoryName($Workspace) -ine $Context.Parent -or [IO.Path]::GetFileName($Workspace) -notmatch '^p-up-[1-9][0-9]*$') { throw 'The interrupted update workspace is outside its reserved location.' }
+  foreach ($Path in @($Workspace, (Join-Path $Workspace 'old'), (Join-Path $Workspace 'new'), (Join-Path $Workspace 'failed'), (Join-Path $Workspace 'profile'))) { Assert-PortableTransactionPath $Path }
+  $OwnerPath = Join-Path $Workspace '.pangea-update-owner.json'
+  Assert-PortableTransactionPath $OwnerPath
+  if (-not [IO.File]::Exists($OwnerPath)) { throw 'The interrupted update workspace ownership record is missing.' }
+  $Owner = [IO.File]::ReadAllText($OwnerPath) | ConvertFrom-Json
+  if ($Owner.schema_version -ne 1 -or $Owner.id -ne $Transaction.id -or $Owner.install_root -ine $Context.InstallRoot -or $Owner.owner -ne $Transaction.owner) { throw 'The interrupted update workspace does not belong to this transaction.' }
+  if ($Transaction.base_identity.version -ne $Transaction.base_version -or ($Transaction.target_identity -and $Transaction.target_identity.version -ne $Transaction.target_version)) { throw 'The transaction version identities do not match.' }
+  return $Transaction
+}
+
+function Restore-PortableUpdateTransaction {
+  param($Context, $Transaction, [string]$UserDataRoot)
+  # Re-read durable intent before any mutation. Never trust only in-memory flags.
+  $Current = Read-PortableUpdateTransaction $Context $UserDataRoot
+  if (-not $Current -or $Current.id -ne $Transaction.id) { throw 'The transaction changed before recovery.' }
+  $Transaction=$Current
+  $Root=$Context.InstallRoot; $Old=Join-Path $Transaction.workspace 'old'; $Failed=Join-Path $Transaction.workspace 'failed'
+  if ($Transaction.state -eq 'committed') {
+    if (-not (Test-PortableRootIdentity $Root $Transaction.target_identity)) { throw 'Committed installation identity is missing or changed; automatic rollback is forbidden.' }
+    return $Transaction
+  }
+  if ($Transaction.state -eq 'restored') {
+    if (-not (Test-PortableRootIdentity $Root $Transaction.base_identity)) { throw 'Restored installation identity has changed; no recovery actions were repeated.' }
+    # A completed rollback is a terminal transaction. The user may have edited
+    # configuration since then; never replay its profile snapshot again.
+    return $Transaction
+  }
+  if ([IO.Directory]::Exists($Old)) {
+    if (-not (Test-PortableRootIdentity $Old $Transaction.base_identity)) { throw 'Original backup identity does not match; all directories have been preserved.' }
+    if ([IO.Directory]::Exists($Root)) {
+      if (-not (Test-PortableRootIdentity $Root $Transaction.target_identity)) { throw 'An unexpected installation occupies the target path; recovery will not overwrite it.' }
+      if (Test-Path -LiteralPath $Failed) { throw 'The recovery preservation directory already exists; no data will be overwritten.' }
+      Set-PortableTransactionState $Context $Transaction 'rollback_pending'
+      Move-UpdateDirectory $Root $Failed -ResolveLocks
+      Set-PortableTransactionState $Context $Transaction 'rollback_displaced'
+    } elseif (Test-Path -LiteralPath $Root) { throw 'A file occupies the installation path; recovery will not replace it.' }
+    Set-PortableTransactionState $Context $Transaction 'rollback_displaced'
+    Move-UpdateDirectory $Old $Root -ResolveLocks
+  }
+  if (-not (Test-PortableRootIdentity $Root $Transaction.base_identity)) { throw "Original installation could not be confirmed. Preserve the transaction workspace: $($Transaction.workspace)" }
+  if ($Transaction.profile_snapshot_ready -eq $true -and $Transaction.new_version_started -eq $true) {
+    Restore-UpdateProfileSnapshot -UserDataRoot $UserDataRoot -SnapshotRoot (Join-Path $Transaction.workspace 'profile') | Out-Null
+  }
+  # Retain candidate/failed/profile directories for diagnosis and user edits.
+  # A future attempt reserves another p-up-N; recovery never recursively deletes.
+  Set-PortableTransactionState $Context $Transaction 'restored'
+  return $Transaction
+}
+
 $script:UpdaterScriptPath = $PSCommandPath
+if ($IOWorker) { Invoke-PortableIOWorkerEntry $IOWorker; exit 0 }
 if ($WatchExplorer) { Watch-ExplorerRecovery $WatchExplorer; exit 0 }
 if ($ScanLocks) {
   Initialize-HandleInspector
@@ -1231,6 +2246,13 @@ try {
   $ResultPath = [IO.Path]::GetFullPath([string]$Plan.result_path)
   $LogPath = [IO.Path]::GetFullPath([string]$Plan.log_path)
   $ParentPid = [int]$Plan.parent_pid
+  $StartupHealthTimeoutSeconds=Get-PortableStartupHealthTimeout $Plan
+  if ([IO.Path]::GetFileName($ExecutableName) -ne $ExecutableName -or -not $ExecutableName.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) { throw 'The portable executable name is invalid.' }
+  $UpdatesRoot = [IO.Path]::GetDirectoryName($ResultPath)
+  $UserDataRoot = [IO.Path]::GetDirectoryName($UpdatesRoot)
+  if ([IO.Path]::GetFileName($UpdatesRoot) -ine 'updates' -or -not [IO.Path]::GetFullPath($PlanPath).StartsWith($UpdatesRoot.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'The update plan must belong to the profile updates directory.' }
+  $TransactionContext = Get-PortableTransactionContext $InstallRoot
+  $InstallRoot=$TransactionContext.InstallRoot; $InstallParent=$TransactionContext.Parent
   $InstalledExecutable = Join-Path $InstallRoot $ExecutableName
 } catch {
   $ErrorFile=if ($WatchUpdate) { "$PlanPath.ui-error" } else { "$PlanPath.startup-error" }
@@ -1241,7 +2263,8 @@ if ($WatchUpdate) { Watch-UpdateWindow; exit 0 }
 
 $UpdateWorkspace = $null
 $CandidateRoot = $null; $BackupRoot = $null; $FailedRoot = $null
-$OriginalMoved = $false; $Swapped = $false; $NewProcess = $null
+$Transaction = $null; $InstallLock = $null; $RecoveryBlocked = $false; $RecoveryCompletionState = ''; $NewProcess = $null
+$script:UnsafeIOWorker = $false
 $script:OwnedUpdateProcesses = @()
 $script:AutomaticUpdateCleanup = $Plan.PSObject.Properties['allow_owned_process_cleanup'] -and $Plan.allow_owned_process_cleanup -eq $true
 $DesktopIdentity = $null
@@ -1250,6 +2273,7 @@ $script:ProtectedUpdateProcesses = @($PID, $ParentPid)
 # The installed Desktop remains open until the independent window is visible
 # and process ownership has been captured. Never acknowledge a hidden updater.
 try {
+  $InstallLock = Enter-PortableUpdateLock $TransactionContext
   Open-UpdateWindow
   $script:ProtectedUpdateProcesses += $script:UpdateMonitor.Id
   Set-UpdateStage '升级窗口已就绪，正在记录进程信息；当前主窗口暂时保持打开…' 5 'prepare'
@@ -1289,6 +2313,7 @@ try {
   try { [IO.File]::WriteAllText("$PlanPath.startup-error",$StartupMessage,(New-Object Text.UTF8Encoding($false))) } catch { }
   Write-UpdateResult 'failed' $StartupMessage 'not_needed'
   Write-UpdateProgress -State failed -Stage 'startup' -Message $StartupMessage -Percent 0 -Rollback 'not_needed'
+  if ($InstallLock) { $InstallLock.Dispose() }
   exit 1
 }
 
@@ -1296,20 +2321,40 @@ try {
   Write-UpdateLog "waiting for PANGEA Desktop process $ParentPid"
   Set-UpdateStage '正在等待当前版本退出…' 12 'desktop-exit'
   Wait-UpdateDesktopExit $ParentPid $DesktopIdentity
+  Stop-PortableOwnedWriters -InstallRoot $InstallRoot
+  # Recover first: the install path may be temporarily absent between renames.
+  # A new package is never applied in the same invocation as crash recovery.
+  $RecoveryBlocked=$true
+  $PriorTransaction = Read-PortableUpdateTransaction $TransactionContext $UserDataRoot
+  if ($RecoverOnly -or ($PriorTransaction -and $PriorTransaction.state -notin @('restored','committed'))) {
+    if (-not $PriorTransaction) { throw '没有找到可恢复的升级事务；安装文件未改动。' }
+    $Transaction=$PriorTransaction
+    Set-UpdateStage '正在检查中断的升级并恢复原版本…' 25 'recover-interrupted'
+    $Transaction = Restore-PortableUpdateTransaction $TransactionContext $Transaction $UserDataRoot
+    $RecoveryCompletionState=$Transaction.state
+    $ExpectedVersion = if ($Transaction.state -eq 'committed') { $Transaction.target_version } else { $Transaction.base_version }
+    $RecoveryLog = Join-Path ([IO.Path]::GetDirectoryName($PlanPath)) 'recovered-start.log'
+    $RecoveryProcess = Start-PortableDesktop $InstalledExecutable "$PlanPath.recovered-healthy.json" $RecoveryLog
+    try { Wait-PortableDesktopHealthy $RecoveryProcess "$PlanPath.recovered-healthy.json" $ExpectedVersion -TimeoutSeconds $StartupHealthTimeoutSeconds -Stage 'rollback-health' -Percent 36 | Out-Null }
+    finally { $RecoveryProcess.Dispose() }
+    $RecoveryMessage="中断升级已处理，版本 $ExpectedVersion 已启动并确认就绪。候选文件和配置快照已保留；如需升级，请重新发起。"
+    Write-UpdateResult 'success' $RecoveryMessage $Transaction.state
+    Write-UpdateProgress -State success -Stage 'complete' -Message $RecoveryMessage -Percent 100 -Rollback $Transaction.state
+    exit 0
+  }
+  $RecoveryBlocked=$false
   if ([string]::IsNullOrWhiteSpace($InstallParent) -or $InstallRoot -eq [IO.Path]::GetPathRoot($InstallRoot)) { throw 'The portable application directory is unsafe to replace.' }
+  $BaseIdentity = Assert-PortableUpgradeSourceVersion -Root $InstallRoot -PackageKind $PackageType -ExpectedBase $ExpectedBaseVersion
   Set-UpdateStage '正在校验升级包的大小与 SHA256…' 18 'verify-package'
-  if (-not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) { throw 'The downloaded update package is missing.' }
-  if ($ExpectedSize -le 0 -or (Get-Item -LiteralPath $PackagePath).Length -ne $ExpectedSize) { throw 'The downloaded update package size no longer matches the signed release.' }
-  if ($ExpectedSha256 -notmatch '^[0-9a-f]{64}$') { throw 'The expected update hash is invalid.' }
-  $ActualSha256 = (Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
-  if ($ActualSha256 -ne $ExpectedSha256) { throw 'The downloaded update package no longer matches the signed release.' }
-  if (-not $ExecutableName.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) { throw 'The portable executable name is invalid.' }
+  Invoke-PortableIOWorker -Operation ValidatePackage -Arguments @{ Path=$PackagePath; Size=$ExpectedSize; Sha256=$ExpectedSha256 } | Out-Null
 
   Initialize-PortableFileIO
+  Assert-PortableUpdatePreflight -InstallRoot $InstallRoot -PackagePath $PackagePath -PackageType $PackageType | Out-Null
   $UpdateWorkspace = [PangeaPortableFileIO]::CreateWorkspace($InstallParent)
   $CandidateRoot = Join-Path $UpdateWorkspace 'new'
   $BackupRoot = Join-Path $UpdateWorkspace 'old'
   $FailedRoot = Join-Path $UpdateWorkspace 'failed'
+  $Transaction = New-PortableUpdateTransaction $TransactionContext $UpdateWorkspace $BaseIdentity $ExpectedVersion $PlanPath $UserDataRoot
   Write-UpdateLog "update directories: new=$CandidateRoot; backup=$BackupRoot"
 
   if ($PackageType -eq 'patch') {
@@ -1319,10 +2364,10 @@ try {
     if (-not (Test-Path -LiteralPath $BaseManifestPath -PathType Leaf)) { throw 'Installed package manifest is missing.' }
     $BaseManifest = Get-Content -LiteralPath $BaseManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ([string]$BaseManifest.version -ne $ExpectedBaseVersion) { throw "Installed version $($BaseManifest.version) does not match patch base $ExpectedBaseVersion." }
-    Apply-VerifiedPatch $PackagePath $InstallRoot $CandidateRoot
+    Invoke-PortableIOWorker -Operation Patch -Arguments @{ Archive=$PackagePath; BaseRoot=$InstallRoot; Destination=$CandidateRoot } | Out-Null
   } elseif ($PackageType -eq 'full') {
     Set-UpdateStage '正在解压新版本文件…' 42 'extract'
-    Expand-VerifiedArchive $PackagePath $CandidateRoot
+    Invoke-PortableIOWorker -Operation Extract -Arguments @{ Archive=$PackagePath; Destination=$CandidateRoot } | Out-Null
   } else { throw "Unsupported package type: $PackageType" }
   $CandidateExecutable = Join-Path $CandidateRoot $ExecutableName
   $CandidateManifest = Join-Path $CandidateRoot 'resources\pangea-manifest.json'
@@ -1330,29 +2375,42 @@ try {
   if (-not (Test-Path -LiteralPath $CandidateManifest -PathType Leaf)) { throw 'Updated component manifest is missing.' }
   $Manifest = Get-Content -LiteralPath $CandidateManifest -Raw -Encoding UTF8 | ConvertFrom-Json
   if ([string]$Manifest.product.version -ne $ExpectedVersion) { throw "Updated product version does not match $ExpectedVersion." }
+  $Transaction.target_identity=Get-PortableRootIdentity $CandidateRoot
+  Set-PortableTransactionState $TransactionContext $Transaction 'candidate_ready'
 
   Set-UpdateStage '正在保留用户工作区、任务和本地技能…' 70 'user-data'
+  Stop-PortableOwnedWriters -InstallRoot $InstallRoot
   Copy-PortableUserData $InstallRoot $CandidateRoot
+  New-UpdateProfileSnapshot -UserDataRoot $UserDataRoot -SnapshotRoot (Join-Path $UpdateWorkspace 'profile') | Out-Null
+  $Transaction.profile_snapshot_ready=$true
+  Set-PortableTransactionState $TransactionContext $Transaction 'candidate_ready'
+  Assert-PortableUserDataUnchanged -PreviousRoot $InstallRoot -CandidateRoot $CandidateRoot
   Set-UpdateStage '正在切换版本，保留原版本备份…' 76 'switch-version'
+  Set-PortableTransactionState $TransactionContext $Transaction 'original_move_pending'
   Move-UpdateDirectory $InstallRoot $BackupRoot -ResolveLocks
-  $OriginalMoved = $true
+  Set-PortableTransactionState $TransactionContext $Transaction 'original_moved'
+  Assert-PortableUserDataUnchanged -PreviousRoot $BackupRoot -CandidateRoot $CandidateRoot
   Set-UpdateStage '原版本已备份，正在启用新版本…' 78 'switch-version'
+  Set-PortableTransactionState $TransactionContext $Transaction 'activate_pending'
   Move-UpdateDirectory $CandidateRoot $InstallRoot -ResolveLocks
-  $Swapped = $true
+  Set-PortableTransactionState $TransactionContext $Transaction 'activated'
 
   $UpdatedExecutable = Join-Path $InstallRoot $ExecutableName
   $LaunchLog = Join-Path ([IO.Path]::GetDirectoryName($PlanPath)) 'desktop-start.log'
   Set-UpdateStage '正在启动新版本…' 82 'start-version'
+  $Transaction.new_version_started=$true
+  Set-PortableTransactionState $TransactionContext $Transaction 'activated'
   $NewProcess = Start-PortableDesktop $UpdatedExecutable $HealthMarker $LaunchLog
-  Wait-PortableDesktopHealthy $NewProcess $HealthMarker $ExpectedVersion | Out-Null
+  Wait-PortableDesktopHealthy $NewProcess $HealthMarker $ExpectedVersion -TimeoutSeconds $StartupHealthTimeoutSeconds | Out-Null
+  Set-PortableTransactionState $TransactionContext $Transaction 'committed'
   Set-UpdateStage '新版健康检查通过，正在恢复资源管理器并清理备份…' 97 'cleanup'
   $SuccessMessage='升级完成，新版本已通过健康检查并重新启动。'
   try { Complete-ExplorerRecovery } catch { $SuccessMessage+=" 资源管理器恢复提示：$($_.Exception.Message)"; Write-UpdateLog $SuccessMessage }
   if (Test-Path -LiteralPath $BackupRoot) {
     try { Remove-PortableDirectory $BackupRoot } catch { $SuccessMessage+=" 旧版本备份暂未清理：$BackupRoot"; Write-UpdateLog $_.Exception.Message }
   }
-  # Delete only an empty workspace; a retained backup must survive cleanup.
-  try { [IO.Directory]::Delete($UpdateWorkspace, $false) } catch { Write-UpdateLog "update directory retained: $UpdateWorkspace" }
+  # Retain the ownership receipt and profile snapshot. A committed transaction
+  # never rolls back because later cleanup or result persistence failed.
   Write-UpdateResult 'success' $SuccessMessage
   Write-UpdateProgress -State success -Stage 'complete' -Message $SuccessMessage -Percent 100
   exit 0
@@ -1360,6 +2418,28 @@ try {
   $FailureMessage = $_.Exception.Message
   Write-UpdateLog "update failed: $FailureMessage"
   Write-UpdateLog "failed operation: $($_.InvocationInfo.PositionMessage)"
+  if ($script:UnsafeIOWorker -or $RecoveryBlocked) {
+    $ReportedRollback=if ($RecoveryCompletionState) { $RecoveryCompletionState } else { 'unknown' }
+    $FailureMessage=if ($RecoveryCompletionState) { "版本目录已确认（$RecoveryCompletionState），但工作台启动未确认；仍在启动的进程会保留。$FailureMessage" } else { "升级或恢复未完成，目录及事务已保留；请查看日志后恢复，当前不会继续切换或启动其他版本。$FailureMessage" }
+    Write-UpdateResult 'failed' $FailureMessage $ReportedRollback
+    Write-UpdateProgress -State failed -Stage 'interrupted' -Message $FailureMessage -Percent 35 -Rollback $ReportedRollback
+    exit 1
+  }
+  if ($Transaction) {
+    try { $DurableTransaction=Read-PortableUpdateTransaction $TransactionContext $UserDataRoot }
+    catch {
+      $FailureMessage+=" 无法安全读取事务，所有版本目录已保留：$($_.Exception.Message)"
+      Write-UpdateResult 'failed' $FailureMessage 'unknown'
+      Write-UpdateProgress -State failed -Stage 'interrupted' -Message $FailureMessage -Percent 35 -Rollback 'unknown'
+      exit 1
+    }
+    if ($DurableTransaction -and $DurableTransaction.state -eq 'committed') {
+      $CommittedMessage="新版本已通过健康检查并提交；后续清理未完成，保留当前版本。$FailureMessage"
+      Write-UpdateResult 'success' $CommittedMessage
+      Write-UpdateProgress -State success -Stage 'complete' -Message $CommittedMessage -Percent 100
+      exit 0
+    }
+  }
   Set-UpdateStage '升级失败，正在检查并恢复原版本，请勿关闭计算机…' 35 'rollback'
   if ($NewProcess) {
     try {
@@ -1378,31 +2458,23 @@ try {
       }
     } catch { Write-UpdateLog "Could not stop new-version process: $($_.Exception.Message)" }
   }
-  $Restored = -not $OriginalMoved
-  $Rollback=if ($OriginalMoved) { 'failed' } else { 'not_needed' }
+  $Restored = $false
+  $Rollback=if ($Transaction) { 'failed' } else { 'not_needed' }
   try {
-    if ($Swapped) {
-      if (Test-Path -LiteralPath $InstallRoot) { Move-UpdateDirectory $InstallRoot $FailedRoot -ResolveLocks }
-      if (Test-Path -LiteralPath $BackupRoot) {
-        Move-UpdateDirectory $BackupRoot $InstallRoot -ResolveLocks
-        $Restored=$true; $Rollback='restored'
-        Write-UpdateLog 'previous PANGEA Desktop version restored'
-      }
-    } elseif ($OriginalMoved -and -not (Test-Path -LiteralPath $InstallRoot) -and (Test-Path -LiteralPath $BackupRoot)) {
-      Move-UpdateDirectory $BackupRoot $InstallRoot -ResolveLocks
+    Stop-PortableOwnedWriters -InstallRoot $InstallRoot
+    if ($Transaction) {
+      $Transaction=Restore-PortableUpdateTransaction $TransactionContext $Transaction $UserDataRoot
       $Restored=$true; $Rollback='restored'
-      Write-UpdateLog 'previous PANGEA Desktop directory restored'
-    }
+      Write-UpdateLog 'previous PANGEA Desktop directory and profile restored'
+    } else { $Restored=Test-Path -LiteralPath $InstallRoot -PathType Container }
     if (-not $Restored) { throw "Original installation retained at '$BackupRoot'; automatic restoration could not be confirmed." }
   } catch {
     $FailureMessage+=" 回滚未完成：$($_.Exception.Message)。原版本备份：'$BackupRoot'。"
     Write-UpdateLog $FailureMessage
   }
   if ($Restored) {
-    foreach ($CleanupRoot in @($CandidateRoot,$FailedRoot)) {
-      if ($CleanupRoot -and (Test-Path -LiteralPath $CleanupRoot)) { try { Remove-PortableDirectory $CleanupRoot } catch { Write-UpdateLog $_.Exception.Message } }
-    }
-    if ($UpdateWorkspace) { try { [IO.Directory]::Delete($UpdateWorkspace, $false) } catch { Write-UpdateLog "update directory retained: $UpdateWorkspace" } }
+    # Failed attempts may contain new user edits. Preserve them and the profile
+    # snapshot even after rollback; do not silently discard diagnostic material.
     if (Test-Path -LiteralPath $InstalledExecutable -PathType Leaf) {
       $RecoveryProcess = $null
       $RecoveryLog = Join-Path ([IO.Path]::GetDirectoryName($PlanPath)) 'rollback-start.log'
@@ -1421,7 +2493,7 @@ try {
         Write-UpdateResult 'failed' ("$FailureMessage 原版本文件已保留，正在确认工作台恢复启动。") $Rollback
         Set-UpdateStage '原版本文件已保留，正在重新启动工作台…' 36 'rollback-start'
         $RecoveryProcess = Start-PortableDesktop $InstalledExecutable $RecoveryMarker $RecoveryLog
-        Wait-PortableDesktopHealthy $RecoveryProcess $RecoveryMarker $PreviousVersion -Stage 'rollback-health' -Percent 36 | Out-Null
+        Wait-PortableDesktopHealthy $RecoveryProcess $RecoveryMarker $PreviousVersion -TimeoutSeconds $StartupHealthTimeoutSeconds -Stage 'rollback-health' -Percent 36 | Out-Null
         $FailureMessage+=' 原版本文件已保留，工作台已重新启动并确认就绪。'
       } catch {
         $FailureMessage+=" 原版本文件已保留，但工作台恢复启动未确认：$($_.Exception.Message) 启动日志：$RecoveryLog（另见 .stdout / .stderr）。"
@@ -1440,4 +2512,5 @@ try {
 } finally {
   # Best effort only: failures here must not erase the true terminal outcome.
   try { Complete-ExplorerRecovery } catch { Write-UpdateLog "Explorer recovery final check: $($_.Exception.Message)" }
+  if ($InstallLock) { $InstallLock.Dispose() }
 }

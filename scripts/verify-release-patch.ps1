@@ -18,6 +18,7 @@ $ExpectedVersion = $TargetManifest.version
 $Plan = @{ package_channel = $TargetManifest.channel }
 $LogPath = "$Base.patch-check.log"
 $script:UpdateForm = $null
+$script:PortableIOWorker = $true
 $Updater = Join-Path $PSScriptRoot '../build/apply-portable-update.ps1'
 $Tokens = $null; $ParseErrors = $null
 $Ast = [System.Management.Automation.Language.Parser]::ParseFile($Updater, [ref]$Tokens, [ref]$ParseErrors)

@@ -19,15 +19,17 @@ Start `Build Windows package` (`release.yml`) on the approved source branch with
 | --- | --- | --- |
 | `mode` | `build` (default) | `backfill` |
 | `channel` | `release` for stable, or `test` | Channel of the existing target release |
-| `version` | Base SemVer, such as `2.0.1` | Exact existing target version, such as `2.0.1` or `2.0.1-test.42.abcdef0` |
+| `version` | Base SemVer, such as `2.0.14` | Exact existing target version, such as `2.0.14` or `2.0.14-test.42.abcdef0` |
 
-The minimum supported patch baseline is **2.0.0** (including the 2.x test channel). **1.x and older upgrade paths are retired.** They are excluded before asset lookup, download, trust checks, or patch generation. Historical Releases and installers are retained; this policy does not delete them. Direct patch generation and backfill publication also reject retired 1.x sources.
+The minimum supported patch baseline is **2.0.7** (including test builds with a base SemVer of 2.0.7 or newer). **2.0.6 and older upgrade paths are retired.** They are excluded before asset lookup, download, trust checks, or patch generation. Historical Releases and installers are retained; this policy does not delete them. Direct patch generation, new-release publication, and backfill publication also reject sources older than 2.0.7. The shared policy is `build/portable-update-policy.json`; the standalone PowerShell helper independently enforces the same minimum. Release publication uses the validated report whitelist, not a ZIP wildcard.
+
+The workflow default target is **2.0.14**. This is independent of the **2.0.7** minimum installed source version: changing the release target does not lower the supported source boundary.
 
 There is no manual `patch_from_version` input. Both modes discover release history automatically and produce a direct patch from each compatible historical base to the target. No intermediate release needs to be installed when a verified patch exists for the user's exact installed version.
 
 ### Build a new target
 
-`mode=build, channel=release, version=2.0.1` builds exactly `2.0.1`. A test build with the same input version resolves to `2.0.1-test.<run-number>.<short-sha>`. Push-triggered builds use build mode and the test channel.
+`mode=build, channel=release, version=2.0.14` builds exactly `2.0.14`. A test build with the same input version resolves to `2.0.14-test.<run-number>.<short-sha>`. Push-triggered builds use build mode and the test channel.
 
 Before building, the workflow rejects a target version if either its Git tag or GitHub Release already exists. It checks availability again immediately before publishing. This applies to stable and test releases, including reruns. Existing assets are never overwritten. If a previous build already published the target, use backfill to add historical patches or choose a new target version to change the program.
 
@@ -54,7 +56,7 @@ $env:GITHUB_REPOSITORY = 'CyberShp/pangea-desktop'
 # Set GH_TOKEN using your normal secret-management mechanism.
 node .\scripts\build-historical-patches.mjs `
   --mode build `
-  --target-version 2.0.1 `
+  --target-version 2.0.14 `
   --channel stable `
   --private-key 'D:\pangea-secrets\update-private.pem' `
   --output-dir .\dist
@@ -64,7 +66,7 @@ The historical patch script prepares files and verification evidence; it does no
 
 ### Backfill an already published target
 
-For a published stable `2.0.1`, dispatch `mode=backfill, channel=release, version=2.0.1`. For a test target, supply its full test version and `channel=test`.
+For a published stable `2.0.14`, dispatch `mode=backfill, channel=release, version=2.0.14`. For a test target, supply its full test version and `channel=test`.
 
 Backfill downloads and verifies the target release's existing full portable ZIP. It does not run `npm version`, assemble a new target, or run the new-build target integration steps. Locked dependencies are installed with lifecycle scripts disabled. Each generated patch is still applied and verified against the downloaded target, including the patched-program compatibility checks.
 
@@ -79,7 +81,7 @@ Run retries in a clean output directory (GitHub-hosted jobs provide a fresh work
 
 ## Historical coverage and verification
 
-The release tooling paginates through the entire GitHub Release history and its assets. It considers canonical `v<version>` tags, older target-compatible versions at or above 2.0.0 in the same channel, with the expected Windows x64 portable ZIP and checksum. Bases are processed serially and their temporary directories are cleaned up between versions; there is no arbitrary “last N releases” limit.
+The release tooling paginates through the entire GitHub Release history and its assets. It considers canonical `v<version>` tags, older target-compatible versions at or above 2.0.7 in the same channel, with the expected Windows x64 portable ZIP and checksum. Bases are processed serially and their temporary directories are cleaned up between versions; there is no arbitrary “last N releases” limit.
 
 Patch generation and offline/manual import remain separate: this workflow does not add automatic client update discovery or selection.
 
@@ -115,7 +117,7 @@ pangea-desktop-<version>-patch-report-<content-hash>.json
 
 The complete ZIP contains the application and its signed file manifest. Each patch contains only changed files plus the target manifest. Every imported package must have a version greater than the currently running application. Test and stable channels never cross. A patch must match the exact installed base version, but it may advance directly over multiple intermediate versions.
 
-No 1.x or older in-app upgrade path is supported. Users of retired versions must install a current complete package separately; this workflow does not validate migration from their old installation. For supported 2.x versions, the complete ZIP remains the fallback when no verified patch matches the installed version or when reinstalling manually.
+No version older than 2.0.7 supports in-app upgrade, including full-package imports. Users of retired versions must install a current complete package separately; this workflow does not validate migration from their old installation. For supported versions at or above 2.0.7, the complete ZIP remains the fallback when no verified patch matches the installed version or when reinstalling manually.
 
 1. Find the installed version in the application and open the target GitHub Release's patch report.
 2. Download the matching exact-base patch and its `.sha256`. If no verified entry matches, download the complete ZIP and its `.sha256`. For a short-lived test build, use the workflow artifact from the completed GitHub Actions run.
