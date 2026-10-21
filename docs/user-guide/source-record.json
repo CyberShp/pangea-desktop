@@ -3,43 +3,57 @@
   "verified_date": "2026-10-22",
   "desktop": {
     "repository": "https://github.com/CyberShp/pangea-desktop",
-    "branch": "langgraph",
-    "commit": "a23cd31145a71e3997b617eb809950a00f20f4b8"
+    "branch": "feat/analysis-quality-20261022",
+    "commit": "2d25e7f6200a4e8149afa2a5298a3e1612aecfaf"
   },
   "workbench": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
     "branch": "langgraph",
-    "commit": "7cc5179a30c3beefd61ea4792558c6fc8e8dc73a"
+    "commit": "79175f1ae2e5b646cce1529384b6bd9ac50c64fb"
   },
   "engine": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
     "branch": "langgraph",
-    "commit": "7aa7abc3e921173409787f22e23ca872318baffd"
+    "commit": "58e3be11f1607336ee4a0e54b2e9edb5c4b55efc"
   },
-  "image_basis": "图1–17：锁定工作台 React 组件与隔离示例数据；图18–19：真实历史产物、冻结源码与编辑者判断组成的独立证据阅读页截图。",
+  "image_basis": "图1–17保留Desktop a23cd31、工作台7cc5179、引擎7aa7abc基线的实际组件与隔离示例；图18–19为原历史产物阅读页。当前操作按文字版本执行。",
   "workflow_diagram": "原创操作路线图，SVG 源文件随附；正文使用 PNG。",
   "verification": {
-    "images_load": 20,
-    "broken_images": 0,
-    "top_level_sections": 15,
-    "desktop_viewport": [
-      1440,
-      1100
-    ],
-    "narrow_viewport": [
-      390,
-      844
-    ],
-    "horizontal_overflow": false,
-    "toc_navigation": "passed; Chinese heading anchors and active navigation verified",
-    "image_zoom_and_escape": "passed; new evidence image opens and Escape closes",
-    "source_accuracy": "Rechecked executor setup/recovery, explicit scope and source updates, installed workspace path, exact version manifests; historical case records checked against frozen source",
-    "real_windows_model_analysis": "本轮未执行 Windows 安装、登录或真实模型分析",
+    "scope": "本次仅核对操作文案、Markdown/HTML一致性、链接、图片与历史证据完整性；产品功能与真实模型验收另行记录",
+    "source_accuracy": "按Desktop组件锁核对显式目标类型、源码冻结边界、模块总览、离线报告ZIP及执行依据导出；历史案例正文与evidence文件保留",
+    "images_updated": false,
+    "real_windows_model_analysis": "本次文档修订未执行模型分析或SPDK测试",
     "local_links_and_anchors": "passed; main and evidence HTML",
-    "historical_case_original_hashes": "matched to original final-state.json files",
-    "reader_review": "7 of 7 novice questions answered by an independent reader using the guide only; no material dead ends found",
-    "scope_function_checks": "Locked engine functions in isolated temporary sample: primary/reference counts, rejection of reference directories and overlap, unversioned directory metadata",
-    "historical_case_execution": "读取既有历史 Run 与冻结源码；本轮未重跑分析或执行 SPDK 测试"
+    "historical_case_section": "unchanged against 2d25e7f",
+    "original_evidence_and_image_hashes": "26 of 26 matched; text uses Git LF normalization",
+    "text_hash_line_endings": "LF",
+    "markdown_html": "rendered from the same Markdown; 15 section anchors and all five updated operation labels verified",
+    "browser_layout": [
+      {
+        "viewport": {
+          "width": 1440,
+          "height": 1100
+        },
+        "images": 20,
+        "broken": 0,
+        "sections": 15,
+        "overflow": false,
+        "image_zoom_and_escape": "passed",
+        "script_errors": 0
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "images": 20,
+        "broken": 0,
+        "sections": 15,
+        "overflow": false,
+        "image_zoom_and_escape": "passed",
+        "script_errors": 0
+      }
+    ]
   },
   "sources": [
     {
@@ -134,8 +148,8 @@
     },
     {
       "repository": "engine",
-      "path": "src/pangea_agent/graph/nodes/prepare_inputs.py",
-      "purpose": "主范围和参考范围规则"
+      "path": "src/pangea_agent/graph/nodes/source_first.py",
+      "purpose": "冻结源码边界、目标透传与单元职责"
     },
     {
       "repository": "engine",
@@ -149,13 +163,28 @@
     },
     {
       "repository": "engine",
-      "path": "src/pangea_agent/flow_stability.py",
-      "purpose": "流程基线与内容指纹"
+      "path": "src/pangea_agent/documents/incremental.py",
+      "purpose": "补充和增量分析约束"
     },
     {
       "repository": "engine",
-      "path": "src/pangea_agent/documents/incremental.py",
-      "purpose": "补充和增量分析约束"
+      "path": "src/pangea_agent/analysis_scenarios.py",
+      "purpose": "显式目标类型冻结与比例目标豁免"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea-companion/src/module-overview.js",
+      "purpose": "当前Run模块总览的显式关系"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea-companion/src/offline-report.js",
+      "purpose": "离线报告ZIP内容及三图诊断"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea-companion/src/export.js",
+      "purpose": "八列用例主表和执行条件与依据附表"
     }
   ],
   "images": [
@@ -260,8 +289,8 @@
       "bytes": 153141
     }
   ],
-  "document_sha256": "b13f119b8fd763409d62732a79a77cd5c58353b617aefa416f89a6097f6d8a36",
-  "edition": "langgraph 源码快照使用指南",
+  "document_sha256": "50c98c8bdd07fe6cd3a109e65c8c672f00d930e928f5c784e448dc0ff756240c",
+  "edition": "2026-10-22 分析目标与交付操作修订",
   "executor_example": {
     "name": "OpenCode",
     "version": "1.18.4",
@@ -358,5 +387,45 @@
       "sha256": "a67df58cdb6adb80cf7c641edbd67e62cb59e9fd56d9c24b32e6b152aa5cbd93",
       "bytes": 1193
     }
-  ]
+  ],
+  "image_baseline": {
+    "desktop": {
+      "repository": "https://github.com/CyberShp/pangea-desktop",
+      "branch": "langgraph",
+      "commit": "a23cd31145a71e3997b617eb809950a00f20f4b8"
+    },
+    "workbench": {
+      "repository": "https://github.com/CyberShp/dsh-pangea.git",
+      "branch": "langgraph",
+      "commit": "7cc5179a30c3beefd61ea4792558c6fc8e8dc73a"
+    },
+    "engine": {
+      "repository": "https://github.com/CyberShp/pangea-agent.git",
+      "branch": "langgraph",
+      "commit": "7aa7abc3e921173409787f22e23ca872318baffd"
+    },
+    "verification": {
+      "images_load": 20,
+      "broken_images": 0,
+      "top_level_sections": 15,
+      "desktop_viewport": [
+        1440,
+        1100
+      ],
+      "narrow_viewport": [
+        390,
+        844
+      ],
+      "horizontal_overflow": false,
+      "toc_navigation": "passed; Chinese heading anchors and active navigation verified",
+      "image_zoom_and_escape": "passed; new evidence image opens and Escape closes",
+      "source_accuracy": "Rechecked executor setup/recovery, explicit scope and source updates, installed workspace path, exact version manifests; historical case records checked against frozen source",
+      "real_windows_model_analysis": "本轮未执行 Windows 安装、登录或真实模型分析",
+      "local_links_and_anchors": "passed; main and evidence HTML",
+      "historical_case_original_hashes": "matched to original final-state.json files",
+      "reader_review": "7 of 7 novice questions answered by an independent reader using the guide only; no material dead ends found",
+      "scope_function_checks": "Locked engine functions in isolated temporary sample: primary/reference counts, rejection of reference directories and overlap, unversioned directory metadata",
+      "historical_case_execution": "读取既有历史 Run 与冻结源码；本轮未重跑分析或执行 SPDK 测试"
+    }
+  }
 }

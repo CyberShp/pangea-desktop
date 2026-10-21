@@ -10,14 +10,15 @@ dialog{border:1px solid var(--line);border-radius:12px;width:min(1600px,95vw);ma
 @media(max-width:1100px){.layout{grid-template-columns:190px minmax(0,1fr);gap:24px;padding:34px 24px}.sidebar a{font-size:12px}main{padding:34px 30px}h1{font-size:31px}figure{margin-left:0;margin-right:0}.top{padding:0 24px}}
 @media(max-width:820px){.layout{display:block;padding:18px 14px 48px}.sidebar{display:none}main{padding:26px 22px}.top{height:64px;padding:0 16px}.top small{display:none}.brand{font-size:15px;gap:10px}.actions{gap:8px}.actions a,.actions button{padding:5px 8px;font-size:12px}.mobile-toc{display:block;border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:30px;background:var(--soft)}.mobile-toc summary{cursor:pointer;font-size:14px;font-weight:600}.mobile-toc nav{margin-top:12px}h1{font-size:28px}h2{font-size:23px;margin-top:44px}h1+p{font-size:17px}table{font-size:13px}th,td{padding:10px 11px}td:first-child{width:28%}body{font-size:15px}figure{margin:24px 0}figcaption{margin-left:0;margin-right:0}}
 @media print{.top,.sidebar,.mobile-toc,.eyebrow,dialog{display:none!important}body{background:white;font-size:11pt;line-height:1.65}.layout{display:block;padding:0;max-width:none}main{border:0;box-shadow:none;padding:0}h1{font-size:26pt}h2{font-size:18pt;break-after:avoid}h3{font-size:14pt;break-after:avoid}figure{margin:18px 0;break-inside:avoid}table{font-size:10pt}tr{break-inside:avoid}img{max-height:21cm;object-fit:contain}a{text-decoration:none;color:inherit}@page{size:A4;margin:18mm}}
-</style></head><body><a class="skip" href="#content">跳到正文</a><header class="top"><a class="brand" href="#content"><span class="mark" aria-hidden="true">P</span>PANGEA Desktop<small>使用指南</small></a><div class="actions"><a href="user-guide.md" download>下载正文</a><button id="print" type="button">打印</button></div></header><div class="layout"><aside class="sidebar"><p class="nav-title">阅读目录</p><nav aria-label="文章目录"><a href="#开始前准备什么"><span>01</span>开始前准备什么</a><a href="#安装并打开工作台"><span>02</span>安装并打开工作台</a><a href="#配好分析执行器和讨论助手"><span>03</span>配好分析执行器和讨论助手</a><a href="#把源码加入-pangea"><span>04</span>把源码加入 PANGEA</a><a href="#创建第一次分析"><span>05</span>创建第一次分析</a><a href="#查看进度和处理待办"><span>06</span>查看进度和处理待办</a><a href="#读懂结果和业务流程"><span>07</span>读懂结果和业务流程</a><a href="#真实案例中的结果判断"><span>08</span>真实案例中的结果判断</a><a href="#评审并导出测试用例"><span>09</span>评审并导出测试用例</a><a href="#补充需求和历史缺陷资料"><span>10</span>补充需求和历史缺陷资料</a><a href="#源码更新后重新分析"><span>11</span>源码更新后重新分析</a><a href="#按现象排查问题"><span>12</span>按现象排查问题</a><a href="#升级和保留数据"><span>13</span>升级和保留数据</a><a href="#第一次使用完成检查"><span>14</span>第一次使用完成检查</a><a href="#版本与资料依据"><span>15</span>版本与资料依据</a></nav><div class="version">Windows x64<br>Desktop a23cd31<br>工作台 7cc5179<br>引擎 7aa7abc<br>2026 年 10 月 22 日</div></aside><main id="content"><div class="eyebrow">PANGEA DESKTOP · GETTING STARTED</div><details class="mobile-toc"><summary>展开阅读目录</summary><nav><a href="#开始前准备什么"><span>01</span>开始前准备什么</a><a href="#安装并打开工作台"><span>02</span>安装并打开工作台</a><a href="#配好分析执行器和讨论助手"><span>03</span>配好分析执行器和讨论助手</a><a href="#把源码加入-pangea"><span>04</span>把源码加入 PANGEA</a><a href="#创建第一次分析"><span>05</span>创建第一次分析</a><a href="#查看进度和处理待办"><span>06</span>查看进度和处理待办</a><a href="#读懂结果和业务流程"><span>07</span>读懂结果和业务流程</a><a href="#真实案例中的结果判断"><span>08</span>真实案例中的结果判断</a><a href="#评审并导出测试用例"><span>09</span>评审并导出测试用例</a><a href="#补充需求和历史缺陷资料"><span>10</span>补充需求和历史缺陷资料</a><a href="#源码更新后重新分析"><span>11</span>源码更新后重新分析</a><a href="#按现象排查问题"><span>12</span>按现象排查问题</a><a href="#升级和保留数据"><span>13</span>升级和保留数据</a><a href="#第一次使用完成检查"><span>14</span>第一次使用完成检查</a><a href="#版本与资料依据"><span>15</span>版本与资料依据</a></nav></details><h1>PANGEA Desktop 新手使用指南</h1>
+</style></head><body><a class="skip" href="#content">跳到正文</a><header class="top"><a class="brand" href="#content"><span class="mark" aria-hidden="true">P</span>PANGEA Desktop<small>使用指南</small></a><div class="actions"><a href="user-guide.md" download>下载正文</a><button id="print" type="button">打印</button></div></header><div class="layout"><aside class="sidebar"><p class="nav-title">阅读目录</p><nav aria-label="文章目录"><a href="#开始前准备什么"><span>01</span>开始前准备什么</a><a href="#安装并打开工作台"><span>02</span>安装并打开工作台</a><a href="#配好分析执行器和讨论助手"><span>03</span>配好分析执行器和讨论助手</a><a href="#把源码加入-pangea"><span>04</span>把源码加入 PANGEA</a><a href="#创建第一次分析"><span>05</span>创建第一次分析</a><a href="#查看进度和处理待办"><span>06</span>查看进度和处理待办</a><a href="#读懂结果和业务流程"><span>07</span>读懂结果和业务流程</a><a href="#真实案例中的结果判断"><span>08</span>真实案例中的结果判断</a><a href="#评审并导出测试用例"><span>09</span>评审并导出测试用例</a><a href="#补充需求和历史缺陷资料"><span>10</span>补充需求和历史缺陷资料</a><a href="#源码更新后重新分析"><span>11</span>源码更新后重新分析</a><a href="#按现象排查问题"><span>12</span>按现象排查问题</a><a href="#升级和保留数据"><span>13</span>升级和保留数据</a><a href="#第一次使用完成检查"><span>14</span>第一次使用完成检查</a><a href="#版本与资料依据"><span>15</span>版本与资料依据</a></nav><div class="version">Windows x64<br>操作文字：Desktop 2d25e7f<br>工作台 79175f1<br>引擎 58e3be1<br>配图：较早基线<br>2026 年 10 月 22 日</div></aside><main id="content"><div class="eyebrow">PANGEA DESKTOP · GETTING STARTED</div><details class="mobile-toc"><summary>展开阅读目录</summary><nav><a href="#开始前准备什么"><span>01</span>开始前准备什么</a><a href="#安装并打开工作台"><span>02</span>安装并打开工作台</a><a href="#配好分析执行器和讨论助手"><span>03</span>配好分析执行器和讨论助手</a><a href="#把源码加入-pangea"><span>04</span>把源码加入 PANGEA</a><a href="#创建第一次分析"><span>05</span>创建第一次分析</a><a href="#查看进度和处理待办"><span>06</span>查看进度和处理待办</a><a href="#读懂结果和业务流程"><span>07</span>读懂结果和业务流程</a><a href="#真实案例中的结果判断"><span>08</span>真实案例中的结果判断</a><a href="#评审并导出测试用例"><span>09</span>评审并导出测试用例</a><a href="#补充需求和历史缺陷资料"><span>10</span>补充需求和历史缺陷资料</a><a href="#源码更新后重新分析"><span>11</span>源码更新后重新分析</a><a href="#按现象排查问题"><span>12</span>按现象排查问题</a><a href="#升级和保留数据"><span>13</span>升级和保留数据</a><a href="#第一次使用完成检查"><span>14</span>第一次使用完成检查</a><a href="#版本与资料依据"><span>15</span>版本与资料依据</a></nav></details><h1>PANGEA Desktop 新手使用指南</h1>
 <p>从准备源码开始，完成一次分析，读懂流程与风险，筛选并导出可用的测试用例。</p>
-<p>适用环境：Windows x64。界面基线为 Desktop <code>a23cd31</code>、工作台插件 <code>7cc5179</code>、分析引擎 <code>7aa7abc</code>，核对日期为 2026 年 10 月 22 日。完整提交与安装包核对方法见<a href="#%E7%89%88%E6%9C%AC%E4%B8%8E%E8%B5%84%E6%96%99%E4%BE%9D%E6%8D%AE">版本与资料依据</a>。</p>
+<p>适用环境：Windows x64。操作文字按 Desktop <code>2d25e7f</code>、工作台插件 <code>79175f1</code>、分析引擎 <code>58e3be1</code> 核对，日期为 2026 年 10 月 22 日。现有界面配图来自较早的组件基线，使用时以正文步骤和自己安装包的组件清单为准。完整提交与核对方法见<a href="#%E7%89%88%E6%9C%AC%E4%B8%8E%E8%B5%84%E6%96%99%E4%BE%9D%E6%8D%AE">版本与资料依据</a>。</p>
 <p>PANGEA Desktop 是一个面向源码分析与测试设计的工作台。你提供源码、分析目标和可选的需求等资料，它组织分析与复核，并把业务流程、风险、测试用例和报告放在同一项任务里。</p>
 <p>第一次使用，建议选择一个你熟悉的小模块，采用“模块分析”，先走通下面的流程。</p>
 <p>首次使用可按正文顺序操作；已有任务时，可直接查阅<a href="#%E7%9C%9F%E5%AE%9E%E6%A1%88%E4%BE%8B%E4%B8%AD%E7%9A%84%E7%BB%93%E6%9E%9C%E5%88%A4%E6%96%AD">真实案例中的结果判断</a>、<a href="#%E6%BA%90%E7%A0%81%E6%9B%B4%E6%96%B0%E5%90%8E%E9%87%8D%E6%96%B0%E5%88%86%E6%9E%90">源码更新后重新分析</a>或<a href="#%E6%8C%89%E7%8E%B0%E8%B1%A1%E6%8E%92%E6%9F%A5%E9%97%AE%E9%A2%98">按现象排查问题</a>。范围选择中的目录示例用于解释怎样划定工作边界，真实案例中的产物用于练习怎样做测试判断。</p>
-<figure><a class="figure-link" href="assets/01-journey.png" target="_blank" aria-label="放大图片：第一次使用的操作路线"><img src="assets/01-journey.png" alt="第一次使用的操作路线" loading="lazy" decoding="async"></a></figure><blockquote>
-<p>配图说明：图 1–17 使用配套版本的实际工作台组件，展示示例任务和模型数据；窗口外框为演示环境。图 18–19 来自随包的真实产物阅读页，保留历史记录与冻结源码节选，并单独标明评审建议。</p>
+<figure><a class="figure-link" href="assets/01-journey.png" target="_blank" aria-label="放大图片：第一次使用的操作路线"><img src="assets/01-journey.png" alt="第一次使用的操作路线" loading="lazy" decoding="async"></a></figure>
+<blockquote>
+<p>配图说明：图 1–17 是 Desktop <code>a23cd31</code>、工作台 <code>7cc5179</code>、引擎 <code>7aa7abc</code> 基线的界面样例，展示隔离的示例任务和模型数据；窗口外框为演示环境。它们用于帮助辨认页面位置，目标类型、范围和导出选项按本版文字操作。图 18–19 来自随包的真实历史产物阅读页，保留原记录与冻结源码节选，并单独标明评审建议。</p>
 </blockquote>
 <h2 id="开始前准备什么">开始前准备什么</h2>
 <div class="table-scroll"><table>
@@ -98,7 +99,7 @@ dialog{border:1px solid var(--line);border-radius:12px;width:min(1600px,95vw);ma
 <h3 id="分析执行器">分析执行器</h3>
 <p>分析执行器是实际读取源码、完成分析与复核的外部 Agent。当前支持 <strong>NGA、CodeAgent、OpenCode</strong>。</p>
 <p>下面以 <strong>OpenCode 1.18.4 的 Windows 原生安装</strong>为例。它适合能安装命令行工具、且有模型服务访问权限的电脑。已部署 NGA 或 CodeAgent 的用户可直接在 <strong>新建分析 → 执行设置</strong> 选择已有执行器，并完成下表的模型确认与首个任务检查。</p>
-<h4>安装并确认命令可用</h4>
+<h4 id="安装并确认命令可用">安装并确认命令可用</h4>
 <ol>
 <li>从 <a href="https://nodejs.org/en/download">Node.js 官方下载页</a>安装 Windows x64 的 LTS 安装程序，保留 npm 组件和命令环境配置。npm 是安装 OpenCode 所用的软件包工具。</li>
 <li>打开一个新的 <strong>Windows PowerShell</strong>，依次执行：</li>
@@ -114,7 +115,7 @@ opencode.cmd acp --help
 </code></pre>
 <p>应分别看到命令路径、<code>1.18.4</code> 和 <code>acp</code> 帮助。ACP 是 PANGEA 与执行器通信的接口。本文选用 npm 安装的 <code>.cmd</code> 入口，可避开 PowerShell 对 <code>.ps1</code> 脚本的策略限制。仅在 WSL 中安装 OpenCode，不代表 Windows 程序能找到它。</p>
 <p>这条路线依据 <a href="https://opencode.ai/docs/#install">OpenCode 官方安装说明</a>与 <a href="https://opencode.ai/docs/acp/">ACP 接口说明</a>。后续换用其他版本时，重新检查命令、模型和实际请求；OpenCode 1 与 2 共用命令名，安装前先确认已有版本。</p>
-<h4>登录并验证一次模型请求</h4>
+<h4 id="登录并验证一次模型请求">登录并验证一次模型请求</h4>
 <p>在 PowerShell 中执行：</p>
 <pre><code class="language-powershell">opencode.cmd auth login
 </code></pre>
@@ -127,7 +128,7 @@ opencode.cmd acp --help
 <p>收到 <code>PANGEA_READY</code> 或相应简短回复，说明这个账号和模型此时可以完成请求。若失败，先按<a href="#%E6%A8%A1%E5%9E%8B%E4%B8%8E%E7%BD%91%E7%BB%9C%E9%97%AE%E9%A2%98">模型与网络问题</a>定位，再进入任务创建。登录、模型列表和单次请求的命令说明见 <a href="https://opencode.ai/docs/cli/">OpenCode CLI 文档</a>。</p>
 <p><strong>企业自定义网关：</strong> 先向账号管理员取得 <strong>API 协议、完整接口地址、模型 ID、本人凭据</strong>。全局配置默认位于 <code>%USERPROFILE%\.config\opencode\opencode.json</code>；若组织另设配置位置，以其配置为准。按<a href="https://opencode.ai/docs/providers/#custom-provider">自定义供应商说明</a>添加供应商，凭据中的供应商 ID 必须与配置中的 ID 一致。配置为全局后，Desktop 的分析目录才能读取同一连接；随后仍执行上述模型列表和短请求检查。</p>
 <p>代理和企业证书按 <a href="https://opencode.ai/docs/network/">OpenCode 网络配置</a>设置。让启动 Desktop 的进程继承这些配置；另一个 PowerShell 窗口里的临时设置不会自动传给已运行的 Desktop。</p>
-<h4>在 PANGEA 中确认接入</h4>
+<h4 id="在-pangea-中确认接入">在 PANGEA 中确认接入</h4>
 <ol>
 <li>重新打开 PANGEA Desktop。先按后文完成<a href="#%E6%8A%8A%E6%BA%90%E7%A0%81%E5%8A%A0%E5%85%A5-pangea">源码导入</a>及<a href="#%E5%88%9B%E5%BB%BA%E7%AC%AC%E4%B8%80%E6%AC%A1%E5%88%86%E6%9E%90">创建向导的前两步</a>，再到第三步 <strong>执行设置 → 外部 Agent</strong> 选择 <strong>OpenCode</strong>。</li>
 <li>点击 <strong>刷新模型</strong>，选择刚才测试过的模型，确认页面显示 <strong>已确认模型：具体模型 ID</strong>。</li>
@@ -186,13 +187,30 @@ opencode.cmd acp --help
 <p>点击 <strong>新建分析</strong>。创建向导依次包含 <strong>分析目标、输入资料、执行设置、确认创建</strong> 四步。</p>
 <p>本节用一个示例贯穿操作：源码仓库为 <code>storage</code>，分析目标为“TLS 建链分析”，关注握手与失败清理行为，源码范围为仓库内的 <code>tls/</code>。操作时请替换成自己的仓库、目标和路径。</p>
 <h3 id="第一步明确目标和源码范围">第一步明确目标和源码范围</h3>
-<figure><a class="figure-link" href="assets/05-create-target.png" target="_blank" aria-label="放大图片：新建分析的目标与场景设置"><img src="assets/05-create-target.png" alt="新建分析的目标与场景设置" loading="lazy" decoding="async"></a><figcaption>图 4　先选仓库、写清目标，再选择场景、模式和源码范围。</figcaption></figure>
+<figure><a class="figure-link" href="assets/05-create-target.png" target="_blank" aria-label="放大图片：新建分析的目标与场景设置"><img src="assets/05-create-target.png" alt="新建分析的目标与场景设置" loading="lazy" decoding="async"></a><figcaption>图 4　较早基线的页面位置示例。当前步骤还需选择分析目标类型，具体字段按下文操作。</figcaption></figure>
 <ol>
 <li>在 <strong>源码仓库</strong> 中选择已导入的仓库。</li>
 <li>填写 <strong>分析目标</strong>。使用具体的模块或业务行为名称，例如“TLS 握手与失败清理”。</li>
-<li>选择 <strong>模块分析</strong>，先完成一次综合分析。</li>
-<li>在 <strong>分析模式</strong> 中选择适合本次任务的模式。首次可以采用 <strong>标准型</strong>。</li>
+<li>在 <strong>分析目标类型</strong> 中明确选择 <strong>产品行为</strong> 或 <strong>接口契约</strong>。选择会随本次分析保存。</li>
+<li>选择 <strong>模块分析</strong>，先完成一次综合分析；在 <strong>分析模式</strong> 中选择适合本次任务的模式。首次可以采用 <strong>标准型</strong>。</li>
 </ol>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>分析目标类型</th>
+<th>怎样选择</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>产品行为</td>
+<td>围绕产品支持的入口、实际操作和外部结果设计用例，例如建立连接、拒绝无效密钥、失败后重新操作。</td>
+</tr>
+<tr>
+<td>接口契约</td>
+<td>围绕公开 API 的输入、调用顺序、状态、返回和资源责任设计用例，例如接口调用与资源释放约定。</td>
+</tr>
+</tbody></table></div>
+<p>目标类型由你选择，不根据“库”或“驱动”等名称自动判断。产品行为沿用可实施黑盒与灰盒至少 70% 的交付目标；接口契约和风险场景不设这项比例目标。两者都要如实说明执行入口、现有工具及待补设施，具备执行条件仍不表示已经实测通过。历史 Run 按当时保存的目标和规则阅读。</p>
 <p>四种场景的区别如下。</p>
 <div class="table-scroll"><table>
 <thead>
@@ -228,8 +246,8 @@ opencode.cmd acp --help
 </ol>
 <figure><a class="figure-link" href="assets/07-scope-preview.png" target="_blank" aria-label="放大图片：预览实际命中的源码文件"><img src="assets/07-scope-preview.png" alt="预览实际命中的源码文件" loading="lazy" decoding="async"></a><figcaption>图 6　示例范围命中 42 个源码文件。你的任务应以自己的预览结果为准。</figcaption></figure>
 <p><strong>文件清单符合目标后再继续。</strong> 范围为空、预览失败或命中数为 0 时，不能进入后续步骤。修改范围后需要重新预览；若创建时提示文件集合变化，也应重新核对。</p>
-<p><strong>源码冻结范围</strong>是本次要正式分析的文件集合；<strong>参考源码范围</strong>是为理解这些文件而补充的材料。主范围不会自动补齐整个依赖链。参考范围每行填写一个具体文件，不能填写目录，也不能与主范围重复。辅助文件会随任务一起保存，但不会因此变成主分析对象。</p>
-<h4>用目录判断哪些代码应进入主范围</h4>
+<p><strong>源码冻结范围</strong>是本次可读取的源码边界。分析会围绕你填写的目标组织主干和跨文件流程，不因选择目录就逐个文件承担全量分析。把判断目标行为所必需的入口、接口、状态和清理实现纳入范围；入口或调用方超出边界时，结果应说明证据缺口。</p>
+<h4 id="用目录判断应冻结哪些源码">用目录判断应冻结哪些源码</h4>
 <p>下面是用于讲解职责的目录示例，文件名请替换成自己的工程路径：</p>
 <pre><code class="language-text">storage/
 ├─ tls/
@@ -244,19 +262,15 @@ opencode.cmd acp --help
 └─ docs/
    └─ tls-requirements.md   需求与行为约束
 </code></pre>
-<p>目标是“TLS 握手与失败清理”时，先回答一个问题：<strong>如果 <code>common/transport.c</code> 的关闭或释放行为写错，本次分析是否应该发现？</strong> 如果答案是“应该”，它就是主范围的一部分。</p>
-<p>本例主范围填写：</p>
+<p>目标是“TLS 握手与失败清理”时，先回答一个问题：<strong>如果 <code>common/transport.c</code> 的关闭或释放行为写错，本次分析是否应该发现？</strong> 如果答案是“应该”，就把它纳入源码冻结范围。</p>
+<p>本例源码冻结范围可填写：</p>
 <pre><code class="language-text">tls/
 common/transport.c
-</code></pre>
-<p>参考范围填写：</p>
-<pre><code class="language-text">include/tls.h
+include/tls.h
 tests/tls_test.c
-docs/tls-requirements.md
 </code></pre>
-<p>接口声明用于判断调用是否合法，已有测试用于理解当前覆盖，需求用于判断预期行为。若目标只是“密钥解析是否正确”，可以把主范围缩到 <code>tls/key.c</code>，将握手调用处放入参考范围；如果还要检查连接释放，就需要把负责释放的实现重新纳入主范围。公共模块是否进入主范围，取决于本次要对它的什么行为作出结论。</p>
-<p>点击 <strong>预览命中文件</strong> 后，按职责核对四件事：入口文件是否在内、关键状态判断是否在内、成功和失败出口是否在内、清理责任是否落到具体实现。预览的 <strong>42</strong> 是配图中的示例数量，只表示筛选命中，不能证明范围完整。当前预览统计主范围中支持的 C/C++ 或 Lua 源码；运行时保存的参考文件也会出现在冻结清单中，因此两处文件数可能不同。</p>
-<p><strong>流程基线</strong>是一份已审核的历史流程，用于比较流程结构的变化。第一次独立分析保持 <strong>不选择 · 独立分析</strong>；重复分析时，只有确认它来自同一目标和适用的源码范围后再选。基线必须已完成、审核通过且不是部分交付。它不负责更新源码，旧结论仍需结合本次版本重新判断。</p>
+<p>接口声明用于判断调用是否合法；已有测试可以帮助理解测试驱动和现有执行设施。需求文档通过下一步的 <strong>输入资料</strong> 选择。若目标只是“密钥解析是否正确”，可围绕 <code>tls/key.c</code>、必要接口及其调用关系选择范围；如果还要检查连接释放，就需要纳入负责释放的实现。公共模块是否需要冻结，取决于判断目标行为所需的证据。</p>
+<p>点击 <strong>预览命中文件</strong> 后，按职责核对四件事：入口文件是否在内、关键状态判断是否在内、成功和失败出口是否在内、清理责任是否落到具体实现。预览的 <strong>42</strong> 是配图中的示例数量，只表示筛选命中，不能证明范围完整。当前预览统计范围中支持的 C/C++ 或 Lua 源码，实际输入以本次冻结清单为准。</p>
 <p>点击 <strong>下一步 · 输入资料</strong>。</p>
 <h3 id="第二步选择输入资料">第二步选择输入资料</h3>
 <figure><a class="figure-link" href="assets/08-inputs.png" target="_blank" aria-label="放大图片：为分析选择可选的补充资料"><img src="assets/08-inputs.png" alt="为分析选择可选的补充资料" loading="lazy" decoding="async"></a><figcaption>图 7　模块分析可以不选资产，直接使用源码；有相关材料时，再从资产库中选择。</figcaption></figure>
@@ -273,10 +287,10 @@ docs/tls-requirements.md
 </ol>
 <p>若列表读取失败、没有可用模型或所选模型失效，先处理页面提示再继续。切换执行器后，应重新检查该执行器的模型。</p>
 <h3 id="第四步确认并开始">第四步确认并开始</h3>
-<figure><a class="figure-link" href="assets/10-confirm.png" target="_blank" aria-label="放大图片：确认分析目标和执行设置"><img src="assets/10-confirm.png" alt="确认分析目标和执行设置" loading="lazy" decoding="async"></a><figcaption>图 9　提交前集中核对目标、源码范围、资料版本和执行模型。</figcaption></figure>
+<figure><a class="figure-link" href="assets/10-confirm.png" target="_blank" aria-label="放大图片：确认分析目标和执行设置"><img src="assets/10-confirm.png" alt="确认分析目标和执行设置" loading="lazy" decoding="async"></a><figcaption>图 9　较早基线的确认页示例。当前提交前还需核对分析目标类型。</figcaption></figure>
 <p>逐项确认：</p>
 <ul>
-<li>仓库和目标是否正确。</li>
+<li>仓库、目标及产品行为/接口契约类型是否正确。</li>
 <li>源码范围与命中文件数是否符合预期。</li>
 <li>是否选中了本次需要的资料。</li>
 <li>执行器和具体模型是否正确。</li>
@@ -335,7 +349,8 @@ docs/tls-requirements.md
 </ol>
 <p>页面若提示读取失败或结果不可信，先处理该提示。此时空列表不能被理解成“没有风险”或“没有用例”。</p>
 <h3 id="用图表理解代码行为">用图表理解代码行为</h3>
-<p>进入 <strong>业务流程</strong>，根据任务已有产物选择图表。</p>
+<p>进入 <strong>业务流程</strong>，先展开 <strong>模块总览 · 当前 Run</strong>。按分析单元查看已有流程的类别和关系、入口、主干路径、调用入口及显式调用关系，点击流程名称进入对应内容。需要核对依据时，打开 <strong>查看流程证据 ↗</strong>。关系未声明或证据不足时保留“未声明”等提示；分组清单本身不证明流程完整，也不会补造跨单元连线。</p>
+<p>再根据当前流程已有产物选择图表。</p>
 <figure><a class="figure-link" href="assets/14-flow.png" target="_blank" aria-label="放大图片：业务流程的图形阅读界面"><img src="assets/14-flow.png" alt="业务流程的图形阅读界面" loading="lazy" decoding="async"></a><figcaption>图 13　流程图展示分支与路径；可选择重点路径、查看节点详情。</figcaption></figure>
 <div class="table-scroll"><table>
 <thead>
@@ -357,6 +372,7 @@ docs/tls-requirements.md
 <td>查看函数、宏及外部函数之间的调用，以及变量的读取、计算和写入。</td>
 </tr>
 </tbody></table></div>
+<p>在 <strong>函数与变量</strong> 中选择函数节点，再点击带仓库、路径和行号的源码位置，预览当前 Run 保存的源码。缺少位置、行号或仓库不属于当前 Run 时，先核对记录与页面提示；不要拿工作区里已更新的文件替代当时的依据。</p>
 <p>阅读较大的图时，可使用全屏入口；按 <strong>Esc</strong> 退出全屏。普通滚轮用于阅读，<strong>Ctrl＋滚轮</strong>用于缩放。流程图提供 <strong>高亮路径</strong> 和 <strong>聚焦所选路径</strong>，方便单独查看关注的路径。</p>
 <p>还可以切换到 <strong>文字流程</strong>，按节点和分支逐项阅读。分支很多时，在 <strong>分支与异常</strong> 中使用搜索、筛选和分页，也可以点击 <strong>绘制本页分支</strong>，在流程图中查看当前页的分支。某次任务没有生成相应图表时，以该任务实际保存的内容为准。</p>
 <h3 id="从风险追到证据">从风险追到证据</h3>
@@ -494,7 +510,7 @@ docs/tls-requirements.md
 <p><strong>“已采纳”和“具备执行条件”都不表示用例已执行通过。</strong> 实际验证结果需要由测试执行记录确认。“待补执行条件”的用例，应先补齐环境、工具或其他前提。</p>
 <h3 id="选择正确的导出范围">选择正确的导出范围</h3>
 <p>在测试用例页打开导出窗口；已勾选用例时，也可以点击 <strong>导出所选</strong>。</p>
-<figure><a class="figure-link" href="assets/17-export.png" target="_blank" aria-label="放大图片：选择用例导出范围和文件格式"><img src="assets/17-export.png" alt="选择用例导出范围和文件格式" loading="lazy" decoding="async"></a><figcaption>图 16　示例数据：导出前核对范围和条数，再选择 Excel 工作簿或 CSV。</figcaption></figure>
+<figure><a class="figure-link" href="assets/17-export.png" target="_blank" aria-label="放大图片：选择用例导出范围和文件格式"><img src="assets/17-export.png" alt="选择用例导出范围和文件格式" loading="lazy" decoding="async"></a><figcaption>图 16　较早基线的导出窗口示例。当前格式选项会同时交付执行依据，见下表。</figcaption></figure>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -521,14 +537,33 @@ docs/tls-requirements.md
 </tbody></table></div>
 <ol>
 <li>选择范围，核对显示的条数。</li>
-<li>选择 <strong>Excel 工作簿</strong> 或 <strong>CSV</strong>。</li>
+<li>选择 <strong>Excel 工作簿及执行依据</strong> 或 <strong>CSV及执行依据（ZIP）</strong>。</li>
 <li>点击 <strong>导出 N 条</strong>，保存文件。</li>
 <li>打开导出的表格，检查数量、标题和步骤是否符合本次交付需要。</li>
 </ol>
-<p>表格包含八列：<strong>用例ID、标题、类型、前置条件、操作步骤、预期结果、观察点、清理动作（环境恢复）</strong>。</p>
+<p>用例主表包含八列：<strong>用例ID、标题、类型、前置条件、操作步骤、预期结果、观察点、清理动作（环境恢复）</strong>。执行条件与依据另表保存，便于把用例安排与证据核对一起交接。</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>文件格式</th>
+<th>打开后核对什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Excel 工作簿及执行依据</td>
+<td>同一工作簿包含 <strong>测试用例</strong> 和 <strong>执行条件与依据</strong> 两张表。按用例身份对应阅读。</td>
+</tr>
+<tr>
+<td>CSV及执行依据（ZIP）</td>
+<td>解压后读取 <code>cases.csv</code>、<code>case-evidence.csv</code> 和 <code>manifest.json</code>。清单保留 Run 与用例顺序。</td>
+</tr>
+</tbody></table></div>
+<p>依据表保留已声明的执行准备度及原因、测试层级、用途、源码证据、入口和判据等字段。空白表示记录尚未提供；导出不会自动补齐执行设施，也不会把设计状态改成实测通过。</p>
 <p>如果页面提示“含 N 条筛选外选择”，说明导出已勾选项时还会包含这些条目。想只导出当前筛选结果，就直接选择对应范围；想重新选择，先点击 <strong>清空选择</strong>。范围为 0 时，先调整筛选或选择。</p>
 <h3 id="保存报告">保存报告</h3>
 <p>在结果概览点击 <strong>查看分析报告</strong>，进入报告页后点击 <strong>打开已有报告</strong>；也可以从 <strong>交付文件</strong> 中分别打开 <code>report.html</code> 或 <code>report.md</code>。运行过程页出现 <strong>查看报告</strong> 时，也能直接打开当前报告。</p>
+<p>需要离线阅读或分享时，在报告页的 <strong>交付文件</strong> 点击 <strong>导出离线图文报告（ZIP）</strong>。解压整个文件包后打开 <code>report.html</code>，按模块总览阅读各流程的流程图、时序图和函数调用图，以及原文字报告、事实与诊断。包内还包含 <code>report.md</code>、<code>facts.json</code>、<code>manifest.json</code>、<code>diagnostics.json</code> 和可用的 SVG 图；清单用于核对 Run、产物版本和内容校验值。</p>
+<p>离线包按导出时的已保存结果生成。缺少图形事实、未完成或存在绘图问题时，会保留原记录和诊断；历史 Run 没有提供的图不会因此补成完整结果。分享前核对未解决事项，并按团队要求检查文件包中的源码和资料内容。</p>
 <p>分享时一并说明仓库、分析目标、所用源码版本，以及报告中的未解决事项。测试用例表格和分析报告各有用途：前者便于安排执行，后者保留分析依据、复核情况和交付范围。</p>
 <h2 id="补充需求和历史缺陷资料">补充需求和历史缺陷资料</h2>
 <p>首次流程走通后，可以加入资料，让后续分析更贴近实际业务。</p>
@@ -550,7 +585,7 @@ docs/tls-requirements.md
 <li>回到工作台，点击 <strong>添加仓库 → 选择文件夹</strong>，选择更新后的原始目录。</li>
 <li>将 <strong>仓库名称</strong> 改成新的名称，例如 <code>storage-20261022</code> 或团队交付版本名 <code>storage-R2</code>。已有同名仓库会被拒绝，旧副本保持原样。日期只帮助识别，实际版本要在冻结清单中核对。</li>
 <li>核对页面 <strong>目标位置</strong>，点击 <strong>添加仓库</strong>，等待新名称出现在列表。</li>
-<li>点击 <strong>新建分析</strong>，选择新仓库，重新检查目标、主范围、参考范围和资料版本，再次 <strong>预览命中文件</strong>。新增或移动文件可能改变范围。</li>
+<li>点击 <strong>新建分析</strong>，选择新仓库，重新检查目标、目标类型、源码冻结范围和资料版本，再次 <strong>预览命中文件</strong>。新增或移动文件可能改变范围。</li>
 <li>创建后，打开 <strong>运行过程 → 02 分析单元划分 → 阶段任务 → 阶段产物 → 冻结源码清单（source-manifest.json）</strong>。准备阶段尚未完成时，清单可能还没生成。</li>
 <li>得到新报告后，用新仓库名称和新 Run 编号分享结果，并重新评审适用的用例。</li>
 </ol>
@@ -633,8 +668,8 @@ git -C &quot;D:\Code\storage&quot; status --short
 <h3 id="源码命中为零或提示范围变化">源码命中为零或提示范围变化</h3>
 <p><strong>在哪里看：</strong> 新建分析的 <strong>分析目标 → 预览命中文件</strong>。</p>
 <p>命中为 0 时，先核对当前选中的仓库。路径相对仓库根目录填写，例如 <code>tls/</code>，不要填另一台电脑的路径。用 <strong>选择目录或文件</strong>查看实际目录，再预览。当前支持 C/C++ 与 Lua；目录展开还有默认排除规则，不能用资源管理器里“目录有文件”代替预览结果。若目录都是其他语言或被排除的文件，扩大同一个路径也不会自动变成可分析范围。</p>
-<p>提示范围已经变化时，说明创建所用文件集合与上次预览不一致。重新预览，重点核对新增、移动或删除的文件，然后再创建。参考范围报错时，确认每行是存在的具体文件，并移除与主范围重复的条目。</p>
-<p><strong>恢复标志：</strong> 清单中出现预期入口、状态判断与清理实现，主范围命中数大于 0，下一步可点击。仍不行时提供仓库名、主/参考范围文本、预览错误和预期文件的相对路径。</p>
+<p>提示范围已经变化时，说明创建所用文件集合与上次预览不一致。重新预览，重点核对新增、移动或删除的文件，然后再创建。</p>
+<p><strong>恢复标志：</strong> 清单中出现预期入口、状态判断与清理实现，命中数大于 0，下一步可点击。仍不行时提供仓库名、源码冻结范围文本、预览错误和预期文件的相对路径。</p>
 <h3 id="页面显示上次结果或资料暂不可读">页面显示上次结果或资料暂不可读</h3>
 <p><strong>现象：</strong> 运行过程顶部提示 <strong>同步失败，正在显示上次结果</strong>，并显示“最后成功读取于 …”。这是页面读取失败，后台是否仍在分析需要重新确认。</p>
 <p>点击 <strong>重试读取</strong>。这只重新读取状态，不重新派发分析。看到最近同步时间更新、警告消失、当前阶段恢复显示，才说明页面读取恢复。持续失败时保留最后成功时间、Run 编号和错误文字，不用新建同任务替代读取恢复。</p>
@@ -681,7 +716,7 @@ git -C &quot;D:\Code\storage&quot; status --short
 </ul>
 <p>接下来，可以扩大模块范围、加入需求和历史缺陷资料，或在准备好执行环境后安排测试执行。</p>
 <h2 id="版本与资料依据">版本与资料依据</h2>
-<p>本指南对应以下 <code>langgraph</code> 源码快照。分支会继续更新；复核按钮或行为时，请使用固定提交。</p>
+<p>本版操作文字对应以下源码快照及组件锁定。分支会继续更新；复核按钮或行为时，请使用固定提交。</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -691,17 +726,18 @@ git -C &quot;D:\Code\storage&quot; status --short
 </thead>
 <tbody><tr>
 <td>PANGEA Desktop</td>
-<td><a href="https://github.com/CyberShp/pangea-desktop/commit/a23cd31145a71e3997b617eb809950a00f20f4b8"><code>a23cd31145a71e3997b617eb809950a00f20f4b8</code></a></td>
+<td><code>2d25e7f6200a4e8149afa2a5298a3e1612aecfaf</code></td>
 </tr>
 <tr>
 <td>工作台插件 dsh-pangea</td>
-<td><a href="https://github.com/CyberShp/dsh-pangea/commit/7cc5179a30c3beefd61ea4792558c6fc8e8dc73a"><code>7cc5179a30c3beefd61ea4792558c6fc8e8dc73a</code></a></td>
+<td><code>79175f1ae2e5b646cce1529384b6bd9ac50c64fb</code></td>
 </tr>
 <tr>
 <td>分析引擎 pangea-agent</td>
-<td><a href="https://github.com/CyberShp/pangea-agent/commit/7aa7abc3e921173409787f22e23ca872318baffd"><code>7aa7abc3e921173409787f22e23ca872318baffd</code></a></td>
+<td><code>58e3be11f1607336ee4a0e54b2e9edb5c4b55efc</code></td>
 </tr>
 </tbody></table></div>
+<p>界面配图仍保留 Desktop <code>a23cd31</code>、工作台 <code>7cc5179</code>、引擎 <code>7aa7abc</code> 的页面样例，便于对照历史版本。历史真实案例保持原 Run、原源码与原状态，不因本次操作说明更新而改变。</p>
 <p><strong>先对照自己安装的产品。</strong> 打开 <strong>设置 → 版本与升级</strong>，记录“当前版本”。在程序安装目录中，用记事本只读打开 <code>resources\update\pangea-package-manifest.json</code>，核对 <code>version</code>、<code>channel</code> 和 <code>components</code>；也可查看 <code>resources\pangea-manifest.json</code> 中的组件信息。保留这些文件原样。</p>
 <ul>
 <li><code>stable</code> 表示正式包通道；<code>test</code> 表示测试包通道，测试包版本格式带有 <code>-test.&lt;序号&gt;.&lt;提交短标识&gt;</code>。</li>
