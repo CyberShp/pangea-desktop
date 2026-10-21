@@ -10,6 +10,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: uiux-internal-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   windows-dev:
     runs-on: windows-2022
@@ -46,6 +49,14 @@ jobs:
       - name: Smoke test an isolated profile
         shell: pwsh
         run: ./scripts/test-uiux-dev-instance.ps1 -PackageDirectory './dist-dev/win-unpacked'
+      - name: Verify packaged Cordis analysis integration
+        shell: pwsh
+        run: |
+          $env:PANGEA_TEST_APP_ROOT = (Resolve-Path './dist-dev/win-unpacked/resources/app').Path
+          $PackagedNode = Join-Path $env:PANGEA_TEST_APP_ROOT 'node_modules/node/bin/node.exe'
+          $IntegrationTest = Join-Path $env:PANGEA_TEST_APP_ROOT 'node_modules/dsh-pangea-companion/tests/cordis-launch.integration.mjs'
+          & $PackagedNode --test $IntegrationTest
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged Cordis integration failed.' }
       - name: Add isolated launch entry and review checklist
         shell: pwsh
         run: |

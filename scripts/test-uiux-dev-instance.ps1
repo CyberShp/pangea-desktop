@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw "Missing d
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $EvidenceRoot = Join-Path $ProjectRoot '.pangea-build'
 $Profile = Join-Path ([IO.Path]::GetTempPath()) "pangea-uiux-$([Guid]::NewGuid().ToString('N'))"
-$Marker = Join-Path $Profile 'health.json'
+$Marker = Join-Path $Profile 'updates\uiux-health.json'
 $PreviousProfile = $env:PANGEA_USER_DATA_DIR
 $Process = $null
 try {
