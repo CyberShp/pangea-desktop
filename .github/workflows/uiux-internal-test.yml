@@ -17,8 +17,6 @@ jobs:
   windows-dev:
     runs-on: windows-2022
     timeout-minutes: 60
-    env:
-      PANGEA_PACKAGE_CHANNEL: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,6 +41,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Source scope/freeze parity failed.' }
       - name: Build the separate development application
         shell: pwsh
+        env:
+          PANGEA_PACKAGE_CHANNEL: test
         run: |
           npm run package:dev:dir
           if ($LASTEXITCODE -ne 0) { throw 'Development application build failed.' }
