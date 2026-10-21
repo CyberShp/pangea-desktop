@@ -523,6 +523,28 @@ describe('navigation trust boundary', () => {
       canGrantWindowPermission('clipboard-sanitized-write', 'file:///tmp/app.html', true)
     ).toBe(false)
   })
+
+  it('allows user-triggered fullscreen for the Harness main frame', () => {
+    for (const url of ['http://127.0.0.1:43127/pangea', 'http://localhost:43127/pangea']) {
+      expect(canGrantWindowPermission('fullscreen', url, true)).toBe(true)
+      expect(canGrantWindowPermission('fullscreen', url, false)).toBe(false)
+      expect(canGrantWindowPermission('automatic-fullscreen', url, true)).toBe(false)
+    }
+  })
+
+  it.each([
+    undefined,
+    '',
+    'not a URL',
+    'file:///app/index.html',
+    'dsh-recovery://app',
+    'https://example.com',
+    'http://127.0.0.1.example.com:43127',
+    'http://localhost@example.com:43127',
+    'https://127.0.0.1:43127'
+  ])('rejects fullscreen outside the Harness page: %s', url => {
+    expect(canGrantWindowPermission('fullscreen', url, true)).toBe(false)
+  })
 })
 
 describe('Harness window activation', () => {

@@ -26,7 +26,7 @@ export function canGrantWindowPermission(
   isMainFrame: boolean
 ): boolean {
   return (
-    permission === 'clipboard-sanitized-write' &&
+    (permission === 'clipboard-sanitized-write' || permission === 'fullscreen') &&
     isMainFrame &&
     requestingUrl !== undefined &&
     isHarnessUrl(requestingUrl)
