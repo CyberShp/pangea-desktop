@@ -1,0 +1,28 @@
+{
+  "purpose": "Historical analysis excerpts for a user-guide reading exercise; no new analysis or test execution",
+  "source_commit": "97af299e3c76368219f0cddcc710fafd57edcc1c",
+  "engine_commit": null,
+  "engine_commit_note": "Historical Run artifacts inspected do not record an exact engine Git commit; current checkout cannot establish historical runtime version.",
+  "files": [
+    {
+      "file": "nvme-tcp-chap-tls-260825-01.json",
+      "origin": "nvme-tcp-chap-tls-260825-01/final-state.json",
+      "original_sha256": "7a82e9aec6f47519b30cfd83c0cf831d8a94c4ffaf45d512f44125c8b46bbeb5"
+    },
+    {
+      "file": "nvme-tcp-chap-tls-260825-01-source.json",
+      "origin": "nvme-tcp-chap-tls-260825-01/inputs/frozen/source/spdk-full",
+      "excerpt_count": 2
+    },
+    {
+      "file": "nvme-of-dh-hmac-chap-aut-260904-04.json",
+      "origin": "nvme-of-dh-hmac-chap-aut-260904-04/final-state.json",
+      "original_sha256": "6d05480ab597e9bdb0ed1b2c4660fe1eb80fc75d3d532ed09a7284136c3b8e7e"
+    },
+    {
+      "file": "nvme-of-dh-hmac-chap-aut-260904-04-source.json",
+      "origin": "nvme-of-dh-hmac-chap-aut-260904-04/inputs/source/spdk-full",
+      "excerpt_count": 6
+    }
+  ]
+}

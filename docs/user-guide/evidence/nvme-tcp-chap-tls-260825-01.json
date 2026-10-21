@@ -1,0 +1,125 @@
+{
+  "provenance": {
+    "run_id": "nvme-tcp-chap-tls-260825-01",
+    "completed_at": "2026-08-24T18:03:14.367072+00:00",
+    "artifact": "final-state.json",
+    "artifact_sha256": "7a82e9aec6f47519b30cfd83c0cf831d8a94c4ffaf45d512f44125c8b46bbeb5",
+    "schema_version": "1.0",
+    "workflow_version": 2,
+    "run_status": "COMPLETE",
+    "quality_status": "PASS",
+    "source_commit": "97af299e3c76368219f0cddcc710fafd57edcc1c"
+  },
+  "records": {
+    "business_flows": [
+      {
+        "title": "NVMe/TCP qpair同步断开与outstanding_reqs竞态",
+        "description": "TCP qpair在同步模式下的disconnect流程及其与polling线程的竞态条件分析",
+        "steps": [
+          "1. 外部调用nvme_tcp_ctrlr_disconnect_qpair(qpair, async=false)进入同步断开路径",
+          "2. 函数先调用spdk_sock_group_remove_sock从sock_group移除socket",
+          "3. 调用spdk_sock_close关闭socket",
+          "4. 调用nvme_tcp_qpair_abort_reqs遍历outstanding_reqs完成所有pending请求",
+          "5. 检查qpair->async标志：async=false时执行assert(TAILQ_EMPTY(&tqpair->outstanding_reqs))",
+          "6. 若abort_reqs执行期间polling线程完成新请求并放入outstanding_reqs，则assert触发",
+          "7. Debug：进程终止。Release：跳过assert，调用nvme_tcp_ctrlr_disconnect_qpair_done",
+          "8. tqpair资源释放但可能存在内存泄漏"
+        ],
+        "mermaid": null,
+        "evidence": [
+          {
+            "chunk_id": "spdk-full:lib/nvme/nvme_tcp.c:361-480",
+            "location": "spdk-full:lib/nvme/nvme_tcp.c:361-480",
+            "observation": "nvme_tcp_ctrlr_disconnect_qpair完整代码路径，async=false时在abort_reqs之后有assert检查",
+            "status": "confirmed",
+            "pending_reason": null
+          }
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "risk_id": "RISK-U00-001",
+        "title": "NVMe/TCP同步断开时并发polling可能导致outstanding_reqs残留触发assert",
+        "affected_paths": [
+          "lib/nvme/nvme_tcp.c"
+        ],
+        "dfx": [
+          "并发与异常"
+        ],
+        "severity": "Medium",
+        "confidence": "medium",
+        "trigger": "1) 创建TCP qpair并建立连接使状态进入RUNNING；2) 向qpair提交IO请求使outstanding_reqs非空；3) 在polling线程处理completion期间，另一个线程调用nvme_tcp_ctrlr_disconnect_qpair进入同步断开路径；4) disconnect的abort_reqs遍历完成outstanding_reqs同时，polling线程恰好有新的PICO recv完成将新请求放入outstanding_reqs；5) abort_reqs返回后检查TAILQ_EMPTY(&tqpair->outstanding_reqs)为false触发assert",
+        "system_result": "Debug构建：进程在assert处终止。Release构建：跳过assert，disconnect_qpair_done仍被调用，但tqpair->outstanding_reqs包含未完成的nvme_tcp_req结构体内存未释放",
+        "external_observation": "Debug构建：进程coredump或日志显示'assert(TAILQ_EMPTY(&tqpair->outstanding_reqs))'失败。Release构建：观察到spdk_nvme_qpair_connect返回成功但后续IO无response或超时；valgrind/asan报告内存泄漏",
+        "exclusion_condition": "在disconnect调用前确保所有inflight请求已完成或取消；使用异步断开模式(qpair->async=true)；在单线程环境下无并发polling",
+        "upstream_semantics": {
+          "reachability": "nvme_tcp_ctrlr_disconnect_qpair在disconnect路径中先调用nvme_tcp_qpair_abort_reqs再检查outstanding_reqs空。理论上abort_reqs应完成所有请求，但若polling线程与disconnect线程并发，abort_reqs返回后可能新请求已进入队列。触发窗口极小但理论上存在。",
+          "caller_constraints": "nvme_tcp_ctrlr_disconnect_qpair的调用方必须持有qpair引用。qpair->async标志在创建时设定，控制同步/异步路径。同步断开路径（有async=false）在abort_reqs之后有assert检查。",
+          "documented_behavior": "代码注释表明'If the qpair is marked as asynchronous, let it go through the process_completions()...'，说明同步模式期望outstanding_reqs在disconnect前已清空",
+          "existing_tests": "test/unit/lib/nvme/nvme_tcp.c中有部分qpair delete测试，但未覆盖disconnect与polling并发场景",
+          "conclusion": "risk_remains"
+        },
+        "translation_status": "Blackbox-ready",
+        "status": "pending",
+        "evidence": [
+          {
+            "chunk_id": "spdk-full:lib/nvme/nvme_tcp.c:481-600",
+            "location": "spdk-full:lib/nvme/nvme_tcp.c:481-600",
+            "observation": "nvme_tcp_ctrlr_disconnect_qpair:485处assert(TAILQ_EMPTY(&tqpair->outstanding_reqs))，若disconnect执行期间polling完成新请求并加入outstanding_reqs则触发",
+            "status": "confirmed",
+            "pending_reason": null
+          }
+        ]
+      }
+    ],
+    "test_cases": [
+      {
+        "test_case_id": "TC-U00-001",
+        "title": "NVMe/TCP同步断开时并发polling导致outstanding_reqs残留-风险验证",
+        "case_type": "风险复现测试",
+        "linked_risk_ids": [
+          "RISK-U00-001"
+        ],
+        "linked_requirement_ids": [],
+        "linked_material_ids": [],
+        "linked_coverage_ids": [],
+        "preconditions": [
+          "已建立TCP qpair连接并进入RUNNING状态",
+          "qpair->async=false（同步模式）",
+          "存在inflight IO请求使outstanding_reqs非空",
+          "存在并发polling线程在后台处理completion"
+        ],
+        "steps": [
+          {
+            "action": "向NVMe/TCP qpair提交IO请求并立即调用nvme_tcp_ctrlr_disconnect_qpair同步断开",
+            "expected_result": "disconnect返回成功，连接关闭，outstanding_reqs被清空，tqpair资源完全释放",
+            "failure_observation": "Debug构建：进程在assert(TAILQ_EMPTY(&tqpair->outstanding_reqs))处终止。Release构建：观察到内存泄漏或tqpair释放不完全"
+          },
+          {
+            "action": "（Debug构建）若进程未终止，检查dmesg或coredump中assert失败日志",
+            "expected_result": "日志显示'TAILQ_EMPTY(&tqpair->outstanding_reqs)'断言失败",
+            "failure_observation": null
+          },
+          {
+            "action": "（Release构建）使用valgrind --leak-check=full重新运行相同场景",
+            "expected_result": "valgrind报告tqpair相关内存完全释放，无泄漏",
+            "failure_observation": "valgrind报告definitely lost或indirectly lost内存与tqpair相关"
+          }
+        ],
+        "observability": [
+          "进程退出状态（Debug assert导致coredump）",
+          "dmesg/syslog中的assert失败日志",
+          "valgrind内存泄漏报告",
+          "strace显示close(fd)调用后socket真正关闭"
+        ],
+        "cleanup": [
+          "终止测试进程",
+          "清理测试创建的NVMe subsystem和namespace",
+          "清理测试网络命名空间或TCP连接状态"
+        ],
+        "status": "pending"
+      }
+    ]
+  }
+}

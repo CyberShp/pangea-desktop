@@ -1,0 +1,475 @@
+{
+  "provenance": {
+    "run_id": "nvme-of-dh-hmac-chap-aut-260904-04",
+    "completed_at": "2026-09-03T18:10:03.609769+00:00",
+    "artifact": "final-state.json",
+    "artifact_sha256": "6d05480ab597e9bdb0ed1b2c4660fe1eb80fc75d3d532ed09a7284136c3b8e7e",
+    "schema_version": "3.1",
+    "workflow_version": null,
+    "run_status": "COMPLETE",
+    "quality_status": "UNRESOLVED",
+    "source_commit": "97af299e3c76368219f0cddcc710fafd57edcc1c"
+  },
+  "records": {
+    "business_flows": [
+      {
+        "flow_id": "F-U00-FLOW-HOST-AUTH-POLL",
+        "unit_id": "U00",
+        "title": "Host 侧 DH-HMAC-CHAP 轮询认证流程",
+        "description": "Host 通过 nvme_fabric_qpair_authenticate_poll 驱动 7 状态状态机，向 Target 发送 negotiate/reply/success2，接收 challenge/success1 并验证 HMAC，最终以回调或返回码通知调用方。",
+        "entry": "spdk_nvme_qpair_authenticate / nvme_fabric_qpair_authenticate_async",
+        "steps": [
+          "[entry] spdk_nvme_qpair_authenticate 入口检查与资源分配",
+          "[main] nvme_fabric_qpair_authenticate_poll 状态机轮询",
+          "[main] 发送 negotiate 消息",
+          "[branch] 接收并验证 challenge",
+          "[branch] 验证 success1",
+          "[branch] 发送 success2（仅当 dhchap_ctrlr_key != NULL）",
+          "[exit] 认证完成，清理资源并返回结果",
+          "[exit] poll_status 泄漏（未清理）"
+        ],
+        "diagram": {
+          "nodes": [
+            {
+              "id": "STEP-HOST-ENTRY",
+              "label": "spdk_nvme_qpair_authenticate 入口检查与资源分配",
+              "kind": "entry"
+            },
+            {
+              "id": "STEP-HOST-STATE-MACHINE",
+              "label": "nvme_fabric_qpair_authenticate_poll 状态机轮询",
+              "kind": "main"
+            },
+            {
+              "id": "STEP-HOST-SEND-NEGOTIATE",
+              "label": "发送 negotiate 消息",
+              "kind": "main"
+            },
+            {
+              "id": "STEP-HOST-CHALLENGE",
+              "label": "接收并验证 challenge",
+              "kind": "branch"
+            },
+            {
+              "id": "STEP-HOST-CHECK-SUCCESS1",
+              "label": "验证 success1",
+              "kind": "branch"
+            },
+            {
+              "id": "STEP-HOST-SEND-SUCCESS2",
+              "label": "发送 success2（仅当 dhchap_ctrlr_key != NULL）",
+              "kind": "branch"
+            },
+            {
+              "id": "STEP-HOST-DONE",
+              "label": "认证完成，清理资源并返回结果",
+              "kind": "exit"
+            },
+            {
+              "id": "STEP-HOST-LEAK-EXIT",
+              "label": "poll_status 泄漏（未清理）",
+              "kind": "exit"
+            }
+          ],
+          "edges": [
+            {
+              "source_step_key": "STEP-HOST-ENTRY",
+              "target_step_key": "STEP-HOST-STATE-MACHINE",
+              "condition": null
+            },
+            {
+              "source_step_key": "STEP-HOST-STATE-MACHINE",
+              "target_step_key": "STEP-HOST-SEND-NEGOTIATE",
+              "condition": "状态 == NEGOTIATE"
+            },
+            {
+              "source_step_key": "STEP-HOST-STATE-MACHINE",
+              "target_step_key": "STEP-HOST-CHALLENGE",
+              "condition": "状态 == AWAIT_CHALLENGE 且等待完成"
+            },
+            {
+              "source_step_key": "STEP-HOST-STATE-MACHINE",
+              "target_step_key": "STEP-HOST-CHECK-SUCCESS1",
+              "condition": "状态 == AWAIT_SUCCESS1 且等待完成"
+            },
+            {
+              "source_step_key": "STEP-HOST-STATE-MACHINE",
+              "target_step_key": "STEP-HOST-SEND-SUCCESS2",
+              "condition": "dhchap_ctrlr_key != NULL"
+            },
+            {
+              "source_step_key": "STEP-HOST-STATE-MACHINE",
+              "target_step_key": "STEP-HOST-DONE",
+              "condition": "状态 == DONE"
+            },
+            {
+              "source_step_key": "STEP-HOST-STATE-MACHINE",
+              "target_step_key": "STEP-HOST-LEAK-EXIT",
+              "condition": "nvme_fabric_qpair_authenticate_poll 返回非 EAGAIN 错误（qpair->fabric_poll_status 和 DMA 缓冲区未清理）"
+            }
+          ]
+        },
+        "mermaid": "flowchart TD\n    STEP-HOST-ENTRY[\"spdk_nvme_qpair_authenticate 入口检查与资源分配\"]\n    STEP-HOST-STATE-MACHINE[\"nvme_fabric_qpair_authenticate_poll 状态机轮询\"]\n    STEP-HOST-SEND-NEGOTIATE[\"发送 negotiate 消息\"]\n    STEP-HOST-CHALLENGE[\"接收并验证 challenge\"]\n    STEP-HOST-CHECK-SUCCESS1[\"验证 success1\"]\n    STEP-HOST-SEND-SUCCESS2[\"发送 success2（仅当 dhchap_ctrlr_key != NULL）\"]\n    STEP-HOST-DONE[\"认证完成，清理资源并返回结果\"]\n    STEP-HOST-LEAK-EXIT[\"poll_status 泄漏（未清理）\"]\n    STEP-HOST-ENTRY --> STEP-HOST-STATE-MACHINE\n    STEP-HOST-STATE-MACHINE -->|\"状态 == NEGOTIATE\"| STEP-HOST-SEND-NEGOTIATE\n    STEP-HOST-STATE-MACHINE -->|\"状态 == AWAIT_CHALLENGE 且等待完成\"| STEP-HOST-CHALLENGE\n    STEP-HOST-STATE-MACHINE -->|\"状态 == AWAIT_SUCCESS1 且等待完成\"| STEP-HOST-CHECK-SUCCESS1\n    STEP-HOST-STATE-MACHINE -->|\"dhchap_ctrlr_key != NULL\"| STEP-HOST-SEND-SUCCESS2\n    STEP-HOST-STATE-MACHINE -->|\"状态 == DONE\"| STEP-HOST-DONE\n    STEP-HOST-STATE-MACHINE -->|\"nvme_fabric_qpair_authenticate_poll 返回非 EAGAIN 错误（qpair->fabric_poll_status 和 DMA 缓冲区未清理）\"| STEP-HOST-LEAK-EXIT",
+        "evidence": [
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:1235",
+            "observation": "\tif (ctrlr->opts.dhchap_key == NULL) {"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:1245",
+            "observation": "\tstatus = calloc(1, sizeof(*qpair->fabric_poll_status));"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:1093",
+            "observation": "\tif (auth->flags.in_auth_poll) {"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:1099",
+            "observation": "\tdo {"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:1211",
+            "observation": "\t\tcase NVME_QPAIR_AUTH_STATE_DONE:"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:812",
+            "observation": "\tmsg->t_id = auth->tid;"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:856",
+            "observation": "\tswitch (challenge->dhg_id) {"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:920",
+            "observation": "\tif (challenge->dhg_id != SPDK_NVMF_DHCHAP_DHGROUP_NULL) {"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:1039",
+            "observation": "\tif (ctrlr->opts.dhchap_ctrlr_key != NULL) {"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:1076-1077",
+            "observation": "\tmsg->auth_type = SPDK_NVMF_AUTH_TYPE_DHCHAP;"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:1211",
+            "observation": "\t\tcase NVME_QPAIR_AUTH_STATE_DONE:"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:1260",
+            "observation": "\tqpair->fabric_poll_status = status;"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:1269-1270",
+            "observation": "\trc = nvme_fabric_qpair_authenticate_poll(qpair);"
+          }
+        ]
+      },
+      {
+        "flow_id": "F-U00-FLOW-KEY-TRANSFORM",
+        "unit_id": "U00",
+        "title": "DH-HMAC-CHAP 密钥转换与 HMAC 计算",
+        "description": "密钥从 keyring 加载后经 DHHC-1 格式解析、CRC32 校验，派生后用于 HMAC 计算；DH 密钥派生使用 OpenSSL DHX API。",
+        "entry": "spdk_nvme_dhchap_calculate",
+        "steps": [
+          "[entry] nvme_auth_get_key — 解析 DHHC-1 格式",
+          "[main] nvme_auth_transform_key — HMAC(NQN + \"NVMe-over-Fabrics\")",
+          "[main] spdk_nvme_dhchap_generate_dhkey / derive_secret",
+          "[main] nvme_auth_augment_challenge — DH secret 对 challenge 做 HMAC 增强"
+        ],
+        "diagram": {
+          "nodes": [
+            {
+              "id": "STEP-KEY-LOAD",
+              "label": "nvme_auth_get_key — 解析 DHHC-1 格式",
+              "kind": "entry"
+            },
+            {
+              "id": "STEP-HMAC-TRANSFORM",
+              "label": "nvme_auth_transform_key — HMAC(NQN + \"NVMe-over-Fabrics\")",
+              "kind": "main"
+            },
+            {
+              "id": "STEP-DH-KEYGEN",
+              "label": "spdk_nvme_dhchap_generate_dhkey / derive_secret",
+              "kind": "main"
+            },
+            {
+              "id": "STEP-AUGMENT",
+              "label": "nvme_auth_augment_challenge — DH secret 对 challenge 做 HMAC 增强",
+              "kind": "main"
+            }
+          ],
+          "edges": [
+            {
+              "source_step_key": "STEP-KEY-LOAD",
+              "target_step_key": "STEP-HMAC-TRANSFORM",
+              "condition": null
+            },
+            {
+              "source_step_key": "STEP-DH-KEYGEN",
+              "target_step_key": "STEP-AUGMENT",
+              "condition": "DH group != NULL"
+            }
+          ]
+        },
+        "mermaid": "flowchart TD\n    STEP-KEY-LOAD[\"nvme_auth_get_key — 解析 DHHC-1 格式\"]\n    STEP-HMAC-TRANSFORM[\"nvme_auth_transform_key — HMAC(NQN + 'NVMe-over-Fabrics')\"]\n    STEP-DH-KEYGEN[\"spdk_nvme_dhchap_generate_dhkey / derive_secret\"]\n    STEP-AUGMENT[\"nvme_auth_augment_challenge — DH secret 对 challenge 做 HMAC 增强\"]\n    STEP-KEY-LOAD --> STEP-HMAC-TRANSFORM\n    STEP-DH-KEYGEN -->|\"DH group != NULL\"| STEP-AUGMENT",
+        "evidence": [
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:289",
+            "observation": "\trc = sscanf(keystr, \"DHHC-1:%02x:\", &hash);"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:297",
+            "observation": "\tsecret = &keystr[10];"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:305",
+            "observation": "\t*tmp = '\\0';"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:252",
+            "observation": "\tif (EVP_MAC_update(ctx, nqn, strlen(nqn)) != 1) {"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:485",
+            "observation": "\tOSSL_PARAM params[2];"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:628",
+            "observation": "\t}"
+          },
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:360",
+            "observation": "\tif (EVP_Digest(key, keylen, keydgst, &dgstlen, md, NULL) != 1) {"
+          }
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "title": "HMAC 校验失败导致连接断开且无自动重试",
+        "dfx": [
+          "安全性",
+          "可靠性与一致性"
+        ],
+        "severity": "High",
+        "confidence": "high",
+        "trigger": "Host 和 Target 使用不一致的 DH-HMAC-CHAP 密钥（key-value 不匹配）",
+        "system_result": "memcmp(msg->rval, response, hl) != 0 时发送 AUTH_FAILURE1 并在 NVMF_AUTH_FAILURE1_DELAY_US (100ms) 后断开连接；修复 key 后需手动重新连接",
+        "external_observation": "Target 日志出现 'challenge response mismatch' 和 'ctrlr authentication failed'；连接被关闭",
+        "exclusion_condition": "Host 和 Target 配置相同的 DH-HMAC-CHAP 密钥，且 NQN 匹配",
+        "test_disposition": "test_required",
+        "unreachable_reason": null,
+        "unreachable_evidence": [],
+        "risk_id": "R-U00-004",
+        "unit_id": "U00",
+        "evidence": [
+          {
+            "location": "spdk-full:lib/nvmf/auth.c:432",
+            "observation": "\tif (memcmp(msg->rval, response, hl) != 0) {"
+          },
+          {
+            "location": "spdk-full:lib/nvmf/auth.c:598",
+            "observation": "static int"
+          }
+        ],
+        "translation_status": "Test-ready",
+        "status": "identified",
+        "scenario_ids": [
+          "SCN-U00-002"
+        ],
+        "test_case_ids": [
+          "TC-U00-002"
+        ]
+      }
+    ],
+    "scenarios": [
+      {
+        "scenario_id": "SCN-U00-001",
+        "unit_id": "U00",
+        "title": "DHHC-1 格式密钥解析错误",
+        "readiness": "graybox_ready",
+        "business_entry": "spdk_nvme_qpair_authenticate",
+        "preconditions": [
+          "qpair 已建立连接但未认证",
+          "keyring 中注册的 key 格式不符合 DHHC-1:XX: 规范"
+        ],
+        "actions": [
+          "调用 nvme_auth_get_key 从 keyring 加载密钥",
+          "sscanf 解析 DHHC-1 格式失败或 base64 解码失败或 CRC32 校验失败",
+          "nvme_auth_get_key 返回 -EINVAL",
+          "nvme_auth_check_challenge 中断并设置 auth 失败状态"
+        ],
+        "external_oracles": [
+          "nvme_fabric_qpair_authenticate_poll 返回非 0 错误码",
+          "日志出现 'Invalid key format' 或 'Invalid key checksum'"
+        ],
+        "recovery": [
+          "修正 keyring 中对应 key 的格式为有效的 DHHC-1:XX:base64+crc32 格式后重新认证"
+        ],
+        "covered_flow_ids": [
+          "F-U00-FLOW-KEY-TRANSFORM",
+          "F-U00-FLOW-HOST-AUTH-POLL"
+        ],
+        "branch_ids": [
+          "spdk-full:lib/nvme/nvme_auth.c:219:if:1",
+          "spdk-full:lib/nvme/nvme_auth.c:283:if:1",
+          "spdk-full:lib/nvme/nvme_auth.c:290:if:1",
+          "spdk-full:lib/nvme/nvme_auth.c:299:if:1",
+          "spdk-full:lib/nvme/nvme_auth.c:314:if:1",
+          "spdk-full:lib/nvme/nvme_auth.c:321:if:1",
+          "spdk-full:lib/nvme/nvme_auth.c:431:if:1",
+          "spdk-full:lib/nvme/nvme_auth.c:626:if:1",
+          "spdk-full:lib/nvmf/auth.c:399:if:1",
+          "spdk-full:lib/nvmf/auth.c:443:if:1",
+          "spdk-full:lib/nvme/nvme_auth.c:1235:if:1",
+          "spdk-full:lib/nvme/nvme_auth.c:1285:if:1"
+        ],
+        "coverage_ids": [],
+        "linked_risk_ids": [],
+        "linked_input_ids": [],
+        "evidence": [
+          {
+            "location": "spdk-full:lib/nvme/nvme_auth.c:289",
+            "observation": "\trc = sscanf(keystr, \"DHHC-1:%02x:\", &hash);"
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-U00-002",
+        "unit_id": "U00",
+        "title": "Host/Target 密钥不匹配导致 HMAC 校验失败并断开连接",
+        "readiness": "graybox_ready",
+        "business_entry": "spdk_nvme_qpair_authenticate",
+        "preconditions": [
+          "Host 配置 DH-HMAC-CHAP key-A",
+          "Target 配置 DH-HMAC-CHAP key-B（与 key-A 不同）"
+        ],
+        "actions": [
+          "Host 发送 DH-HMAC-CHAP_reply（含基于 key-A 的 HMAC）",
+          "Target 用 key-B 计算期望 HMAC",
+          "memcmp 对比发现不匹配",
+          "Target 发送 AUTH_FAILURE1，100ms 后调用 nvmf_auth_disconnect_qpair",
+          "连接被强制关闭"
+        ],
+        "external_oracles": [
+          "连接被关闭，qpair 不再可用",
+          "Target 日志出现 'challenge response mismatch'",
+          "Host 侧认证返回失败状态或回调收到错误"
+        ],
+        "recovery": [
+          "将 Host 和 Target 的 DH-HMAC-CHAP 密钥统一为相同值后重新建立连接"
+        ],
+        "covered_flow_ids": [
+          "F-U00-FLOW-HOST-AUTH-POLL",
+          "F-U00-FLOW-TARGET-AUTH"
+        ],
+        "branch_ids": [
+          "spdk-full:lib/nvmf/auth.c:432:if:1"
+        ],
+        "coverage_ids": [],
+        "linked_risk_ids": [
+          "R-U00-004"
+        ],
+        "linked_input_ids": [],
+        "evidence": [
+          {
+            "location": "spdk-full:lib/nvmf/auth.c:432",
+            "observation": "\tif (memcmp(msg->rval, response, hl) != 0) {"
+          },
+          {
+            "location": "spdk-full:lib/nvmf/auth.c:598",
+            "observation": "static int"
+          }
+        ]
+      }
+    ],
+    "test_cases": [
+      {
+        "test_case_id": "TC-U00-001",
+        "unit_id": "U00",
+        "title": "非法 DHHC-1 格式 key 导致认证失败并返回错误码",
+        "case_type": "graybox",
+        "basis": [
+          "code_flow"
+        ],
+        "scenario_ids": [
+          "SCN-U00-001"
+        ],
+        "covered_flow_ids": [
+          "F-U00-FLOW-KEY-TRANSFORM",
+          "F-U00-FLOW-HOST-AUTH-POLL"
+        ],
+        "linked_input_ids": [],
+        "direct_coverage_claims": [],
+        "linked_risk_ids": [],
+        "unresolved_linked_risk_keys": [],
+        "preconditions": [
+          "Host 已连接到 Target",
+          "keyring 中注册的 DH-HMAC-CHAP key 格式非法（如缺少 DHHC-1 前缀、CRC 校验错误）"
+        ],
+        "steps": [
+          "调用 spdk_nvme_qpair_authenticate 发起认证",
+          "检查日志输出"
+        ],
+        "expected_results": [
+          "认证返回非 0 错误码，key 解析阶段即中止",
+          "日志包含 'Invalid key format' 或 'Invalid key checksum'"
+        ],
+        "observability": [
+          "检查 spdk_nvme_qpair_authenticate 返回值",
+          "检查认证错误日志",
+          "确认 qpair 仍处于未认证状态"
+        ],
+        "cleanup": [
+          "修正 key 格式后重新执行认证确认成功"
+        ],
+        "status": "ready"
+      },
+      {
+        "test_case_id": "TC-U00-002",
+        "unit_id": "U00",
+        "title": "Host/Target 密钥不匹配时连接被关闭",
+        "case_type": "graybox",
+        "basis": [
+          "code_flow"
+        ],
+        "scenario_ids": [
+          "SCN-U00-002"
+        ],
+        "covered_flow_ids": [
+          "F-U00-FLOW-HOST-AUTH-POLL",
+          "F-U00-FLOW-TARGET-AUTH"
+        ],
+        "linked_input_ids": [],
+        "direct_coverage_claims": [],
+        "linked_risk_ids": [
+          "R-U00-004"
+        ],
+        "unresolved_linked_risk_keys": [],
+        "preconditions": [
+          "Host 使用 DH-HMAC-CHAP key-A",
+          "Target 配置 DH-HMAC-CHAP key-B（与 key-A 不匹配）"
+        ],
+        "steps": [
+          "Host 调用 spdk_nvme_qpair_authenticate 发起认证",
+          "等待 NVMF_AUTH_FAILURE1_DELAY_US (100ms)"
+        ],
+        "expected_results": [
+          "HMAC 校验失败，Target 日志出现 'challenge response mismatch'",
+          "连接被关闭，spdk_nvme_qpair_is_connected 返回 false"
+        ],
+        "observability": [
+          "Target 日志中的 'challenge response mismatch' 消息",
+          "连接状态变化",
+          "spdk_nvme_qpair_is_connected 返回值"
+        ],
+        "cleanup": [
+          "将 Host 和 Target 密钥统一后重新建立连接确认正常"
+        ],
+        "status": "ready"
+      }
+    ]
+  }
+}

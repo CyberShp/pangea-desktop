@@ -1,0 +1,362 @@
+{
+  "title": "PANGEA Desktop 新手使用指南",
+  "verified_date": "2026-10-22",
+  "desktop": {
+    "repository": "https://github.com/CyberShp/pangea-desktop",
+    "branch": "langgraph",
+    "commit": "a23cd31145a71e3997b617eb809950a00f20f4b8"
+  },
+  "workbench": {
+    "repository": "https://github.com/CyberShp/dsh-pangea.git",
+    "branch": "langgraph",
+    "commit": "7cc5179a30c3beefd61ea4792558c6fc8e8dc73a"
+  },
+  "engine": {
+    "repository": "https://github.com/CyberShp/pangea-agent.git",
+    "branch": "langgraph",
+    "commit": "7aa7abc3e921173409787f22e23ca872318baffd"
+  },
+  "image_basis": "图1–17：锁定工作台 React 组件与隔离示例数据；图18–19：真实历史产物、冻结源码与编辑者判断组成的独立证据阅读页截图。",
+  "workflow_diagram": "原创操作路线图，SVG 源文件随附；正文使用 PNG。",
+  "verification": {
+    "images_load": 20,
+    "broken_images": 0,
+    "top_level_sections": 15,
+    "desktop_viewport": [
+      1440,
+      1100
+    ],
+    "narrow_viewport": [
+      390,
+      844
+    ],
+    "horizontal_overflow": false,
+    "toc_navigation": "passed; Chinese heading anchors and active navigation verified",
+    "image_zoom_and_escape": "passed; new evidence image opens and Escape closes",
+    "source_accuracy": "Rechecked executor setup/recovery, explicit scope and source updates, installed workspace path, exact version manifests; historical case records checked against frozen source",
+    "real_windows_model_analysis": "本轮未执行 Windows 安装、登录或真实模型分析",
+    "local_links_and_anchors": "passed; main and evidence HTML",
+    "historical_case_original_hashes": "matched to original final-state.json files",
+    "reader_review": "7 of 7 novice questions answered by an independent reader using the guide only; no material dead ends found",
+    "scope_function_checks": "Locked engine functions in isolated temporary sample: primary/reference counts, rejection of reference directories and overlap, unversioned directory metadata",
+    "historical_case_execution": "读取既有历史 Run 与冻结源码；本轮未重跑分析或执行 SPDK 测试"
+  },
+  "sources": [
+    {
+      "repository": "desktop",
+      "path": "README.zh.md",
+      "purpose": "便携包与启动；数据位置按当前 launch-root 实现核对"
+    },
+    {
+      "repository": "desktop",
+      "path": "scripts/pangea-model-form-view.mjs",
+      "purpose": "模型接口表单"
+    },
+    {
+      "repository": "desktop",
+      "path": "docs/portable-update-recovery.md",
+      "purpose": "升级版本与数据保留边界"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea/src/client.js",
+      "purpose": "设置与升级页面"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea/src/product-model-adapter.js",
+      "purpose": "首次模型引导"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea-companion/src/client.js",
+      "purpose": "源码导入、四步创建、运行与结果、图表、用例评审和导出"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea-companion/src/source-scope-picker.js",
+      "purpose": "源码范围选择与预览"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea-asset-catalog/src/client.js",
+      "purpose": "资料导入与审核"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea-companion/scripts/preview-ui.mjs",
+      "purpose": "配图渲染环境"
+    },
+    {
+      "repository": "desktop",
+      "path": "src/main/state/launch-root.ts",
+      "purpose": "打包环境工作区位置"
+    },
+    {
+      "repository": "desktop",
+      "path": "src/main/pangea-product.ts",
+      "purpose": "源码副本与Run数据根目录"
+    },
+    {
+      "repository": "desktop",
+      "path": "packages/dsh-pangea-product/agent-command-probe.js",
+      "purpose": "Windows执行器命令解析"
+    },
+    {
+      "repository": "desktop",
+      "path": "src/main/runtime/acp-runtime-settings.ts",
+      "purpose": "运行时检测与登录状态边界"
+    },
+    {
+      "repository": "desktop",
+      "path": "scripts/create-signed-portable-package.mjs",
+      "purpose": "发行版本、通道与包内清单"
+    },
+    {
+      "repository": "desktop",
+      "path": "docs/codeagent-tool-recovery.md",
+      "purpose": "工具结束未确认的实际恢复边界"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea-companion/src/acp-recovery.js",
+      "purpose": "继续执行的阻断条件"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea-companion/src/source-first-acp.js",
+      "purpose": "进程树确认与原会话恢复"
+    },
+    {
+      "repository": "workbench",
+      "path": "plugins/dsh-pangea-companion/src/reader.js",
+      "purpose": "冻结源码清单入口"
+    },
+    {
+      "repository": "engine",
+      "path": "src/pangea_agent/graph/nodes/prepare_inputs.py",
+      "purpose": "主范围和参考范围规则"
+    },
+    {
+      "repository": "engine",
+      "path": "src/pangea_agent/inventory/scope_preview.py",
+      "purpose": "范围预览与主文件计数"
+    },
+    {
+      "repository": "engine",
+      "path": "src/pangea_agent/repositories/git_info.py",
+      "purpose": "源码版本与dirty状态"
+    },
+    {
+      "repository": "engine",
+      "path": "src/pangea_agent/flow_stability.py",
+      "purpose": "流程基线与内容指纹"
+    },
+    {
+      "repository": "engine",
+      "path": "src/pangea_agent/documents/incremental.py",
+      "purpose": "补充和增量分析约束"
+    }
+  ],
+  "images": [
+    {
+      "path": "assets/01-journey.png",
+      "sha256": "221d53b6b343d4e67b86fa1d4ec80e4502bc763bab89bac62761a182db213c20",
+      "bytes": 76008
+    },
+    {
+      "path": "assets/02-workbench.png",
+      "sha256": "d532b703d3cc0bbae6c2ba2b4100c82b5a574d1c28a727a195daca6bdc5a5953",
+      "bytes": 96141
+    },
+    {
+      "path": "assets/03-settings.png",
+      "sha256": "4d834ff4e5b16a4f58d4cf6663918e9ba809c81cb0f7938b33352ac5c41bc4fb",
+      "bytes": 138823
+    },
+    {
+      "path": "assets/04-add-repository.png",
+      "sha256": "9ace4a87d75a1c8f95b5438152f56b0bb24c6025f39234c2b47c6e42271434c2",
+      "bytes": 91623
+    },
+    {
+      "path": "assets/05-create-target.png",
+      "sha256": "1aafcf28fcce7d0082b8e7af9b853b107ff6c841477500fe8f2676f71c236cd8",
+      "bytes": 175611
+    },
+    {
+      "path": "assets/06-scope-picker.png",
+      "sha256": "31b62cc369fe0d91b7a98ebe5597341369efd0d024ad184801fdbdc6218719d7",
+      "bytes": 131334
+    },
+    {
+      "path": "assets/07-scope-preview.png",
+      "sha256": "33c033390cdc78b9d0d5cb8169bb50164a52ed5528c91254ab80c88778cc9df6",
+      "bytes": 166762
+    },
+    {
+      "path": "assets/08-inputs.png",
+      "sha256": "6ae9e0b06ea77ed9944d2fbd384e1f20689c6f0d6c1efb90c809e59bbf8c9b83",
+      "bytes": 114980
+    },
+    {
+      "path": "assets/09-executor.png",
+      "sha256": "95b2cfec13a5d537ab942da40638f1f8b3118e862640d31428ec64323a670390",
+      "bytes": 124441
+    },
+    {
+      "path": "assets/10-confirm.png",
+      "sha256": "fb88cfb161b826c35d01a6e3958e64c1b3c313cd962e20125d0d13b20ef61ab7",
+      "bytes": 121433
+    },
+    {
+      "path": "assets/11-running.png",
+      "sha256": "0417d0ddb774ee1102bcfbda01c964fe11e9a94a298aacc6b2f3766101e55d23",
+      "bytes": 151796
+    },
+    {
+      "path": "assets/12-session.png",
+      "sha256": "040823824647ed9f8d126fd6f09761c61a8cd28b96ea68aa1f677303f8287ebe",
+      "bytes": 118039
+    },
+    {
+      "path": "assets/13-overview.png",
+      "sha256": "aaa67d20abf883ef5c2a4a1154cba3af2b5b705b70b8de1259bfc75e0e47365c",
+      "bytes": 155422
+    },
+    {
+      "path": "assets/14-flow.png",
+      "sha256": "65bc5012beb63cbda5658aa5b8c050d6b6593cc1f2067d72350e3ccbaf972de3",
+      "bytes": 77650
+    },
+    {
+      "path": "assets/15-cases.png",
+      "sha256": "5828439da99129cfa3b51a47083a48e3fbd59121ead8b98328fa8fd2ec09ce0d",
+      "bytes": 202696
+    },
+    {
+      "path": "assets/16-case-review.png",
+      "sha256": "1406fab1c87ef7fbce9288a554b4be20206e290c73f5b7b690ddb8ffdcf70a3b",
+      "bytes": 241818
+    },
+    {
+      "path": "assets/17-export.png",
+      "sha256": "5b61a86bce4cbe0e27bd6ea594cf9b3b67ffd7133080bad28bf0b6e43af770c2",
+      "bytes": 213805
+    },
+    {
+      "path": "assets/18-assets.png",
+      "sha256": "f668bb01b8e7d2855d46ac58f7bcdf869403b7dd6a1c1b73e48b29fa74b36b80",
+      "bytes": 70142
+    },
+    {
+      "path": "assets/19-real-disconnect.png",
+      "sha256": "1afaba0ff8d381f16f527810347250217de2a0714ddb6aa6d5badd94e449ef24",
+      "bytes": 136978
+    },
+    {
+      "path": "assets/20-real-key-rejection.png",
+      "sha256": "03c8135ad326cbec4a37aa2a5a4e16393effc51c71b6fdb5d27615bce07e73fd",
+      "bytes": 153141
+    }
+  ],
+  "document_sha256": "b13f119b8fd763409d62732a79a77cd5c58353b617aefa416f89a6097f6d8a36",
+  "edition": "langgraph 源码快照使用指南",
+  "executor_example": {
+    "name": "OpenCode",
+    "version": "1.18.4",
+    "package_version_check": "npm registry version confirmed",
+    "local_cli_check": "macOS: version and acp/auth/models/run help checked",
+    "windows_execution": "not performed"
+  },
+  "historical_cases": [
+    {
+      "run_id": "nvme-tcp-chap-tls-260825-01",
+      "completed_at": "2026-08-24T18:03:14.367072+00:00",
+      "source_commit": "97af299e3c76368219f0cddcc710fafd57edcc1c",
+      "engine_commit": null,
+      "status": "COMPLETE / PASS",
+      "reader": "evidence/index.html#a"
+    },
+    {
+      "run_id": "nvme-of-dh-hmac-chap-aut-260904-04",
+      "completed_at": "2026-09-03T18:10:03.609769+00:00",
+      "source_commit": "97af299e3c76368219f0cddcc710fafd57edcc1c",
+      "engine_commit": null,
+      "status": "COMPLETE / UNRESOLVED",
+      "reader": "evidence/index.html#b"
+    }
+  ],
+  "external_sources": [
+    {
+      "url": "https://nodejs.org/en/download",
+      "purpose": "Windows Node.js LTS installer"
+    },
+    {
+      "url": "https://opencode.ai/docs/",
+      "purpose": "OpenCode 1 installation and generation boundary"
+    },
+    {
+      "url": "https://opencode.ai/docs/cli/",
+      "purpose": "Login, models and request commands"
+    },
+    {
+      "url": "https://opencode.ai/docs/acp/",
+      "purpose": "ACP invocation"
+    },
+    {
+      "url": "https://opencode.ai/docs/providers/",
+      "purpose": "Custom provider configuration"
+    },
+    {
+      "url": "https://opencode.ai/docs/config/",
+      "purpose": "Global config location"
+    },
+    {
+      "url": "https://opencode.ai/docs/network/",
+      "purpose": "Proxy and enterprise CA setup"
+    }
+  ],
+  "documentation_methods": [
+    {
+      "url": "https://diataxis.fr/start-here/",
+      "application": "Separate first-use steps, explanation, specific how-to recovery and version reference"
+    },
+    {
+      "url": "https://github.com/anthropics/skills/blob/main/skills/doc-coauthoring/SKILL.md",
+      "application": "Independent reader test using the revised document only"
+    }
+  ],
+  "evidence_files": [
+    {
+      "path": "evidence/index.html",
+      "sha256": "7386ccda01c2a3a2624363b6a9c4015144776d718defcab5a3eb25348ec2ab6d",
+      "bytes": 36050
+    },
+    {
+      "path": "evidence/nvme-of-dh-hmac-chap-aut-260904-04-source.json",
+      "sha256": "48919bedf2acfa568994d9aeab174dc6694dcbef6b8d281dfd2ffd9975fd2054",
+      "bytes": 23611
+    },
+    {
+      "path": "evidence/nvme-of-dh-hmac-chap-aut-260904-04.json",
+      "sha256": "40222e7b5d8eaf8c73b27036b9ce718206588d8dba473176c946455d8822d7ca",
+      "bytes": 19196
+    },
+    {
+      "path": "evidence/nvme-tcp-chap-tls-260825-01-source.json",
+      "sha256": "d23f5c27d05c84e8176907f69c134f4187c8877a1d40882f9889776ddaa68124",
+      "bytes": 7481
+    },
+    {
+      "path": "evidence/nvme-tcp-chap-tls-260825-01.json",
+      "sha256": "13c2ae326d7f9be24f3a3ab1bcfa3308aa6c8322f04ba5417ba8a717096431bf",
+      "bytes": 7115
+    },
+    {
+      "path": "evidence/provenance.json",
+      "sha256": "a67df58cdb6adb80cf7c641edbd67e62cb59e9fd56d9c24b32e6b152aa5cbd93",
+      "bytes": 1193
+    }
+  ]
+}
