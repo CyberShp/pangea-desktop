@@ -172,9 +172,7 @@ export function pangeaEnvironment(
   return {
     PANGEA_RUNTIME_ROOT: paths.runtimeRoot,
     PANGEA_LOCAL_SKILLS_ROOT: inherited.PANGEA_LOCAL_SKILLS_ROOT || join(dirname(dirname(paths.runtimeRoot)), 'local-skills'),
-    PANGEA_ARCHIFY_ROOT: inherited.PANGEA_ARCHIFY_ROOT || join(dirname(paths.runtimeRoot), 'archify'),
     PANGEA_NODE: inherited.PANGEA_NODE || join(dirname(paths.runtimeRoot), 'app/node_modules/node/bin/node.exe'),
-    ARCHIFY_UPDATE_CHECK_DISABLED: '1',
     PANGEA_PYTHON: paths.pythonExecutable,
     PANGEA_WORKSPACE_ROOT: launchRoot,
     PANGEA_DATA_ROOT: dataRoot,

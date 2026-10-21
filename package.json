@@ -125,7 +125,6 @@
       "!**/node_modules/@mistralai/mistralai/src/**"
     ],
     "extraResources": [
-      { "from": "vendor/archify", "to": "archify" },
       {
         "from": "build/app-icon.png",
         "to": "icon.png"

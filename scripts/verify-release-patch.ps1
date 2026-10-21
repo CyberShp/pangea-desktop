@@ -28,7 +28,7 @@ foreach ($Function in $Ast.FindAll({ param($Node) $Node -is [System.Management.A
 }
 $Data = Join-Path $Base 'launch-root/pangea-data'
 $Node = Join-Path $Target 'resources/app/node_modules/node/bin/node.exe'
-& $Node (Join-Path $PSScriptRoot 'verify-archify-upgrade.mjs') prepare $Target $Data
+& $Node (Join-Path $PSScriptRoot 'verify-diagram-upgrade.mjs') prepare $Target $Data
 if ($LASTEXITCODE -ne 0) { throw 'Could not prepare existing Run fixture.' }
 $Skill = Join-Path $Base 'local-skills/patch-verification/SKILL.md'
 New-Item -ItemType Directory -Path (Split-Path $Skill) -Force | Out-Null
@@ -49,8 +49,8 @@ try {
   Move-Item -LiteralPath $Candidate -Destination $Base
   if ((Get-FileHash -LiteralPath $Skill).Hash -ne $SkillHash) { throw 'User skill changed after patch.' }
   $PatchedNode = Join-Path $Base 'resources/app/node_modules/node/bin/node.exe'
-  & $PatchedNode (Join-Path $PSScriptRoot 'verify-archify-upgrade.mjs') verify $Base $Data
-  if ($LASTEXITCODE -ne 0) { throw 'Patched architecture verification failed.' }
+  & $PatchedNode (Join-Path $PSScriptRoot 'verify-diagram-upgrade.mjs') verify $Base $Data
+  if ($LASTEXITCODE -ne 0) { throw 'Patched native diagram verification failed.' }
   & (Join-Path $PSScriptRoot 'test-packaged-harness-startup.ps1') -PackageDirectory $Base -ExpectedVersion $ExpectedVersion
   if ($LASTEXITCODE -ne 0) { throw 'Patched Harness startup failed.' }
   Write-Output "PASS: real release patch $ExpectedBaseVersion -> $ExpectedVersion reconstructed and started; existing Run and local skill preserved."

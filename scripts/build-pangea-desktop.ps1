@@ -335,8 +335,6 @@ if (-not $SkipTests) {
     'test/finalize-windows-release.test.ts',
     'test/acp-runtime-settings.test.ts',
     'test/acp-provider-launch.test.js',
-    'test/archify-workflow.test.js',
-    'test/archify-sequence.test.js',
     'test/external-agent-provider-patches.test.ts',
     'test/pangea-product.test.ts',
     'test/pangea-product-runtime.test.js',
@@ -359,6 +357,11 @@ if (-not $SkipPackage) {
     $PreviousTestAppRoot = $env:PANGEA_TEST_APP_ROOT
     try {
       $env:PANGEA_TEST_APP_ROOT = $PackagedAppRoot
+      Write-Host 'Verifying packaged native flow, sequence, and function diagrams...'
+      Invoke-Checked $PackagedNode @(
+        (Join-Path $ProjectRoot 'scripts/verify-native-diagrams.mjs'),
+        (Join-Path $PackagedAppRoot 'node_modules\dsh-pangea-companion')
+      )
       Invoke-Checked $PackagedNode @('--test', $PackagedCordisTest)
       Invoke-Checked 'powershell.exe' @(
         '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',

@@ -87,7 +87,7 @@ Patch generation and offline/manual import remain separate: this workflow does n
 
 Supported bases need schema-1 signed package manifests, the current trusted Ed25519 signing key, complete valid file hashes, and an embedded updater with `Apply-VerifiedPatch`. Legacy packages without signed metadata or patch support, and trusted manifests with unsupported schemas, are explicitly reported as unsupported and use the full ZIP. Invalid signatures or corrupt files remain failures, never legacy exclusions.
 
-For each eligible base, verification checks package integrity and trust, generates a signed file-level patch, and applies the actual patch to the base. The reconstructed program must match the independently validated target manifest. Verification also preserves a pre-existing source-first Run and local skill, loads the reconstructed companion, renders HTML/SVG with bundled Archify, and starts Harness with a migrated profile.
+For each eligible base, verification checks package integrity and trust, generates a signed file-level patch, and applies the actual patch to the base. The reconstructed program must match the independently validated target manifest. Verification also preserves a pre-existing source-first Run and local skill, loads the reconstructed companion, renders native workflow/sequence/function SVG from stored Agent records without an extra model session, verifies historical diagram bytes are unchanged, and starts Harness with a migrated profile.
 
 The fixed candidate checks rendering, packaging, and compatibility, not model reasoning. A real configured model session and the application import/restart UI still require end-to-end acceptance; do not report them as covered by the fixed-candidate test.
 

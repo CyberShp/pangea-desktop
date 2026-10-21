@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { writeNativeDiagramFixture, verifyNativeDiagrams } from './native-diagram-smoke.mjs'
 
 const [packageDirectory, evidenceDirectory] = process.argv.slice(2)
 if (!packageDirectory || !evidenceDirectory) throw new Error('Usage: verify-flow-runtime.mjs <package-directory> <new-evidence-directory>')
@@ -11,13 +11,11 @@ const resources = path.resolve(packageDirectory, 'resources')
 const evidence = path.resolve(evidenceDirectory)
 await mkdir(evidence) // Require a new directory; never replace existing Runs or evidence.
 const python = path.join(resources, 'pangea-python/python.exe')
-const node = path.join(resources, 'app/node_modules/node/bin/node.exe')
-const companion = path.join(resources, 'app/node_modules/dsh-pangea-companion/src')
-const archify = path.join(resources, 'archify')
+const companion = path.join(resources, 'app/node_modules/dsh-pangea-companion')
 function run(executable, args) {
   const result = spawnSync(executable, args, {
     encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024,
-    env: { ...process.env, PYTHONIOENCODING: 'utf-8', ARCHIFY_UPDATE_CHECK_DISABLED: '1' },
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
   })
   assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout)
   return result.stdout
@@ -60,29 +58,10 @@ const pythonResult = run(python, ['-c', pythonProbe, evidence, resources, regres
 await writeFile(path.join(evidence, 'python-result.json'), pythonResult)
 console.log(pythonResult.trim())
 
-const { createView, listViews, viewArtifact, updateView } = await import(pathToFileURL(path.join(companion, 'architecture-views.js')))
-const task = { task_id: 'flow-runtime-check', run_id: 'synthetic-run', data_root: evidence, target: '中文架构验收' }
-const index = path.join(evidence, 'runs', task.run_id, '内部索引')
-await mkdir(index, { recursive: true })
-const projection = JSON.stringify({ run_id: task.run_id, publication: { revision: 1 }, business_flows: [], risks: [], test_cases: [], evidence: [] })
-await writeFile(path.join(index, '工作台投影.json'), projection)
-await writeFile(path.join(index, '运行状态.json'), 'main-run-unchanged')
-const prepared = await createView(task, { type: 'architecture' }, { PANGEA_ARCHIFY_ROOT: archify, PANGEA_NODE: node })
-const viewFolder = path.join(evidence, 'runs', task.run_id, '派生视图/archify', prepared.view.view_id)
-const candidate = JSON.parse(await readFile(path.join(archify, 'examples/web-app.architecture.json'), 'utf8'))
-candidate.meta.title = '中文架构验收 · 合成示例'
-await writeFile(path.join(viewFolder, 'candidate.json'), JSON.stringify(candidate))
-const receipt = JSON.parse(run(node, [path.join(companion, 'architecture-render.mjs'), viewFolder, archify]))
-assert.equal(receipt.ok, true)
-assert.equal((await listViews(task))[0].status, 'ready')
-const html = await viewArtifact(task, prepared.view.view_id, 'html')
-assert.match(html.toString(), /中文架构验收/)
-await writeFile(path.join(evidence, 'export.html'), html)
-await writeFile(path.join(evidence, 'export.svg'), await viewArtifact(task, prepared.view.view_id, 'svg'))
-run(python, ['-c', 'import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1]); print("SVG XML valid")', path.join(evidence, 'export.svg')])
-const revision = await createView(task, { type: 'architecture', previous_view_id: prepared.view.view_id }, { PANGEA_ARCHIFY_ROOT: archify, PANGEA_NODE: node })
-await updateView(task, revision.view.view_id, { status: 'failed', error: 'synthetic follow-up failure' })
-assert.equal((await listViews(task)).find(view => view.view_id === prepared.view.view_id).status, 'ready')
-assert.equal(await readFile(path.join(index, '工作台投影.json'), 'utf8'), projection)
-assert.equal(await readFile(path.join(index, '运行状态.json'), 'utf8'), 'main-run-unchanged')
-console.log('PASS: packaged Node/Archify renders Chinese HTML and valid SVG; failed revision preserves good view and main Run.')
+const fixture = await writeNativeDiagramFixture(evidence)
+const exports = path.join(evidence, 'native-diagrams')
+const rendered = await verifyNativeDiagrams(companion, fixture, exports)
+for (const name of rendered.diagrams) {
+  run(python, ['-c', 'import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1]); print("SVG XML valid")', path.join(exports, `${name}.svg`)])
+}
+console.log(`PASS: packaged companion renders native flow, sequence and function diagrams; main Run and historical artifacts unchanged. ${JSON.stringify(rendered)}`)
