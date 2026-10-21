@@ -1,0 +1,968 @@
+{
+  "run_id": "nvme-of-dh-hmac-chap-aut-260904-04",
+  "source_commit": "97af299e3c76368219f0cddcc710fafd57edcc1c",
+  "excerpts": [
+    {
+      "repository": "spdk-full",
+      "path": "lib/nvme/nvme_auth.c",
+      "start_line": 272,
+      "end_line": 333,
+      "frozen_file_sha256": "bca0bbaf5835b70b337b3f7f0cdc612db2a9d2bea909a4ba0d1b9eea1e21853c",
+      "lines": [
+        {
+          "number": 272,
+          "text": "static int"
+        },
+        {
+          "number": 273,
+          "text": "nvme_auth_get_key(struct spdk_key *key, const char *nqn, void *buf, size_t buflen)"
+        },
+        {
+          "number": 274,
+          "text": "{"
+        },
+        {
+          "number": 275,
+          "text": "\tchar keystr[NVME_AUTH_CHAP_KEY_MAX_SIZE + 1] = {};"
+        },
+        {
+          "number": 276,
+          "text": "\tchar keyb64[NVME_AUTH_CHAP_KEY_MAX_SIZE] = {};"
+        },
+        {
+          "number": 277,
+          "text": "\tchar *tmp, *secret;"
+        },
+        {
+          "number": 278,
+          "text": "\tuint32_t hash;"
+        },
+        {
+          "number": 279,
+          "text": "\tint rc;"
+        },
+        {
+          "number": 280,
+          "text": "\tsize_t keylen;"
+        },
+        {
+          "number": 281,
+          "text": ""
+        },
+        {
+          "number": 282,
+          "text": "\trc = spdk_key_get_key(key, keystr, NVME_AUTH_CHAP_KEY_MAX_SIZE);"
+        },
+        {
+          "number": 283,
+          "text": "\tif (rc < 0) {"
+        },
+        {
+          "number": 284,
+          "text": "\t\tSPDK_ERRLOG(\"Failed to load key=%s: %s\\n\", spdk_key_get_name(key),"
+        },
+        {
+          "number": 285,
+          "text": "\t\t\t    spdk_strerror(-rc));"
+        },
+        {
+          "number": 286,
+          "text": "\t\tgoto out;"
+        },
+        {
+          "number": 287,
+          "text": "\t}"
+        },
+        {
+          "number": 288,
+          "text": ""
+        },
+        {
+          "number": 289,
+          "text": "\trc = sscanf(keystr, \"DHHC-1:%02x:\", &hash);"
+        },
+        {
+          "number": 290,
+          "text": "\tif (rc != 1) {"
+        },
+        {
+          "number": 291,
+          "text": "\t\tSPDK_ERRLOG(\"Invalid key format (key=%s)\\n\", spdk_key_get_name(key));"
+        },
+        {
+          "number": 292,
+          "text": "\t\trc = -EINVAL;"
+        },
+        {
+          "number": 293,
+          "text": "\t\tgoto out;"
+        },
+        {
+          "number": 294,
+          "text": ""
+        },
+        {
+          "number": 295,
+          "text": "\t}"
+        },
+        {
+          "number": 296,
+          "text": "\t/* Start at the first character after second \":\" and remove the trailing \":\" */"
+        },
+        {
+          "number": 297,
+          "text": "\tsecret = &keystr[10];"
+        },
+        {
+          "number": 298,
+          "text": "\ttmp = strstr(secret, \":\");"
+        },
+        {
+          "number": 299,
+          "text": "\tif (!tmp) {"
+        },
+        {
+          "number": 300,
+          "text": "\t\tSPDK_ERRLOG(\"Invalid key format (key=%s)\\n\", spdk_key_get_name(key));"
+        },
+        {
+          "number": 301,
+          "text": "\t\trc = -EINVAL;"
+        },
+        {
+          "number": 302,
+          "text": "\t\tgoto out;"
+        },
+        {
+          "number": 303,
+          "text": "\t}"
+        },
+        {
+          "number": 304,
+          "text": ""
+        },
+        {
+          "number": 305,
+          "text": "\t*tmp = '\\0';"
+        },
+        {
+          "number": 306,
+          "text": "\tkeylen = sizeof(keyb64);"
+        },
+        {
+          "number": 307,
+          "text": "\trc = spdk_base64_decode(keyb64, &keylen, secret);"
+        },
+        {
+          "number": 308,
+          "text": "\tif (rc != 0) {"
+        },
+        {
+          "number": 309,
+          "text": "\t\tSPDK_ERRLOG(\"Invalid key format (key=%s)\\n\", spdk_key_get_name(key));"
+        },
+        {
+          "number": 310,
+          "text": "\t\trc = -EINVAL;"
+        },
+        {
+          "number": 311,
+          "text": "\t\tgoto out;"
+        },
+        {
+          "number": 312,
+          "text": "\t}"
+        },
+        {
+          "number": 313,
+          "text": "\t/* Only 32B, 48B, and 64B keys are supported (+ 4B, as they're followed by a crc32) */"
+        },
+        {
+          "number": 314,
+          "text": "\tif (keylen != 36 && keylen != 52 && keylen != 68) {"
+        },
+        {
+          "number": 315,
+          "text": "\t\tSPDK_ERRLOG(\"Invalid key size=%zu (key=%s)\\n\", keylen, spdk_key_get_name(key));"
+        },
+        {
+          "number": 316,
+          "text": "\t\trc = -EINVAL;"
+        },
+        {
+          "number": 317,
+          "text": "\t\tgoto out;"
+        },
+        {
+          "number": 318,
+          "text": "\t}"
+        },
+        {
+          "number": 319,
+          "text": ""
+        },
+        {
+          "number": 320,
+          "text": "\tkeylen -= 4;"
+        },
+        {
+          "number": 321,
+          "text": "\tif (~spdk_crc32_ieee_update(keyb64, keylen, ~0) != from_le32(&keyb64[keylen])) {"
+        },
+        {
+          "number": 322,
+          "text": "\t\tSPDK_ERRLOG(\"Invalid key checksum (key=%s)\\n\", spdk_key_get_name(key));"
+        },
+        {
+          "number": 323,
+          "text": "\t\trc = -EINVAL;"
+        },
+        {
+          "number": 324,
+          "text": "\t\tgoto out;"
+        },
+        {
+          "number": 325,
+          "text": "\t}"
+        },
+        {
+          "number": 326,
+          "text": ""
+        },
+        {
+          "number": 327,
+          "text": "\trc = nvme_auth_transform_key(key, hash, nqn, keyb64, keylen, buf, buflen);"
+        },
+        {
+          "number": 328,
+          "text": "out:"
+        },
+        {
+          "number": 329,
+          "text": "\tspdk_memset_s(keystr, sizeof(keystr), 0, sizeof(keystr));"
+        },
+        {
+          "number": 330,
+          "text": "\tspdk_memset_s(keyb64, sizeof(keyb64), 0, sizeof(keyb64));"
+        },
+        {
+          "number": 331,
+          "text": ""
+        },
+        {
+          "number": 332,
+          "text": "\treturn rc;"
+        },
+        {
+          "number": 333,
+          "text": "}"
+        }
+      ]
+    },
+    {
+      "repository": "spdk-full",
+      "path": "lib/nvme/nvme_auth.c",
+      "start_line": 1227,
+      "end_line": 1297,
+      "frozen_file_sha256": "bca0bbaf5835b70b337b3f7f0cdc612db2a9d2bea909a4ba0d1b9eea1e21853c",
+      "lines": [
+        {
+          "number": 1227,
+          "text": "int"
+        },
+        {
+          "number": 1228,
+          "text": "nvme_fabric_qpair_authenticate_async(struct spdk_nvme_qpair *qpair)"
+        },
+        {
+          "number": 1229,
+          "text": "{"
+        },
+        {
+          "number": 1230,
+          "text": "\tstruct spdk_nvme_ctrlr *ctrlr = qpair->ctrlr;"
+        },
+        {
+          "number": 1231,
+          "text": "\tstruct nvme_completion_poll_status *status;"
+        },
+        {
+          "number": 1232,
+          "text": "\tstruct nvme_auth *auth = &qpair->auth;"
+        },
+        {
+          "number": 1233,
+          "text": "\tint rc;"
+        },
+        {
+          "number": 1234,
+          "text": ""
+        },
+        {
+          "number": 1235,
+          "text": "\tif (ctrlr->opts.dhchap_key == NULL) {"
+        },
+        {
+          "number": 1236,
+          "text": "\t\tAUTH_ERRLOG(qpair, \"missing DH-HMAC-CHAP key\\n\");"
+        },
+        {
+          "number": 1237,
+          "text": "\t\treturn -ENOKEY;"
+        },
+        {
+          "number": 1238,
+          "text": "\t}"
+        },
+        {
+          "number": 1239,
+          "text": ""
+        },
+        {
+          "number": 1240,
+          "text": "\tif (qpair->auth.flags.ascr) {"
+        },
+        {
+          "number": 1241,
+          "text": "\t\tAUTH_ERRLOG(qpair, \"secure channel concatenation is not supported\\n\");"
+        },
+        {
+          "number": 1242,
+          "text": "\t\treturn -EINVAL;"
+        },
+        {
+          "number": 1243,
+          "text": "\t}"
+        },
+        {
+          "number": 1244,
+          "text": ""
+        },
+        {
+          "number": 1245,
+          "text": "\tstatus = calloc(1, sizeof(*qpair->fabric_poll_status));"
+        },
+        {
+          "number": 1246,
+          "text": "\tif (!status) {"
+        },
+        {
+          "number": 1247,
+          "text": "\t\tAUTH_ERRLOG(qpair, \"failed to allocate poll status\\n\");"
+        },
+        {
+          "number": 1248,
+          "text": "\t\treturn -ENOMEM;"
+        },
+        {
+          "number": 1249,
+          "text": "\t}"
+        },
+        {
+          "number": 1250,
+          "text": ""
+        },
+        {
+          "number": 1251,
+          "text": "\tstatus->dma_data = spdk_zmalloc(NVME_AUTH_DATA_SIZE, 0, NULL, SPDK_ENV_LCORE_ID_ANY,"
+        },
+        {
+          "number": 1252,
+          "text": "\t\t\t\t\tSPDK_MALLOC_DMA);"
+        },
+        {
+          "number": 1253,
+          "text": "\tif (!status->dma_data) {"
+        },
+        {
+          "number": 1254,
+          "text": "\t\tAUTH_ERRLOG(qpair, \"failed to allocate poll status\\n\");"
+        },
+        {
+          "number": 1255,
+          "text": "\t\tfree(status);"
+        },
+        {
+          "number": 1256,
+          "text": "\t\treturn -ENOMEM;"
+        },
+        {
+          "number": 1257,
+          "text": "\t}"
+        },
+        {
+          "number": 1258,
+          "text": ""
+        },
+        {
+          "number": 1259,
+          "text": "\tassert(qpair->fabric_poll_status == NULL);"
+        },
+        {
+          "number": 1260,
+          "text": "\tqpair->fabric_poll_status = status;"
+        },
+        {
+          "number": 1261,
+          "text": ""
+        },
+        {
+          "number": 1262,
+          "text": "\tnvme_ctrlr_lock(ctrlr);"
+        },
+        {
+          "number": 1263,
+          "text": "\tauth->tid = ctrlr->auth_tid++;"
+        },
+        {
+          "number": 1264,
+          "text": "\tnvme_ctrlr_unlock(ctrlr);"
+        },
+        {
+          "number": 1265,
+          "text": ""
+        },
+        {
+          "number": 1266,
+          "text": "\tnvme_auth_set_state(qpair, NVME_QPAIR_AUTH_STATE_NEGOTIATE);"
+        },
+        {
+          "number": 1267,
+          "text": ""
+        },
+        {
+          "number": 1268,
+          "text": "\t/* Do the initial poll to kick-start the state machine */"
+        },
+        {
+          "number": 1269,
+          "text": "\trc = nvme_fabric_qpair_authenticate_poll(qpair);"
+        },
+        {
+          "number": 1270,
+          "text": "\treturn rc != -EAGAIN ? rc : 0;"
+        },
+        {
+          "number": 1271,
+          "text": "}"
+        },
+        {
+          "number": 1272,
+          "text": ""
+        },
+        {
+          "number": 1273,
+          "text": "int"
+        },
+        {
+          "number": 1274,
+          "text": "spdk_nvme_qpair_authenticate(struct spdk_nvme_qpair *qpair,"
+        },
+        {
+          "number": 1275,
+          "text": "\t\t\t     spdk_nvme_authenticate_cb cb_fn, void *cb_ctx)"
+        },
+        {
+          "number": 1276,
+          "text": "{"
+        },
+        {
+          "number": 1277,
+          "text": "\tstruct spdk_nvme_ctrlr *ctrlr = qpair->ctrlr;"
+        },
+        {
+          "number": 1278,
+          "text": "\tint rc;"
+        },
+        {
+          "number": 1279,
+          "text": ""
+        },
+        {
+          "number": 1280,
+          "text": "\tif (qpair->auth.cb_fn != NULL) {"
+        },
+        {
+          "number": 1281,
+          "text": "\t\tAUTH_ERRLOG(qpair, \"authentication already in-progress\\n\");"
+        },
+        {
+          "number": 1282,
+          "text": "\t\treturn -EALREADY;"
+        },
+        {
+          "number": 1283,
+          "text": "\t}"
+        },
+        {
+          "number": 1284,
+          "text": ""
+        },
+        {
+          "number": 1285,
+          "text": "\tif (ctrlr->opts.dhchap_key == NULL) {"
+        },
+        {
+          "number": 1286,
+          "text": "\t\tAUTH_ERRLOG(qpair, \"missing DH-HMAC-CHAP key\\n\");"
+        },
+        {
+          "number": 1287,
+          "text": "\t\treturn -ENOKEY;"
+        },
+        {
+          "number": 1288,
+          "text": "\t}"
+        },
+        {
+          "number": 1289,
+          "text": ""
+        },
+        {
+          "number": 1290,
+          "text": "\trc = nvme_transport_qpair_authenticate(qpair);"
+        },
+        {
+          "number": 1291,
+          "text": "\tif (rc == 0) {"
+        },
+        {
+          "number": 1292,
+          "text": "\t\tqpair->auth.cb_fn = cb_fn;"
+        },
+        {
+          "number": 1293,
+          "text": "\t\tqpair->auth.cb_ctx = cb_ctx;"
+        },
+        {
+          "number": 1294,
+          "text": "\t}"
+        },
+        {
+          "number": 1295,
+          "text": ""
+        },
+        {
+          "number": 1296,
+          "text": "\treturn rc;"
+        },
+        {
+          "number": 1297,
+          "text": "}"
+        }
+      ]
+    },
+    {
+      "repository": "spdk-full",
+      "path": "include/spdk/nvme.h",
+      "start_line": 2237,
+      "end_line": 2253,
+      "frozen_file_sha256": "ef2c69796693a9eb63fcfa19c8770385dec5085ac683f6e3f77d9fba5f5e0778",
+      "lines": [
+        {
+          "number": 2237,
+          "text": "typedef void (*spdk_nvme_authenticate_cb)(void *ctx, int status);"
+        },
+        {
+          "number": 2238,
+          "text": ""
+        },
+        {
+          "number": 2239,
+          "text": "/**"
+        },
+        {
+          "number": 2240,
+          "text": " * Force a qpair to authenticate.  As part of initialization, qpairs are authenticated automatically"
+        },
+        {
+          "number": 2241,
+          "text": " * if the controller is configured with DH-HMAC-CHAP keys.  However, this function can be used to"
+        },
+        {
+          "number": 2242,
+          "text": " * force authentication after a connection has already been established."
+        },
+        {
+          "number": 2243,
+          "text": " *"
+        },
+        {
+          "number": 2244,
+          "text": " * This function doesn't disconnect the qpair if the authentication is successful."
+        },
+        {
+          "number": 2245,
+          "text": " *"
+        },
+        {
+          "number": 2246,
+          "text": " * \\param qpair The qpair to authenticate."
+        },
+        {
+          "number": 2247,
+          "text": " * \\param cb_fn Callback to be executed after the authentication is done."
+        },
+        {
+          "number": 2248,
+          "text": " * \\param cb_ctx Context passed to `cb_fn`."
+        },
+        {
+          "number": 2249,
+          "text": " *"
+        },
+        {
+          "number": 2250,
+          "text": " * \\return 0 on success, negative errno on failure."
+        },
+        {
+          "number": 2251,
+          "text": " */"
+        },
+        {
+          "number": 2252,
+          "text": "int spdk_nvme_qpair_authenticate(struct spdk_nvme_qpair *qpair,"
+        },
+        {
+          "number": 2253,
+          "text": "\t\t\t\t spdk_nvme_authenticate_cb cb_fn, void *cb_ctx);"
+        }
+      ]
+    },
+    {
+      "repository": "spdk-full",
+      "path": "lib/nvmf/auth.c",
+      "start_line": 422,
+      "end_line": 438,
+      "frozen_file_sha256": "29364928f16925a49a627aca8c4f2d2950a19b709072a2e3084cced4af158bf0",
+      "lines": [
+        {
+          "number": 422,
+          "text": "\t\t\t\t\tctrlr->hostnqn, ctrlr->subsys->subnqn,"
+        },
+        {
+          "number": 423,
+          "text": "\t\t\t\t\tdhseclen > 0 ? dhsec : NULL, dhseclen,"
+        },
+        {
+          "number": 424,
+          "text": "\t\t\t\t\tauth->cval, response);"
+        },
+        {
+          "number": 425,
+          "text": "\tif (rc != 0) {"
+        },
+        {
+          "number": 426,
+          "text": "\t\tAUTH_ERRLOG(qpair, \"failed to calculate challenge response: %s\\n\","
+        },
+        {
+          "number": 427,
+          "text": "\t\t\t    spdk_strerror(-rc));"
+        },
+        {
+          "number": 428,
+          "text": "\t\tnvmf_auth_request_fail1(req, SPDK_NVMF_AUTH_FAILED);"
+        },
+        {
+          "number": 429,
+          "text": "\t\tgoto out;"
+        },
+        {
+          "number": 430,
+          "text": "\t}"
+        },
+        {
+          "number": 431,
+          "text": ""
+        },
+        {
+          "number": 432,
+          "text": "\tif (memcmp(msg->rval, response, hl) != 0) {"
+        },
+        {
+          "number": 433,
+          "text": "\t\tAUTH_ERRLOG(qpair, \"challenge response mismatch\\n\");"
+        },
+        {
+          "number": 434,
+          "text": "\t\tAUTH_LOGDUMP(\"response:\", msg->rval, hl);"
+        },
+        {
+          "number": 435,
+          "text": "\t\tAUTH_LOGDUMP(\"expected:\", response, hl);"
+        },
+        {
+          "number": 436,
+          "text": "\t\tnvmf_auth_request_fail1(req, SPDK_NVMF_AUTH_FAILED);"
+        },
+        {
+          "number": 437,
+          "text": "\t\tgoto out;"
+        },
+        {
+          "number": 438,
+          "text": "\t}"
+        }
+      ]
+    },
+    {
+      "repository": "spdk-full",
+      "path": "lib/nvmf/auth.c",
+      "start_line": 598,
+      "end_line": 636,
+      "frozen_file_sha256": "29364928f16925a49a627aca8c4f2d2950a19b709072a2e3084cced4af158bf0",
+      "lines": [
+        {
+          "number": 598,
+          "text": "static int"
+        },
+        {
+          "number": 599,
+          "text": "nvmf_auth_recv_failure1_done(void *ctx)"
+        },
+        {
+          "number": 600,
+          "text": "{"
+        },
+        {
+          "number": 601,
+          "text": "\tstruct spdk_nvmf_qpair *qpair = ctx;"
+        },
+        {
+          "number": 602,
+          "text": "\tstruct spdk_nvmf_qpair_auth *auth = qpair->auth;"
+        },
+        {
+          "number": 603,
+          "text": ""
+        },
+        {
+          "number": 604,
+          "text": "\tspdk_poller_unregister(&auth->poller);"
+        },
+        {
+          "number": 605,
+          "text": "\tnvmf_auth_disconnect_qpair(qpair);"
+        },
+        {
+          "number": 606,
+          "text": ""
+        },
+        {
+          "number": 607,
+          "text": "\treturn SPDK_POLLER_BUSY;"
+        },
+        {
+          "number": 608,
+          "text": "}"
+        },
+        {
+          "number": 609,
+          "text": ""
+        },
+        {
+          "number": 610,
+          "text": "static void"
+        },
+        {
+          "number": 611,
+          "text": "nvmf_auth_recv_failure1(struct spdk_nvmf_request *req, int fail_reason)"
+        },
+        {
+          "number": 612,
+          "text": "{"
+        },
+        {
+          "number": 613,
+          "text": "\tstruct spdk_nvmf_qpair *qpair = req->qpair;"
+        },
+        {
+          "number": 614,
+          "text": "\tstruct spdk_nvmf_qpair_auth *auth = qpair->auth;"
+        },
+        {
+          "number": 615,
+          "text": "\tstruct spdk_nvmf_auth_failure *failure;"
+        },
+        {
+          "number": 616,
+          "text": ""
+        },
+        {
+          "number": 617,
+          "text": "\tfailure = nvmf_auth_get_message(req, sizeof(*failure));"
+        },
+        {
+          "number": 618,
+          "text": "\tif (failure == NULL) {"
+        },
+        {
+          "number": 619,
+          "text": "\t\tnvmf_auth_request_complete(req, SPDK_NVME_SCT_GENERIC,"
+        },
+        {
+          "number": 620,
+          "text": "\t\t\t\t\t   SPDK_NVME_SC_INVALID_FIELD, 1);"
+        },
+        {
+          "number": 621,
+          "text": "\t\tnvmf_auth_disconnect_qpair(qpair);"
+        },
+        {
+          "number": 622,
+          "text": "\t\treturn;"
+        },
+        {
+          "number": 623,
+          "text": "\t}"
+        },
+        {
+          "number": 624,
+          "text": ""
+        },
+        {
+          "number": 625,
+          "text": "\tfailure->auth_type = SPDK_NVMF_AUTH_TYPE_COMMON_MESSAGE;"
+        },
+        {
+          "number": 626,
+          "text": "\tfailure->auth_id = SPDK_NVMF_AUTH_ID_FAILURE1;"
+        },
+        {
+          "number": 627,
+          "text": "\tfailure->t_id = auth->tid;"
+        },
+        {
+          "number": 628,
+          "text": "\tfailure->rc = SPDK_NVMF_AUTH_FAILURE;"
+        },
+        {
+          "number": 629,
+          "text": "\tfailure->rce = fail_reason;"
+        },
+        {
+          "number": 630,
+          "text": ""
+        },
+        {
+          "number": 631,
+          "text": "\tnvmf_auth_set_state(qpair, NVMF_QPAIR_AUTH_FAILURE1);"
+        },
+        {
+          "number": 632,
+          "text": "\tnvmf_auth_recv_complete(req, sizeof(*failure));"
+        },
+        {
+          "number": 633,
+          "text": ""
+        },
+        {
+          "number": 634,
+          "text": "\tspdk_poller_unregister(&auth->poller);"
+        },
+        {
+          "number": 635,
+          "text": "\tauth->poller = SPDK_POLLER_REGISTER(nvmf_auth_recv_failure1_done, qpair,"
+        },
+        {
+          "number": 636,
+          "text": "\t\t\t\t\t    NVMF_AUTH_FAILURE1_DELAY_US);"
+        }
+      ]
+    },
+    {
+      "repository": "spdk-full",
+      "path": "lib/nvme/nvme_tcp.c",
+      "start_line": 2885,
+      "end_line": 2905,
+      "frozen_file_sha256": "9008f0dcf91d3f1f3d38cc8b05b585d484cec6738780226b47fa70121ffdfb23",
+      "lines": [
+        {
+          "number": 2885,
+          "text": "static int"
+        },
+        {
+          "number": 2886,
+          "text": "nvme_tcp_qpair_authenticate(struct spdk_nvme_qpair *qpair)"
+        },
+        {
+          "number": 2887,
+          "text": "{"
+        },
+        {
+          "number": 2888,
+          "text": "\tstruct nvme_tcp_qpair *tqpair = nvme_tcp_qpair(qpair);"
+        },
+        {
+          "number": 2889,
+          "text": "\tint rc;"
+        },
+        {
+          "number": 2890,
+          "text": ""
+        },
+        {
+          "number": 2891,
+          "text": "\t/* If the qpair is still connecting, it'll be forced to authenticate later on */"
+        },
+        {
+          "number": 2892,
+          "text": "\tif (tqpair->state < NVME_TCP_QPAIR_STATE_RUNNING) {"
+        },
+        {
+          "number": 2893,
+          "text": "\t\treturn 0;"
+        },
+        {
+          "number": 2894,
+          "text": "\t} else if (tqpair->state != NVME_TCP_QPAIR_STATE_RUNNING) {"
+        },
+        {
+          "number": 2895,
+          "text": "\t\treturn -ENOTCONN;"
+        },
+        {
+          "number": 2896,
+          "text": "\t}"
+        },
+        {
+          "number": 2897,
+          "text": ""
+        },
+        {
+          "number": 2898,
+          "text": "\trc = nvme_fabric_qpair_authenticate_async(qpair);"
+        },
+        {
+          "number": 2899,
+          "text": "\tif (rc == 0) {"
+        },
+        {
+          "number": 2900,
+          "text": "\t\tnvme_tcp_qpair_set_state(tqpair, NVME_TCP_QPAIR_STATE_AUTHENTICATING);"
+        },
+        {
+          "number": 2901,
+          "text": "\t\tnvme_qpair_set_state(qpair, NVME_QPAIR_CONNECTING);"
+        },
+        {
+          "number": 2902,
+          "text": "\t}"
+        },
+        {
+          "number": 2903,
+          "text": ""
+        },
+        {
+          "number": 2904,
+          "text": "\treturn rc;"
+        },
+        {
+          "number": 2905,
+          "text": "}"
+        }
+      ]
+    }
+  ]
+}
