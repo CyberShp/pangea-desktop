@@ -206,7 +206,7 @@ function Get-PortableProtectedInventory {
     while ($Normalized.Contains('/')) { $Normalized=$Normalized.Substring(0,$Normalized.LastIndexOf('/')); $KnownDirectories[$Normalized]=$true }
   }
   $Entries=@([PangeaPortableTree]::Inventory($InstallRoot,$false))
-  $Unknown=[Collections.Generic.List[string]]::new(); [long]$UserBytes=0; [long]$UserCount=0
+  $Unknown=[Collections.Generic.List[string]]::new(); [long]$UnknownCount=0; [long]$UserBytes=0; [long]$UserCount=0
   foreach ($Entry in $Entries) {
     $Relative=$Entry.Path.Replace('\','/').ToLowerInvariant()
     $Top=$Relative.Split('/')[0]
@@ -217,13 +217,17 @@ function Get-PortableProtectedInventory {
     if ($Entry.Kind -eq 'file' -and $KnownFiles.ContainsKey($Relative)) { continue }
     if ($Entry.Kind -eq 'directory' -and $KnownDirectories.ContainsKey($Relative)) { continue }
     # These are the only generated program files excluded by the package
-    # builder. Do not migrate arbitrary old binaries or ignore custom files.
+    # builder. Keep this cache exemption; never migrate old program files.
     if (($Entry.Kind -eq 'directory' -and $Relative -match '(^|/)__pycache__$') -or
         ($Entry.Kind -eq 'file' -and $Relative -match '(^|/)__pycache__/[^/]+\.pyc$')) { continue }
+    $UnknownCount++
     if ($Unknown.Count -lt 20) { $Unknown.Add([string]$Entry.Path) }
   }
-  if ($Unknown.Count) {
-    throw ('安装目录存在升级包清单外的文件或目录，升级已停止以避免丢失：' + ($Unknown -join '；') + '。请先将自建内容备份并移出安装目录，或放入 launch-root / local-skills；不要把旧程序残留迁入新版本。原目录未替换。')
+  if ($UnknownCount) {
+    # Rebuild only the target package and copy the two protected user roots.
+    # Extras stay in the rollback tree until health succeeds, then are deleted
+    # with that tree. Never delete from the live installation during preflight.
+    Write-UpdateLog ('安装目录清单外条目不迁入新版，将在新版健康检查通过后随旧版本备份删除；数量：' + $UnknownCount + '；示例（最多20项）：' + ($Unknown -join '；'))
   }
   return [pscustomobject]@{UserBytes=$UserBytes;UserCount=$UserCount}
 }
@@ -350,8 +354,8 @@ function Assert-PortableUserDataUnchanged {
     return
   }
   Initialize-PortableFileIO
-  # Repeat classification after copying and after the old-root rename: a user
-  # file created while rebuilding must not disappear with the old backup.
+  # Repeat inventory validation after copying and after the old-root rename.
+  # Only the two protected roots are migrated; other extras retire with backup.
   if ([PangeaPortableFileIO]::IsFile((Join-Path $PreviousRoot 'resources\update\pangea-package-manifest.json'))) {
     Get-PortableProtectedInventory $PreviousRoot | Out-Null
   }

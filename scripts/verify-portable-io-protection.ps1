@@ -84,11 +84,17 @@ try {
   $Estimate=Assert-PortableUpdatePreflight $Source $Archive full
   if ($Estimate.candidate_bytes -ne 17 -or $Estimate.user_bytes -ne 21) { throw 'Preflight did not measure the archive and existing user data.' }
   [IO.File]::WriteAllText((Join-Path $Source 'my-project.txt'),'custom root content')
-  $Rejected=$false
-  try { Assert-PortableUpdatePreflight $Source $Archive full | Out-Null } catch { $Rejected=$_.Exception.Message -like '*my-project.txt*' }
-  if (-not $Rejected -or -not [IO.File]::Exists((Join-Path $Source 'my-project.txt'))) { throw 'Unknown installation content must block before directory replacement and remain intact.' }
-  [IO.File]::Delete((Join-Path $Source 'my-project.txt'))
-  Write-Output 'PASS: actual preflight measures full candidate/user data and preserves unknown root content by refusing upgrade'
+  New-Item -ItemType Directory -Path (Join-Path $Source 'local-skills'),(Join-Path $Source 'obsolete'),(Join-Path $Source '__pycache__') -Force | Out-Null
+  [IO.File]::WriteAllText((Join-Path $Source 'local-skills/custom.txt'),'skill')
+  [IO.File]::WriteAllText((Join-Path $Source 'obsolete/old.dll'),'old binary')
+  [IO.File]::WriteAllText((Join-Path $Source '__pycache__/fixture.pyc'),'cache')
+  $Estimate=Assert-PortableUpdatePreflight $Source $Archive full
+  if ($Estimate.user_bytes -ne 26) { throw 'Only protected user roots should count toward migration size.' }
+  foreach ($Name in @('my-project.txt','obsolete/old.dll','__pycache__/fixture.pyc')) {
+    if (-not [IO.File]::Exists((Join-Path $Source $Name))) { throw "Preflight deleted rollback content: $Name" }
+  }
+  Write-Output 'PASS: extras and Python cache do not block preflight; rollback source remains intact'
+
 
   $PatchRoot=Join-Path $Root 'oversized-patch'
   New-Item -ItemType Directory -Path (Join-Path $PatchRoot 'target/resources/update') -Force | Out-Null
@@ -105,6 +111,14 @@ try {
   $CopyProgress=Read-UpdateProgress "$PlanPath.progress.json"
   if (-not $CopyProgress -or $CopyProgress.worker_pid -ne $PID -or $CopyProgress.state -ne 'running' -or -not (Test-UpdateWorkerIdentity $CopyProgress)) { throw 'Completed copy worker replaced the live supervisor progress identity.' }
   Assert-PortableUserDataUnchanged $Source $Candidate
+  foreach ($Name in @('my-project.txt','obsolete','__pycache__')) {
+    if (Test-Path -LiteralPath (Join-Path $Candidate $Name)) { throw "Old extra migrated into candidate: $Name" }
+  }
+  if ([IO.File]::ReadAllText((Join-Path $Candidate 'local-skills/custom.txt')) -ne 'skill') { throw 'Local skills were not preserved.' }
+  [IO.File]::WriteAllText((Join-Path $Source 'late-extra.txt'),'created during upgrade')
+  Assert-PortableUserDataUnchanged $Source $Candidate
+  if (-not [IO.File]::Exists((Join-Path $Source 'late-extra.txt'))) { throw 'Late extra must remain available for rollback.' }
+  Write-Output 'PASS: protected roots migrate, old extras do not; late extras do not block switch'
   [IO.File]::WriteAllText((Join-Path $Source 'launch-root/report.txt'),'report changed after copy')
   $Rejected=$false
   try { Assert-PortableUserDataUnchanged $Source $Candidate } catch { $Rejected=$_.Exception.Message -like '*changed after copy*' }
