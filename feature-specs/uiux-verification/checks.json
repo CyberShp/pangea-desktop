@@ -1,0 +1,72 @@
+{
+  "browser": "153.0.8010.0",
+  "checks": [
+    "overview-complete-1380",
+    "cases-40-1380",
+    "case-adopted-1380",
+    "export-selected-1380",
+    "review-persisted",
+    "cases-120-page3",
+    "flow-branches-page2",
+    "flow-graph-1380",
+    "flow-fullscreen",
+    "run-running-1380",
+    "run-failed-1380",
+    "run-stopping-1380",
+    "run-partial-1380",
+    "session-markdown-error",
+    "cases-1280-plain",
+    "cases-1280-assistant",
+    "cases-1920-plain",
+    "cases-1920-assistant",
+    "cases-900-plain",
+    "cases-900-assistant",
+    "home-1380",
+    "tasks-1380",
+    "create-1380",
+    "scope-preview-42",
+    "scope-preview-entire",
+    "assets-1380",
+    "settings-1380",
+    "environment-1380"
+  ],
+  "windowsNative": "not-tested",
+  "fixture_note": "Actual React components and real scope/review/export routes; simulated analysis and external Agent; static desktop chrome. Not native Electron acceptance.",
+  "components": {
+    "dsh_pangea": "d726d2b9cb672a6d1feb1aabf2dadfcdd8607b4b",
+    "pangea_agent": "470b4869869447f07a14d65934791d5a2f75f10b"
+  },
+  "checks_summary": {
+    "companion": {
+      "tests": 696,
+      "passed": 688,
+      "skipped": 8,
+      "failed": 0
+    },
+    "shell": {
+      "tests": 37,
+      "passed": 37,
+      "failed": 0
+    },
+    "assets": {
+      "tests": 109,
+      "passed": 108,
+      "skipped": 1,
+      "failed": 0
+    },
+    "desktop_focused": {
+      "files": 13,
+      "passed": 169,
+      "skipped": 1,
+      "failed": 0
+    },
+    "desktop_release_tools": {
+      "tests": 163,
+      "passed": 163,
+      "failed": 0
+    },
+    "desktop_typecheck": "passed",
+    "desktop_build": "passed"
+  },
+  "merge_gate": "Do not merge until internal-network acceptance and Windows display-scale checks are confirmed stable."
+}

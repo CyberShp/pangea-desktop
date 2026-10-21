@@ -1,0 +1,73 @@
+name: UIUX isolated Windows test build
+run-name: UIUX development build ${{ github.run_number }}
+on:
+  push:
+    branches: [feat/uiux-workbench-20261021]
+    paths:
+      - pangea.components.json
+      - .github/workflows/uiux-internal-test.yml
+      - scripts/test-uiux-dev-instance.ps1
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-dev:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      PANGEA_PACKAGE_CHANNEL: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.9.0
+          cache: npm
+      - name: Set a development test version
+        shell: pwsh
+        run: |
+          $Version = "1.0.4-test.$env:GITHUB_RUN_NUMBER.$($env:GITHUB_SHA.Substring(0, 7))"
+          npm version $Version --no-git-tag-version --allow-same-version
+          if ($LASTEXITCODE -ne 0) { throw 'Could not set the development version.' }
+      - name: Stage locked feature components and run product checks
+        shell: pwsh
+        run: ./scripts/build-pangea-desktop.ps1 -SkipPackage -PackageChannel test
+      - name: Verify source preview against the staged Python engine
+        shell: pwsh
+        run: |
+          $env:PANGEA_TEST_PYTHON = (Resolve-Path '.pangea-build/runtime/python/python.exe').Path
+          $env:PANGEA_AGENT_ROOT = (Resolve-Path '.pangea-build/runtime/pangea-runtime').Path
+          node --test .pangea-build/plugins/dsh-pangea-companion/tests/source-scope-engine.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Source scope/freeze parity failed.' }
+      - name: Build the separate development application
+        shell: pwsh
+        run: |
+          npm run package:dev:dir
+          if ($LASTEXITCODE -ne 0) { throw 'Development application build failed.' }
+      - name: Smoke test an isolated profile
+        shell: pwsh
+        run: ./scripts/test-uiux-dev-instance.ps1 -PackageDirectory './dist-dev/win-unpacked'
+      - name: Add isolated launch entry and review checklist
+        shell: pwsh
+        run: |
+          @'
+          @echo off
+          set "PANGEA_USER_DATA_DIR=%~dp0uiux-test-profile"
+          start "PANGEA UIUX test" "%~dp0PANGEA Desktop Dev.exe"
+          '@ | Set-Content -LiteralPath './dist-dev/win-unpacked/start-uiux-test.cmd' -Encoding ASCII
+          Copy-Item -LiteralPath 'feature-specs/2026-10-21-uiux-development.md' -Destination './dist-dev/win-unpacked/UIUX-REVIEW.md'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pangea-uiux-win-unpacked-${{ github.sha }}
+          path: dist-dev/win-unpacked
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pangea-uiux-build-evidence-${{ github.sha }}
+          path: |
+            .pangea-build/manifest.json
+            .pangea-build/components.resolved.json
+            .pangea-build/uiux-smoke.json
+            .pangea-build/uiux-smoke-logs
+          if-no-files-found: ignore
+          retention-days: 14
