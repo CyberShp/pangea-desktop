@@ -45,3 +45,11 @@
 Desktop 未修改产品源码的 `a23cd31` 基线全量测试为 634 通过、3 跳过、10 失败，原始日志和分类保存在 `desktop-baseline-tests.log` / `desktop-baseline.json`。失败涉及历史品牌/preload/模型选择器静态断言、飞书脚本环境及升级恢复等；不能把这组基线记录为全绿，最终验收须区分新增回归。
 
 旧真实 Run `e2e-261021-01` 的只读对照已完成：push/pop 的时序消息均从 1/4 恢复为 4/4；两条流程的 3 个变量一直保留，数组形式 writes 的展示已恢复。未修改该 Run 的记录或冻结输入，证据为 `diagrams-before.json` / `diagrams-after.json`。
+
+## 首次推送后的验收修复
+
+真实 Run 暴露出旧 `flow_path_hint` 已随记录替换而失效，却仍显示在当前待处理项的问题。当前读取、完成验证、Reviewer 和报告现按同一结果内的显式替换关系区分当前提示与历史；旧压平提示只有在同 action 精确匹配退休来源且没有当前同文提示时才省去。显式 `source_warning` 必须具有匹配的类型和记录身份，缺失或冲突时保留。原始 Run、历史 warnings/degradations 均保留。只读复现中，unit3 的 4 条旧 fin-close-normal 提示从当前待处理项消失，78 条历史 degradation 保留。
+
+该修复经主 Agent 审核及独立边界复查，插件最终回归 762 通过、8 跳过、0 失败；Python 当前警告与 closure 身份检查 7 项、观测恢复检查 12 项通过。相关日志为 `plugin-final-warning-tests.log`、`root-current-warning-final-tests.log`、`root-warning-observability-tests.log`。
+
+CLI 合同补充 compact 完整项、片段拼接和跨 action 记录身份的读取说明，未增加工具、门禁或自动回合。此更新来自真实 Reviewer 自写整理脚本遗漏记录的观察；本次活动 Run 保持最初运行代码，等待其自然完成后再同步修复并复验。首次运行的 manifest 已独立保存为 `initial-run-*`，后续展示版本不替换原始生成版本证据。以上工程修复和测试尚不代表真实分析质量验收通过。
