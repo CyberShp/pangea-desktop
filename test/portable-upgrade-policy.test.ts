@@ -1,7 +1,7 @@
 import { ZipArchive } from 'archiver'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -17,18 +17,23 @@ afterEach(async () => {
 })
 
 describe('portable upgrade source policy', () => {
-  it('accepts the 2.0.7 boundary and newer versions in both channels', () => {
-    expect(MINIMUM_PORTABLE_UPGRADE_SOURCE).toBe('2.0.7')
-    for (const version of ['2.0.7', '2.0.7-test.0.abcdef0', '2.0.10', '2.1.0', '3.0.0']) {
+  it('keeps the standalone signed helper aligned with the shared source boundary', async () => {
+    const helper = await readFile(path.join(process.cwd(), 'build/apply-portable-update.ps1'), 'utf8')
+    expect(helper.match(/\$MinimumSourceVersion\s*=\s*'([^']+)'/)?.[1]).toBe(MINIMUM_PORTABLE_UPGRADE_SOURCE)
+  })
+
+  it('accepts the 2.0.20 boundary and newer versions in both channels', () => {
+    expect(MINIMUM_PORTABLE_UPGRADE_SOURCE).toBe('2.0.20')
+    for (const version of ['2.0.20', '2.0.20-test.0.abcdef0', '2.0.21', '2.1.0', '3.0.0']) {
       expect(() => assertSupportedPortableUpgradeSource(version)).not.toThrow()
     }
-    for (const version of ['1.99.99', '2.0.0', '2.0.6', '2.0.6-test.9999.abcdef0']) {
-      expect(() => assertSupportedPortableUpgradeSource(version)).toThrow(/最低支持版本为 2\.0\.7/)
+    for (const version of ['1.99.99', '2.0.0', '2.0.19', '2.0.19-test.9999.abcdef0']) {
+      expect(() => assertSupportedPortableUpgradeSource(version)).toThrow(/最低支持版本为 2\.0\.20/)
     }
   })
 
   for (const [kind, stage] of [['full', stagePortablePackage], ['patch', stagePortablePatch]] as const) {
-    for (const version of ['2.0.6', '2.0.6-test.9999.abcdef0']) {
+    for (const version of ['2.0.19', '2.0.19-test.9999.abcdef0']) {
       it(`rejects ${kind} import from ${version} before reading or staging any package`, async () => {
         const root = await mkdtemp(path.join(tmpdir(), 'pangea-retired-upgrade-'))
         roots.push(root)
@@ -36,7 +41,7 @@ describe('portable upgrade source policy', () => {
         await expect(stage({
           currentVersion: version, publicKeyPem,
           sourcePath: path.join(root, 'not-read.zip'), destinationPath
-        })).rejects.toThrow(/最低支持版本为 2\.0\.7/)
+        })).rejects.toThrow(/最低支持版本为 2\.0\.20/)
         await expect(stat(path.dirname(destinationPath))).rejects.toMatchObject({ code: 'ENOENT' })
       })
     }
@@ -46,8 +51,8 @@ describe('portable upgrade source policy', () => {
     it(`imports a real signed full package from the minimum ${channel} version`, async () => {
       const root = await mkdtemp(path.join(tmpdir(), 'pangea-supported-upgrade-'))
       roots.push(root)
-      const currentVersion = channel === 'stable' ? '2.0.7' : '2.0.7-test.1.abcdef0'
-      const version = channel === 'stable' ? '2.0.8' : '2.0.8-test.2.abcdef0'
+      const currentVersion = channel === 'stable' ? '2.0.20' : '2.0.20-test.1.abcdef0'
+      const version = channel === 'stable' ? '2.0.21' : '2.0.21-test.2.abcdef0'
       const sourcePath = path.join(root, 'full.zip')
       await writeSignedFullPackage(sourcePath, version, channel)
       const staged = await stagePortablePackage({ sourcePath, destinationPath: path.join(root, 'import', 'full.zip'), currentVersion, publicKeyPem })

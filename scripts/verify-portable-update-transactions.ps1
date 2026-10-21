@@ -28,13 +28,13 @@ function New-Fixture {
   $Install=Join-Path $Root 'installed [中文]'; $Workspace=Join-Path $Root 'p-up-1'; $Data=Join-Path $Root 'profile'
   [IO.Directory]::CreateDirectory((Join-Path $Data 'updates/run-1')) | Out-Null
   [IO.Directory]::CreateDirectory($Workspace) | Out-Null
-  Write-FixtureVersion $Install '2.0.7' 'original user work'
-  Write-FixtureVersion (Join-Path $Workspace 'new') '2.0.13' 'candidate user work'
+  Write-FixtureVersion $Install '2.0.20' 'original user work'
+  Write-FixtureVersion (Join-Path $Workspace 'new') '2.0.21' 'candidate user work'
   return [pscustomobject]@{ Root=$Root; Install=$Install; Workspace=$Workspace; Data=$Data; Plan=(Join-Path $Data 'updates/run-1/plan.json') }
 }
 function Begin-FixtureTransaction {
   param($Fixture,$Context)
-  $Transaction=New-PortableUpdateTransaction $Context $Fixture.Workspace (Get-PortableRootIdentity $Fixture.Install) '2.0.13' $Fixture.Plan $Fixture.Data
+  $Transaction=New-PortableUpdateTransaction $Context $Fixture.Workspace (Get-PortableRootIdentity $Fixture.Install) '2.0.21' $Fixture.Plan $Fixture.Data
   $Transaction.target_identity=Get-PortableRootIdentity (Join-Path $Fixture.Workspace 'new')
   Set-PortableTransactionState $Context $Transaction 'candidate_ready'
   return $Transaction
@@ -103,7 +103,7 @@ try {
     try {
       $Transaction=Read-PortableUpdateTransaction $Context $Data
       $Recovered=Restore-PortableUpdateTransaction $Context $Transaction $Data
-      $Expected=if ($Point -eq 'committed') { '2.0.13' } else { '2.0.7' }
+      $Expected=if ($Point -eq 'committed') { '2.0.21' } else { '2.0.20' }
       if ((Get-PortableRootIdentity $Install).version -ne $Expected) { throw "Wrong version recovered at $Point" }
       $Content=[IO.File]::ReadAllText((Join-Path $Install 'user-work.txt'))
       if ($Point -ne 'committed' -and $Content -ne 'original user work') { throw 'Original user data was changed.' }
@@ -163,7 +163,7 @@ try {
 
   $Policy=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../build/portable-update-policy.json') -Raw | ConvertFrom-Json
   $Fixture=New-Fixture (Join-Path $TestRoot 'source-policy')
-  foreach ($Version in @('2.0.6','2.0.6-test.17.abcdef','2.0.7','2.0.7-test.17.abcdef','2.0.13')) {
+  foreach ($Version in @('2.0.19','2.0.19-test.17.abcdef','2.0.20','2.0.20-test.17.abcdef','2.0.21')) {
     Write-FixtureVersion $Fixture.Install $Version 'original work'
     $Accepted=$true
     try { Assert-PortableUpgradeSourceVersion $Fixture.Install 'patch' $Version | Out-Null } catch { $Accepted=$false }
@@ -171,7 +171,7 @@ try {
     if ($Accepted -ne ($Numeric -ge [version]$Policy.minimum_source_version)) { throw "Signed helper source policy differs from shared policy: $Version" }
   }
   $Rejected=$false
-  try { Assert-PortableUpgradeSourceVersion $Fixture.Install 'patch' '2.0.7' | Out-Null } catch { $Rejected=$true }
+  try { Assert-PortableUpgradeSourceVersion $Fixture.Install 'patch' '2.0.20' | Out-Null } catch { $Rejected=$true }
   if (-not $Rejected) { throw 'Mismatched patch base was accepted.' }
   Write-Output 'PASS: stable/test source-version boundaries match shared policy and patch base is independently checked'
   if ((Get-PortableStartupHealthTimeout ([pscustomobject]@{})) -ne 300) { throw 'Legacy plans must use the 300-second health deadline.' }

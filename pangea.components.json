@@ -8,12 +8,12 @@
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
     "branch": "feat/uiux-workbench-20261021",
-    "commit": "d726d2b9cb672a6d1feb1aabf2dadfcdd8607b4b"
+    "commit": "27319cfb453684c5ed4bdbbaa6192a2f3f3df57f"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
     "branch": "feat/uiux-workbench-20261021",
-    "commit": "470b4869869447f07a14d65934791d5a2f75f10b"
+    "commit": "7aa7abc3e921173409787f22e23ca872318baffd"
   },
   "python": {
     "version": "3.12.10",
