@@ -8,9 +8,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const native = process.argv[2] === '--native'
 if (!native && process.platform !== 'win32') throw new Error('This integration test must run on Windows')
 const appRoot = process.env.PANGEA_TEST_APP_ROOT
-const [ngaShim, codeagentShim, opencodeShim] = process.argv.slice(2)
-if (!appRoot || (!native && (!ngaShim || !codeagentShim || !opencodeShim))) {
-  throw new Error('Packaged app root and three shim paths are required')
+const [ngaShim, codeagentShim, opencodeShim, rawOptionShim] = process.argv.slice(2)
+if (!appRoot || (!native && (!ngaShim || !codeagentShim || !opencodeShim || !rawOptionShim))) {
+  throw new Error('Packaged app root, three forwarding shims, and a raw-option shim are required')
 }
 
 const importPackaged = relativePath => import(pathToFileURL(path.join(appRoot, 'node_modules', relativePath)).href)
@@ -119,6 +119,42 @@ try {
   results.push({ provider: 'pangea-opencode', cancellation: 'aborted', processId: cancellation.processId })
 
   if (!native) {
+    // Unlike pass-through shims, this wrapper examines raw %2 before forwarding.
+    // Quoting --skip-safe-check makes it print help and exit, reproducing the
+    // observed startup failure without depending on a private NGA installation.
+    const rawOptionProviders = ['pangea-nga', 'pangea-codeagent']
+    const rawOptionEntries = product.configuredProviderPlugins({
+      ...probeEnvironment,
+      PANGEA_ACP_RUNTIME_CONFIG: JSON.stringify({
+        version: 1,
+        providers: Object.fromEntries(rawOptionProviders.map(providerName => [providerName, {
+          command: rawOptionShim, resolved_command: rawOptionShim, args: ['acp'],
+        }])),
+      }),
+    }).filter(([, config]) => rawOptionProviders.includes(config.providerName))
+    assert.equal(rawOptionEntries.length, 2)
+    for (const [plugin, config] of rawOptionEntries) {
+      plugin.apply(ctx, plugin.Config({ ...config, cwd: shimDirectory }))
+      const provider = providers.get(config.providerName)
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort('raw-option model discovery timeout'), 30_000)
+      const stages = []
+      try {
+        // discoverModels performs initialize + session/new, without prompting.
+        // The fixture intentionally publishes an empty model catalog.
+        const catalog = await provider.discoverModels({
+          cwd: shimDirectory, signal: controller.signal,
+          onDiagnostic: event => stages.push(event.stage),
+        })
+        assert.deepEqual(stages, ['spawn_process', 'acp_initialize', 'session_new', 'models_received'])
+        assert.equal(catalog.diagnostics.stage, 'models_received')
+        assert.equal(catalog.diagnostics.messageChunks, 0)
+        results.push({ provider: config.providerName, rawOptionWrapper: true, discoveryHandshake: true })
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+
     for (const shim of [ngaShim, codeagentShim, opencodeShim]) {
       for (const invalid of ['caret^', 'unsafe"argument', '%PATH%', 'line\nbreak', 'line\rbreak', 'nul\0byte']) {
         assert.throws(() => ctx.subprocess.spawn({

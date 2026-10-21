@@ -40,10 +40,26 @@ CALL "%~dp0agent-core.cmd" %*
 '@ | Set-Content $Shim -Encoding ASCII
   }
 
+  # Simulate the observed wrapper contract: raw option spelling matters before
+  # forwarding to the executable. This is not a copy of NGA's private wrapper.
+  $RawOptionShim = Join-Path $TemporaryRoot 'agent-raw-option.cmd'
+  @'
+@ECHO OFF
+IF "%~1"=="--version" GOTO forward
+IF NOT "%~1"=="acp" GOTO usage
+IF [%2]==[--skip-safe-check] GOTO forward
+:usage
+ECHO fixture acp --skip-safe-check: bare option required
+EXIT /B 2
+:forward
+CALL "%~dp0agent-core.cmd" %*
+EXIT /B %ERRORLEVEL%
+'@ | Set-Content $RawOptionShim -Encoding ASCII
+
   $PreviousAppRoot = $env:PANGEA_TEST_APP_ROOT
   try {
     $env:PANGEA_TEST_APP_ROOT = $AppRoot
-    & $PackagedNode $TestScript @Shims | Out-Host
+    & $PackagedNode $TestScript @Shims $RawOptionShim | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Packaged ACP batch launch test exited with code $LASTEXITCODE" }
   } finally {
     $env:PANGEA_TEST_APP_ROOT = $PreviousAppRoot
