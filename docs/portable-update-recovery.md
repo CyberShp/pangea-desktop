@@ -20,7 +20,7 @@
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\pangea-update-recovery\resume-portable-update.ps1" -InstallRoot "D:\pangea-desktop" -TargetVersion "2.0.13" -RecoverOnly
 ```
 
-入口复用已验证的完整包或补丁计划；恢复现有事务不要求包仍存在。普通重试则重新核验包大小、SHA-256、最低源版本 **2.0.7** 与补丁精确基线。可用 `-UserDataRoot` 指定自定义数据目录；默认尊重 `PANGEA_USER_DATA_DIR`，否则使用 `%APPDATA%\pangea-desktop`。旧助手未记录事务的历史故障，不能靠新版凭空确定哪一份目录属于有效备份。
+入口复用已验证的完整包或补丁计划；恢复现有事务不要求包仍存在。普通重试则重新核验包大小、SHA-256、最低源版本 **2.0.20** 与补丁精确基线。可用 `-UserDataRoot` 指定自定义数据目录；默认尊重 `PANGEA_USER_DATA_DIR`，否则使用 `%APPDATA%\pangea-desktop`。旧助手未记录事务的历史故障，不能靠新版凭空确定哪一份目录属于有效备份。
 
 正常成功只清理已确认的旧版目录。事务收据、配置快照以及失败候选目录保留供诊断和找回新产生的编辑，不自动递归清理。配置快照属于用户数据，应按本地数据处理，不随问题报告上传。没有新增系统启动项或后台常驻恢复服务。应用启动检查及升级入口使用同一事务状态；安装路径缺失时使用上述外置恢复入口。
 
@@ -34,13 +34,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\pangea-update-recove
 
 每次处理前重新检查占用、PID、启动时间、路径和保护策略。目录切换最多执行三轮清理；新出现的缓存进程必须在后续轮次独立验证，不能沿用旧 PID 的处理决定。清理和改名共用总预算（默认 90 秒，包含 30 秒改名等待及 60 秒清理预算），不会无限重启/结束缓存；Explorer 仍只处理一次。单个进程检查失败不再中断其余候选；最终错误显示受保护/未释放进程及 PID 或扫描失败原因，避免只有“访问被拒绝”。
 
-对已导入并验证但升级失败的 **2.0.7 → 2.0.13**，可将最新的 `resume-portable-update.ps1` 和 `apply-portable-update.ps1` 放在安装目录外，关闭 Desktop 后恢复原升级计划：
+历史 **2.0.7 → 2.0.13** 曾通过外置助手恢复升级。该升级源现已停止支持；已有中断事务仍可用上文 `-RecoverOnly` 恢复，不会继续应用新包。当前以 **2.0.20 → 2.0.21** 为例，对已导入并验证但升级失败的包，可将最新的 `resume-portable-update.ps1` 和 `apply-portable-update.ps1` 放在安装目录外，关闭 Desktop 后恢复原升级计划：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\pangea-update-recovery\resume-portable-update.ps1" -InstallRoot "D:\pangea-desktop" -TargetVersion "2.0.13"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\pangea-update-recovery\resume-portable-update.ps1" -InstallRoot "D:\pangea-desktop" -TargetVersion "2.0.21"
 ```
 
-恢复入口只复用 `%APPDATA%\pangea-desktop\updates` 中安装路径、目标版本和当前基线都匹配的已验证计划；保留原计划，新建独立恢复计划，重新检查包大小、SHA-256 及重建文件。它不修改已签名补丁或旧安装文件，不信任过期父进程 PID。`TargetVersion` 必须显式提供，不再默认历史 1.x 目标。新版助手只供本次恢复执行；成功安装后仍是已签名的原始 2.0.13 内容，后续正式版本才会内置此修复。
+恢复入口只复用 `%APPDATA%\pangea-desktop\updates` 中安装路径、目标版本和当前基线都匹配的已验证计划；保留原计划，新建独立恢复计划，重新检查包大小、SHA-256 及重建文件。它不修改已签名补丁或旧安装文件，不信任过期父进程 PID。`TargetVersion` 必须显式提供，不再默认历史 1.x 目标。新版助手只供本次恢复执行；成功安装后仍是计划指定的已签名目标包内容，外置脚本不会改写包内文件。
 
 2026-09-17 的日志停在 `42% Preparing the new version`，没有 `indexing ... target files`。旧助手在补丁重建前移动整个安装目录；该阶段目录访问失败会立即中断。日志不能区分目录句柄占用和 ACL 权限问题。
 
@@ -54,9 +54,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\pangea-update-recove
 
 ## 最低支持版本
 
-当前构建、补丁生成、发布校验、完整包／补丁导入与独立助手均以 **2.0.7** 为最低升级源版本。2.0.6 及更早版本不再使用当前脚本原地升级；应在独立目录安装完整包并保留原安装目录与用户数据。历史发布包不会被本次修改删除。
+当前构建、补丁生成、发布校验、完整包／补丁导入与独立助手均以 **2.0.20** 为最低升级源版本。2.0.19 及更早版本不再使用当前脚本原地升级；应在独立目录安装完整包并保留原安装目录与用户数据。历史发布包不会被本次修改删除。
 
-新版工作台先关闭任务入口，再检查运行、排队和收尾状态；准备失败会解除冻结。HTTP、RPC、直接执行器调用和资产队列共享同一入口保护。已安装的旧版 2.0.7 不具备这个新接口；首次升级依靠目标助手退出旧版、处理已核验写入者与复制一致性检查，不能宣称旧版已有任务入口冻结。
+新版工作台先关闭任务入口，再检查运行、排队和收尾状态；准备失败会解除冻结。HTTP、RPC、直接执行器调用和资产队列共享同一入口保护。历史旧版 2.0.7 不具备这个接口，且已退出当前升级支持范围；对已有中断事务只执行恢复，不把历史恢复当作当前受支持的升级路径。
 
 ## 空间与用户数据
 
