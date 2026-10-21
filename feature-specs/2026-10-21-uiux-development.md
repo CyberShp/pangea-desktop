@@ -1,6 +1,6 @@
 # UI/UX 开发交付与内网验收
 
-状态：功能修改已推送到独立开发分支，完成本地影响范围回归和浏览器组件验证。**等待 Windows 构建及内网真实业务验收，尚未合入 langgraph。**
+状态：功能修改已推送到独立开发分支，本地回归、浏览器组件验证和 Windows 自动检查均已通过。**等待内网真实业务与显示缩放验收；本次工作未执行合入 langgraph。**
 
 三个仓库统一使用 `feat/uiux-workbench-20261021`。执行规格是同目录 `2026-10-21-uiux-plan.md`（v1.1）；实际配套提交以 `pangea.components.json` 为准。后续修复提交继续留在该分支，禁止提前启用自动合并。
 
@@ -53,7 +53,9 @@
 
 分支专用工作流 `.github/workflows/uiux-internal-test.yml` 在该分支组件锁或自身变更时构建；只上传开发版 `win-unpacked` 和检查证据，不创建 Release、不合入主分支。固定组件 staging、插件测试、桌面核心检查和真实引擎范围一致性通过后，构建独立的 **PANGEA Desktop Dev**，使用临时 profile 验证 Harness readiness。
 
-下载工作流的 `pangea-uiux-win-unpacked-<commit>` 制品并解压，双击 `start-uiux-test.cmd`。入口把 `PANGEA_USER_DATA_DIR` 指向解压目录内 `uiux-test-profile`，与正式程序数据分开；不移动或覆盖正式 profile。实际构建版本和组件 SHA 位于配套 evidence 制品。构建失败时按工作流日志修复，不手工修改签名 ZIP。
+Windows 内测构建已通过：[工作流与检查日志](https://github.com/CyberShp/pangea-desktop/actions/runs/39582994144)；版本 `1.0.4-test.3.cabfa63`，构建提交 `cabfa634571e91973898df8ef65537c5106c9a73`。Windows 侧桌面检查 189 项、真实范围/冻结检查 1 项、打包 Cordis 集成 11 项全部通过；原生程序的隔离 profile readiness 已确认，记录见 `uiux-verification/windows-smoke.json` 和 `windows-manifest.json`。
+
+下载 [Windows 内测包](https://github.com/CyberShp/pangea-desktop/actions/runs/39582994144/artifacts/12339196489) 并解压，双击 `start-uiux-test.cmd`。入口把 `PANGEA_USER_DATA_DIR` 指向解压目录内 `uiux-test-profile`，与正式程序数据分开；不移动或覆盖正式 profile。实际构建版本和组件 SHA 位于配套 evidence 制品。构建失败时按工作流日志修复，不手工修改签名 ZIP。
 
 本次环境没有内网 Windows 交互入口与真实 Agent 凭据，因此原生缩放及内网任务由该实例完成验收。开发者可复现组件验证：Companion `scripts/preview-ui.mjs` 和 `scripts/verify-ui-browser.mjs`；其参数及外部测试工具说明在 Companion README，产品依赖不变。
 
@@ -67,4 +69,4 @@
 4. 20 条以上分支、长变量说明：完整检索、分页、普通滚轮、Ctrl 缩放、全屏退出和选择保留正常。
 5. Windows 三种缩放、最小窗口和助手展开：操作可达，无页面级横向溢出；设置、资产和环境页面页头一致。
 
-验收记录当前为 **待内网确认**。通过后再评审三个仓库的功能分支，按配套组件提交一起合入 langgraph；此开发包不启用自动合并。若有问题，直接在同一功能分支修复，更新检查证据与 Desktop 组件锁后重建。
+验收记录当前为 **待内网确认**。开发期间远端 langgraph 还有独立更新，且与本功能分支分叉：dsh-pangea `43aa37b9b099037a088d73ffd428647e1a89bf9e`（调用图/时序图），Agent `3a783dc564a18267904d37f0ff964c91f16a8773`（流程规则），Desktop `2608c60c1f4ca99a5f89d809b606c1d6b956aa43`（组件锁/发布配置等）。内测包保留上表所列已验证基线和固定提交。合入前必须先将最新 langgraph 同步到功能分支，保留这些独立修改，重建 lib 并重跑受影响检查；若运行或 UI 行为变化，再做相应内网复测。通过后才评审三个仓库的配套功能提交并合入 langgraph；此开发包不启用自动合并。若有问题，直接在同一功能分支修复，更新检查证据与 Desktop 组件锁后重建。

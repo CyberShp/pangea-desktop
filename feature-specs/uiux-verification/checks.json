@@ -30,7 +30,10 @@
     "settings-1380",
     "environment-1380"
   ],
-  "windowsNative": "not-tested",
+  "windowsNative": {
+    "startup": "passed",
+    "native_visual_and_scaling": "pending internal acceptance"
+  },
   "fixture_note": "Actual React components and real scope/review/export routes; simulated analysis and external Agent; static desktop chrome. Not native Electron acceptance.",
   "components": {
     "dsh_pangea": "d726d2b9cb672a6d1feb1aabf2dadfcdd8607b4b",
@@ -68,5 +71,17 @@
     "desktop_typecheck": "passed",
     "desktop_build": "passed"
   },
-  "merge_gate": "Do not merge until internal-network acceptance and Windows display-scale checks are confirmed stable."
+  "merge_gate": "Do not merge until internal-network acceptance and Windows display-scale checks are confirmed stable.",
+  "windows": {
+    "run_id": 39582994144,
+    "run_url": "https://github.com/CyberShp/pangea-desktop/actions/runs/39582994144",
+    "conclusion": "success",
+    "desktop_tests_passed": 189,
+    "source_preview_engine_tests_passed": 1,
+    "packaged_cordis_tests_passed": 11,
+    "version": "1.0.4-test.3.cabfa63",
+    "build_commit": "cabfa634571e91973898df8ef65537c5106c9a73",
+    "artifact_id": 12339196489,
+    "artifact_sha256": "0a8f38f53f8c2039e93fe5e9cbc0699d2b316d24444379ae1d4bf9498553e41b"
+  }
 }

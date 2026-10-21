@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "built_at": "2026-10-21T10:18:05.6258783Z",
+  "product": {
+    "name": "PANGEA Desktop",
+    "version": "1.0.4-test.3.cabfa63"
+  },
+  "components": {
+    "desktop": {
+      "commit": "cabfa634571e91973898df8ef65537c5106c9a73",
+      "upstream_branch": "main",
+      "upstream_base": "bbc668d84843ac4f4e0c81acf00f73d6bc943a66"
+    },
+    "dsh_pangea": {
+      "branch": "feat/uiux-workbench-20261021",
+      "commit": "d726d2b9cb672a6d1feb1aabf2dadfcdd8607b4b"
+    },
+    "pangea_agent": {
+      "branch": "feat/uiux-workbench-20261021",
+      "commit": "470b4869869447f07a14d65934791d5a2f75f10b"
+    },
+    "python": {
+      "version": "3.12.10",
+      "sha256": "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
+    }
+  }
+}
