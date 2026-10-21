@@ -1,6 +1,20 @@
 # UI/UX 开发交付与内网验收
 
-状态：功能修改已推送到独立开发分支，本地回归、浏览器组件验证和 Windows 自动检查均已通过。**等待内网真实业务与显示缩放验收；本次工作未执行合入 langgraph。**
+状态：已在本地隔离分支 `qa/uiux-langgraph-integration-20261021` 集成三个仓库的最新 `langgraph`，完成原生全屏修复及针对性验证。组件锁已指向本地配套提交。远端功能分支及 `langgraph` 尚未更新；原内测包与本地开发补丁的证据分别记录。
+
+## 本地集成与原生修复（2026-10-21）
+
+- Desktop 集成 `2608c60`，保留最低升级源 2.0.20 等独立改动；仅向既有受信任 HTTP loopback 主 frame 放行 `fullscreen`，仍拒绝子 frame、外部页面和 `automatic-fullscreen`。
+- dsh-pangea 集成 `43aa37b`，当前配套提交 `7cc5179a30c3beefd61ea4792558c6fc8e8dc73a`。全屏状态与按钮文案同步，失败可见；支持 Esc 退出；流程图和时序图的内容包装层填满剩余高度，详情独立滚动。
+- Agent 集成 `3a783dc`，当前配套提交 `7aa7abc3e921173409787f22e23ca872318baffd`；保留范围预览与图表合同改动。
+- 原生 Electron 使用真实 `e2e-261021-01` Run 完成 11 项回归：鼠标全屏、窗口全屏状态、剩余画布高度、缩放、按钮退出、Esc、路径选择保留、时序图和调用图、25 条用例及采纳决定重启恢复。没有重新调用模型；模型端到端执行证据沿用本日已完成的真实 Run。
+- Companion 708 通过 / 8 跳过，Shell 37 通过，浏览器 32 通过，Agent 24 通过，真实范围引擎 1 通过；Desktop 受影响测试 67 通过、typecheck/build 通过，发布工具 147 通过 / 16 跳过，包内 Cordis 11 通过，Windows ACP 6 通过。
+- Desktop 全量为 633 通过 / 3 跳过 / 11 失败。这 11 项在原始 `b32c2b8` 与相同依赖环境下均复现：6 项静态契约、2 项 Python 商店别名、2 项路径/夹具、1 项发布分支硬编码。此处不把全量结果记为通过。
+- Run 只读审计 45 项通过。任务 `complete + UNRESOLVED` 对账为 `needs_attention` 是既有行为，执行状态仍为 completed；原审计断言已在集成审计副本中按既有规则纠正，原始证据与 Run 保留。
+
+证据目录：`D:/pangea-desktop-project/runtime-validation/uiux-acceptance-20261021/`。入口为 `integration-report.txt`，原生检查为 `integration-native-check.json`，截图为 `integration-native-evidence/`。本地实例在原 `win-unpacked` 上应用已备份的开发补丁，未重写签名 ZIP。Windows 三档系统缩放及内网真实业务的剩余验收仍按后文门槛执行。
+
+## 原功能分支交付基线
 
 三个仓库统一使用 `feat/uiux-workbench-20261021`。执行规格是同目录 `2026-10-21-uiux-plan.md`（v1.1）；实际配套提交以 `pangea.components.json` 为准。后续修复提交继续留在该分支，禁止提前启用自动合并。
 
