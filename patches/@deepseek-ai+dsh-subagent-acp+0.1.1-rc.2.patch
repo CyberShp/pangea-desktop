@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
-index b89ccf2..4f6a060 100644
+index b89ccf2..9774a41 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 @@ -1,10 +1,12 @@
@@ -284,7 +284,7 @@ index b89ccf2..4f6a060 100644
  /**
  * Start and publish one ACP child after initialization and session creation.
  * Child failures resolve through the run result; startup failures reject after
-@@ -105,50 +367,165 @@ function toError(value) {
+@@ -105,50 +367,173 @@ function toError(value) {
  */
  async function startAcpRun(request, spec) {
  	if (request.signal.aborted) throw new Error("subagent request was aborted before the ACP child started");
@@ -321,6 +321,7 @@ index b89ccf2..4f6a060 100644
 +		child = spec.spawn({
 +			argv: [spec.command, ...spec.args],
 +			windowsBatch: spec.windowsBatch,
++			recoveryFence: spec.recoveryFence,
 +			cwd: spec.cwd,
 +			stdio: {
 +				stdin: "pipe",
@@ -383,10 +384,17 @@ index b89ccf2..4f6a060 100644
  		sessionUpdate(params) {
  			const update = params.update;
 -			if (update.sessionUpdate === "agent_message_chunk") fold.pushText(acpContentText(update.content));
-+			if (update.sessionUpdate === "tool_call") toolRequests.set(update.toolCallId, currentRequestId);
++			if (!sessionLoading && update.sessionUpdate === "tool_call") toolRequests.set(update.toolCallId, currentRequestId);
 +			emitSessionEvent("session_update", { remote_session_id: params.sessionId,
 +				request_id: update.toolCallId ? toolRequests.get(update.toolCallId) ?? currentRequestId : currentRequestId,
 +				replay: sessionLoading, update });
++			// loadSession replays history, including tools whose final notification
++			// was never published. Keep the transcript and SDK acceptance evidence,
++			// but do not turn historical records into live execution or output.
++			if (sessionLoading) {
++				if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") toolLifecycle.accept(params, update.status ?? "unknown");
++				return Promise.resolve();
++			}
 +			diagnostics.lastActivityAt = Date.now();
 +			if (turnStartedAt !== null && diagnostics.firstEventMs === null) diagnostics.firstEventMs = Date.now() - turnStartedAt;
 +			if (update.sessionUpdate === "config_option_update") observeModel(update.configOptions);
@@ -474,7 +482,7 @@ index b89ccf2..4f6a060 100644
  	let signalCancelSettled;
  	const cancelSettled = new Promise((resolve) => {
  		signalCancelSettled = resolve;
-@@ -164,21 +541,39 @@ async function startAcpRun(request, spec) {
+@@ -164,21 +549,39 @@ async function startAcpRun(request, spec) {
  		requestCancel();
  	};
  	request.signal.addEventListener("abort", onAbort, { once: true });
@@ -523,7 +531,7 @@ index b89ccf2..4f6a060 100644
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -189,48 +584,117 @@ async function startAcpRun(request, spec) {
+@@ -189,48 +592,160 @@ async function startAcpRun(request, spec) {
  	} catch (error) {
  		request.signal.removeEventListener("abort", onAbort);
  		await disposeProcess();
@@ -548,6 +556,7 @@ index b89ccf2..4f6a060 100644
 +		let responseReceived = false, outcome;
 +		diagnostics.lastActivityAt = Date.now();
 +		diagnostics.promptPending = true;
++		diagnostics.protocolStopReason = null;
 +		currentTurnOutput = "";
 +		turnStartedAt = Date.now();
 +		diagnostics.firstEventMs = null;
@@ -578,6 +587,7 @@ index b89ccf2..4f6a060 100644
 +				emitSessionEvent("prompt", { request_id: requestId, prompt: acpPrompt });
 +				const promptResult = await conn.prompt({ sessionId: remoteSessionId, prompt: acpPrompt });
 +				responseReceived = true;
++				diagnostics.protocolStopReason = promptResult.stopReason;
 +				emitSessionEvent("turn_end", { request_id: requestId, stop_reason: acpStopReason(promptResult.stopReason),
 +					protocol_stop_reason: promptResult.stopReason, response_received: true });
  				return {
@@ -630,6 +640,8 @@ index b89ccf2..4f6a060 100644
 +	let turn = request.resume ? Promise.resolve({ output: [], stopReason: "completed" }) : runPrompt(request.prompt);
 +	const result = turn;
  	let disposal;
++	let recoveryQuiescence;
++	let recoveryStarted = false;
  	return {
  		id,
 +		remoteSessionId,
@@ -653,13 +665,52 @@ index b89ccf2..4f6a060 100644
 +			return { confirmed: Boolean(outcome.protocolStopReason) && !flags.cancelled, outcome };
 +		},
 +		continuePrompt(prompt) {
-+			turn = turn.then(() => flags.cancelled ? { output: collectOutput(), stopReason: "aborted" } : runPrompt(prompt));
++			if (recoveryStarted) return Promise.reject(new Error("ACP worker stopped for recovery; restore the original session before continuing"));
++			turn = turn.then(() => {
++				if (recoveryStarted) throw new Error("ACP worker stopped for recovery; restore the original session before continuing");
++				return flags.cancelled ? { output: collectOutput(), stopReason: "aborted" } : runPrompt(prompt);
++			});
 +			return turn;
++		},
++		quiesceForRecovery() {
++			if (recoveryQuiescence) return recoveryQuiescence;
++			// Neither an empty tool input nor a root PID exit proves execution has
++			// stopped. This capability requires a real normal prompt response and
++			// the owned subprocess seam's awaited whole-tree exit proof.
++			if (diagnostics.promptPending !== false || diagnostics.protocolStopReason !== "end_turn" || (flags.cancelled && !recoveryStarted)) {
++				return Promise.resolve({ confirmed: false, processTreeStopped: false });
++			}
++			if (process.platform === "win32" && typeof child.quiesceForRecovery !== "function") {
++				return Promise.resolve({ confirmed: false, processTreeStopped: false });
++			}
++			recoveryStarted = true;
++			const attempt = (async () => {
++				flags.cancelled = true;
++				// On Windows the legacy waitForExit path only fences the root PID.
++				// Require launch-time Job containment and its kernel membership proof.
++				if (process.platform === "win32") {
++					const proof = await child.quiesceForRecovery();
++					if (proof?.confirmed !== true || proof.processTreeStopped !== true) return { confirmed: false, processTreeStopped: false };
++				}
++				request.signal.removeEventListener("abort", onAbort);
++				disposal ??= disposeProcess();
++				await disposal;
++				diagnostics.processTreeStopped = true;
++				emitSessionEvent("worker_quiesced", { reason: "missing_tool_terminal", process_tree_stopped: true,
++					tool_lifecycle: toolLifecycle.snapshot() });
++				return { confirmed: true, processTreeStopped: true };
++			})();
++			recoveryQuiescence = attempt;
++			// A failed proof can be checked again by explicit stop; it never
++			// authorizes another prompt on this possibly interrupted handle.
++			const retryable = () => { if (recoveryQuiescence === attempt) recoveryQuiescence = void 0; };
++			attempt.then(proof => { if (!proof.confirmed) retryable(); }, retryable);
++			return attempt;
 +		},
  		localAgent: void 0,
  		result,
  		dispose() {
-@@ -257,10 +721,12 @@ const inject = ["subagents", "subprocess"];
+@@ -257,10 +772,12 @@ const inject = ["subagents", "subprocess"];
  const Config = z.object({
  	providerName: z.string().default("acp"),
  	command: z.string().required(),
@@ -672,7 +723,7 @@ index b89ccf2..4f6a060 100644
  	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
  	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
  });
-@@ -331,24 +797,79 @@ var AcpProvider = class {
+@@ -331,24 +848,80 @@ var AcpProvider = class {
  		this.ctx = ctx;
  		this.config = config;
  	}
@@ -736,6 +787,7 @@ index b89ccf2..4f6a060 100644
 +			env,
  			disposeEofGraceMs: this.config.disposeEofGraceMs,
  			disposeGraceMs: this.config.disposeGraceMs,
++			recoveryFence: this.name === "pangea-codeagent" && !request.discoverOnly,
 +			windowsBatch,
 +			launch,
  			spawn: (spec) => this.ctx.subprocess.spawn(spec),
@@ -800,12 +852,14 @@ diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts b/nod
 index 764ff1d..6c4b6c8 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
-@@ -19,6 +19,16 @@ export interface AcpRunSpec {
+@@ -19,6 +19,18 @@ export interface AcpRunSpec {
      command: string;
      /** Arguments passed to {@link command}. */
      args: string[];
 +    /** Whether this resolved Windows command is a `.cmd`/`.bat` entry point. */
 +    windowsBatch?: boolean;
++    /** Establish Windows process containment before the ACP handshake. */
++    recoveryFence?: boolean;
 +    /** Sanitized launch metadata exposed to the owning Job/log lifecycle. */
 +    launch?: {
 +        configuredCommand: string;

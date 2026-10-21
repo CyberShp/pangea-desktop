@@ -23,10 +23,9 @@ index 4744b4a..abb8dff 100644
  - spec 完全显式（argv、cwd、按流划分的 stdio 处置方式（disposition）、宽限期），因为随部署变化的默认值属于调用方的配置，而不属于某个隐藏的子进程服务默认值（`dsh-shell` 的 request/spec 拆分是这条规则的所属模板）。`argv` 绝不经过 shell 解释；需要 shell 的消费方自行传入 `['bash', '-c', command]`。
  - stdio 按流采用 Node 风格：`'pipe'` 把原始流交给调用方做自己的协议分帧（LSP 的 JSON-RPC、ACP（Agent Client Protocol）的 ndjson），`'inherit'` 直通父进程描述符以承载诊断输出，收集模式（collect）`{ maxBytes, spill? }` 则缓冲一段有界尾部，外加可选的完整流 spill 文件。收集模式的读取器接受全流字节偏移量且从不消费，因此独立的读取器不会抢走彼此的增量；偏移量滑出内存尾部窗口的读取标记为 `lossy`，并在 spill 文件存在时指向它。收集到的输出在结算后仍可读取。
 diff --git a/node_modules/@deepseek-ai/dsh-subprocess/lib/types/types.d.ts b/node_modules/@deepseek-ai/dsh-subprocess/lib/types/types.d.ts
-index 7a3215f..a9e7da2 100644
 --- a/node_modules/@deepseek-ai/dsh-subprocess/lib/types/types.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subprocess/lib/types/types.d.ts
-@@ -67,6 +67,13 @@ export interface SubprocessStdio {
+@@ -67,6 +67,15 @@
  export interface SubprocessSpawnSpec {
      /** Executable and arguments; `argv[0]` is the program. Never shell-interpreted here. */
      argv: readonly string[];
@@ -37,6 +36,17 @@ index 7a3215f..a9e7da2 100644
 +     * and are never shell-interpreted.
 +     */
 +    windowsBatch?: boolean | undefined;
++    /** Establish recovery-only containment before the protocol can execute business tools. */
++    recoveryFence?: boolean | undefined;
      /** Working directory for the child. */
      cwd: string;
      /** Per-stream stdio dispositions. */
+@@ -178,6 +187,8 @@
+      * @returns `true` when the tree exited, `false` when the signal aborted first.
+      */
+     waitForExit(signal?: AbortSignal): Promise<boolean>;
++    /** Explicit recovery proof. Missing/false is not interchangeable with root process exit. */
++    quiesceForRecovery?(): Promise<{ confirmed: boolean; processTreeStopped: boolean; reason?: string; method?: string }>;
+ }
+ /**
+  * Signals supported by the terminal-process primitive. Kept member-identical

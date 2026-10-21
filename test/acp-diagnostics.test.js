@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { readFileSync } from 'node:fs'
 import { Context } from '@deepseek-ai/cordis'
 import { apply, Config } from '@deepseek-ai/dsh-subagent-acp'
 import { LocalSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-local'
@@ -77,6 +78,51 @@ it('summarizes the exact two empty pending Terminal calls without inferring exec
     expect(events.indexOf(raw[0])).toBeLessThan(events.findIndex(event => event.type === 'session_update'))
   }, {}, { onSessionEvent: event => events.push(event) })
 })
+
+for (const mode of ['lifecycle-codeagent-edit-pending', 'lifecycle-codeagent-edit-tree', 'lifecycle-codeagent-edit-tree-root-exit']) {
+  it(`confirms owned-process quiescence while preserving the four unresolved edit records (${mode})`, async () => {
+    const events = []
+    await fixtureRun(mode, 'inspect', async (run, result) => {
+      expect(result).toMatchObject({ stopReason: 'completed', protocolStopReason: 'end_turn' })
+      const before = run.readDiagnostics().toolLifecycle
+      expect(before).toMatchObject({ unclosed_count: 4, pending_count: 4, in_progress_count: 0, unknown_count: 0,
+        received_tool_events: 208, accepted_tool_events: 208, unaccepted_tool_events: 0, validation_error_count: 0,
+        observer_error_count: 0, evidence_evicted_count: 0, tools_truncated: false })
+      expect(before.tools.map(tool => tool.tool_id)).toEqual([
+        'chatcmpl-tool-a5d001413b8ce96b', 'chatcmpl-tool-9d4de9f2c34f4134',
+        'chatcmpl-tool-984abc3da7ac9c06', 'chatcmpl-tool-9f3f38a0ce05f4be',
+      ])
+      for (const tool of before.tools) expect(tool).toMatchObject({ status: 'pending', kind: 'edit',
+        seen_in_progress: false, input_observed: true, input_nonempty: false, output_observed: false,
+        received_update_count: 1, accepted_update_count: 1 })
+      const descendantPid = mode.includes('-tree') ? JSON.parse(result.output[0].text).descendant_pid : null
+      if (descendantPid) expect(() => process.kill(descendantPid, 0)).not.toThrow()
+      expect(await run.quiesceForRecovery()).toMatchObject({ confirmed: true, processTreeStopped: true })
+      expect(run.readDiagnostics()).toMatchObject({ processExited: true, activeToolCount: 4 })
+      expect(run.readDiagnostics().toolLifecycle.tools).toEqual(before.tools)
+      expect(events.some(event => event.type === 'process_exit')).toBe(true)
+      if (descendantPid) {
+        const alive = () => {
+          try {
+            process.kill(descendantPid, 0)
+            // An orphan may remain briefly as a reaped-by-init zombie on Linux;
+            // it cannot execute or mutate files and is no longer a live process.
+            if (process.platform === 'linux') return !/\) Z /.test(readFileSync(`/proc/${descendantPid}/stat`, 'utf8'))
+            return true
+          } catch (error) {
+            if (['ESRCH', 'ENOENT'].includes(error.code)) return false
+            throw error
+          }
+        }
+        await vi.waitFor(() => expect(alive()).toBe(false), { timeout: 3000 })
+      }
+      const prompts = events.filter(event => event.type === 'prompt').length
+      await expect(Promise.resolve().then(() => run.continuePrompt([{ type: 'text', text: 'must not run' }]))).rejects.toThrow()
+      expect(events.filter(event => event.type === 'prompt')).toHaveLength(prompts)
+      expect(await run.quiesceForRecovery()).toMatchObject({ confirmed: true, processTreeStopped: true })
+    }, { providerName: 'pangea-codeagent' }, { onSessionEvent: event => events.push(event) })
+  }, 10000)
+}
 
 it('retains received terminal metadata when the real SDK rejects the notification before its callback', async () => {
   const events = [], sdkErrors = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -203,7 +249,10 @@ it('observes real cancellation followed by a late tool result without inventing 
     run = await provider.start({ prompt: [{ type: 'text', text: 'PANGEA_TOOL_OK' }], parent: { session: { header: { cwd: process.cwd() } } }, signal: new AbortController().signal,
       onSessionEvent: event => { events.push(event); if (event.update?.status === 'in_progress') notifyTool(); if (event.update?.rawOutput?.stdout === 'late tool result') notifyLate() } })
     await started
+    expect(await run.quiesceForRecovery()).toMatchObject({ confirmed: false, processTreeStopped: false })
+    expect(run.readDiagnostics()).toMatchObject({ promptPending: true, processExited: false })
     expect(await run.cancelTurn()).toMatchObject({ confirmed: true, outcome: { stopReason: 'aborted', protocolStopReason: 'cancelled' } })
+    expect(await run.quiesceForRecovery()).toMatchObject({ confirmed: false, processTreeStopped: false })
     const end = events.find(event => event.type === 'turn_end')
     expect(end).toMatchObject({ stop_reason: 'aborted', protocol_stop_reason: 'cancelled', response_received: true })
     await late
@@ -214,9 +263,10 @@ it('observes real cancellation followed by a late tool result without inventing 
 
 it('records protocol errors with an unconfirmed local turn ending', async () => {
   const events = []
-  await fixtureRun('error', 'ping', () => {
+  await fixtureRun('error', 'ping', async run => {
     expect(events.find(event => event.type === 'error')).toMatchObject({ stage: 'session_prompt', error: { code: '-32001' } })
     expect(events.find(event => event.type === 'turn_end')).toMatchObject({ stop_reason: 'error', protocol_stop_reason: null, response_received: false })
+    expect(await run.quiesceForRecovery()).toMatchObject({ confirmed: false, processTreeStopped: false })
   }, {}, { onSessionEvent: event => events.push(event) })
 })
 
@@ -230,6 +280,24 @@ it('marks session/load history as replay instead of attributing it to a new prom
     const live = events.filter(event => event.type === 'session_update' && !event.replay)
     expect(live).toHaveLength(1)
     expect(live[0].request_id).toBe(events.find(event => event.type === 'prompt').request_id)
+  }, {}, { prompt: [], resume: { taskId: 'original-local', remoteSessionId: 'original-remote' }, onSessionEvent: event => events.push(event) })
+})
+
+it('keeps replayed pending edits as history without reopening live tools or draining historical output', async () => {
+  const events = []
+  await fixtureRun('resume-replay-pending', '', async run => {
+    const replay = events.filter(event => event.type === 'session_update')
+    expect(replay).toHaveLength(2)
+    expect(replay.every(event => event.replay === true && event.request_id === null)).toBe(true)
+    expect(replay[1].update).toMatchObject({ toolCallId: 'earlier-tool', status: 'pending' })
+    expect(run.readDiagnostics()).toMatchObject({ activeToolCount: 0, toolCalls: 0, messageChunks: 0 })
+    expect(run.readDiagnostics().toolLifecycle.unclosed_count).toBe(0)
+    expect(run.readOutput()).toBe('')
+    expect(await run.quiesceForRecovery()).toMatchObject({ confirmed: false, processTreeStopped: false })
+    const result = await run.continuePrompt([{ type: 'text', text: 'new turn' }])
+    expect(result).toMatchObject({ stopReason: 'completed', protocolStopReason: 'end_turn' })
+    expect(result.output).toEqual([{ type: 'text', text: 'PANGEA_PING_OK' }])
+    expect(run.readDiagnostics().activeToolCount).toBe(0)
   }, {}, { prompt: [], resume: { taskId: 'original-local', remoteSessionId: 'original-remote' }, onSessionEvent: event => events.push(event) })
 })
 

@@ -335,6 +335,8 @@ if (-not $SkipTests) {
     'test/finalize-windows-release.test.ts',
     'test/acp-runtime-settings.test.ts',
     'test/acp-provider-launch.test.js',
+    'test/acp-diagnostics.test.js',
+    'test/windows-recovery-fence.test.js',
     'test/external-agent-provider-patches.test.ts',
     'test/pangea-product.test.ts',
     'test/pangea-product-runtime.test.js',

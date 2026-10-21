@@ -23,11 +23,11 @@ index 2f37cbc..3ee7ca0 100644
  - **先终止再等待退出的 dispose（资源释放）**：服务保留存活句柄，使自身的 dispose 能对每个仍在运行的进程树执行升级并等待其退出；完全停稳与 spawn 失败的句柄会在整棵进程树或 terminal session 清理完成后离开存活集合。
  - **同步宿主退出最终清理**：服务 effect 仍有效时，Node `exit` listener 会强制终止同一组存活集合中仍存在的每棵普通进程树和可观察 terminal session。这些仅供本地实现使用的操作会向受管 POSIX 进程组发送 SIGKILL、在 Windows 运行 `taskkill /T /F`，并在终止 PTY root 前后同步向已捕获及当前可观察的 terminal 身份发送信号；它们不会创建 Promise 或 timer，不改变宿主退出码与诊断，会分别包含每个目标的失败，也不会声称已经完全停稳。正常 dispose 仍使用上面的须等待温和路径。参见[宿主退出清理决策](../../../.agents/notes/implemented/bug-fix/2026-08-11-synchronous-subprocess-exit-cleanup.zh.md)。
 diff --git a/node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js b/node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js
-index 698efc9..58c824c 100644
 --- a/node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js
-@@ -1,6 +1,6 @@
+@@ -1,6 +1,7 @@
 -import { closeSync, constants, mkdtempSync, openSync, readFileSync, readSync, readdirSync, unlinkSync, writeSync } from "node:fs";
++import { createWindowsRecoveryFence } from './windows-recovery-fence.js';
 +import { accessSync, closeSync, constants, mkdtempSync, openSync, readFileSync, readSync, readdirSync, statSync, unlinkSync, writeSync } from "node:fs";
  import { access, stat } from "node:fs/promises";
 -import { delimiter, extname, isAbsolute, join, resolve } from "node:path";
@@ -35,7 +35,7 @@ index 698efc9..58c824c 100644
  import * as nodePty from "node-pty";
  import { SubprocessRuntime, scrubbedParentEnv } from "@deepseek-ai/dsh-subprocess";
  import { execFileSync, spawn, spawnSync } from "node:child_process";
-@@ -771,6 +771,39 @@ function signalTree(platform, pid, sig, child, taskkill) {
+@@ -771,6 +772,39 @@
  		} catch {}
  	}
  }
@@ -75,7 +75,7 @@ index 698efc9..58c824c 100644
  /**
  * Spawn one isolated detached process tree with the spec's per-stream stdio
  * dispositions. Runtime exits resolve `done` as {@link SubprocessOutcome};
-@@ -787,13 +820,18 @@ function spawnSubprocess(spec, internals = {}) {
+@@ -787,13 +821,18 @@
  	const taskkill = internals.taskkill ?? taskkillProcessTree;
  	const linuxGroupHasLiveMembers = internals.linuxProcessGroupHasLiveMembers ?? linuxProcessGroupHasLiveMembers;
  	if (spec.signal?.aborted) throw new Error(`aborted before spawn: ${String(spec.signal.reason ?? "aborted")}`);
@@ -96,7 +96,7 @@ index 698efc9..58c824c 100644
  	const child = spawn(program, args, {
  		cwd: spec.cwd,
  		env,
-@@ -802,7 +840,8 @@ function spawnSubprocess(spec, internals = {}) {
+@@ -802,8 +841,14 @@
  			outMode === "inherit" ? "inherit" : "pipe",
  			errMode === "inherit" ? "inherit" : "pipe"
  		],
@@ -104,5 +104,228 @@ index 698efc9..58c824c 100644
 +		detached: platform !== "win32",
 +		windowsVerbatimArguments
  	});
++	let recoveryFence;
++	if (spec.recoveryFence === true && platform === "win32") {
++		try { recoveryFence = createWindowsRecoveryFence(child.pid, internals.recoveryFenceNative, internals.recoveryFencePolicy); }
++		catch (error) { recoveryFence = { quiesceForRecovery: async () => ({ confirmed: false, processTreeStopped: false, reason: String(error?.message ?? error) }), releaseWhenEmpty() {} }; }
++	}
  	const collectStream = (mode, stream, label) => {
  		if (!isCollect(mode) || stream === null) return void 0;
+ 		const collector = new OutputCollector(mode.maxBytes, mode.spill?.maxBytes, label, spillDir);
+@@ -912,6 +957,7 @@
+ 			spec.signal?.removeEventListener("abort", onAbort);
+ 		}
+ 	});
++	done.then(() => recoveryFence?.releaseWhenEmpty(), () => recoveryFence?.releaseWhenEmpty());
+ 	const waitForExit = async (signal) => {
+ 		const observed = observeTreeExit();
+ 		if (treeExitObserved) return true;
+@@ -947,7 +993,8 @@
+ 		done,
+ 		terminate,
+ 		terminateForHostExit,
+-		waitForExit
++		waitForExit,
++		...(recoveryFence ? { quiesceForRecovery: () => recoveryFence.quiesceForRecovery() } : {})
+ 	};
+ }
+ //#endregion
+diff --git a/node_modules/@deepseek-ai/dsh-subprocess-local/lib/windows-recovery-fence.js b/node_modules/@deepseek-ai/dsh-subprocess-local/lib/windows-recovery-fence.js
+new file mode 100644
+--- /dev/null
++++ b/node_modules/@deepseek-ai/dsh-subprocess-local/lib/windows-recovery-fence.js
+@@ -0,0 +1,194 @@
++import koffi from 'koffi'
++
++// Recovery-only containment, established synchronously before the ACP handshake.
++// The protocol must not execute business tools before initialize/session/prompt.
++// Ordinary process teardown does not use this proof or change its semantics.
++export function createWindowsRecoveryFence(rootPid, native = nativeWindowsFence(), policy = {}) {
++  const intervalMs = policy.intervalMs ?? 20
++  const timeoutMs = policy.timeoutMs ?? 10000
++  let job, root, reason, released = false, stopped = false, recovery, releaseTimer
++  const members = new Map()
++  const close = () => {
++    if (released) return
++    released = true
++    clearInterval(releaseTimer)
++    for (const member of members.values()) native.close(member.handle)
++    if (job) native.close(job)
++  }
++  const failed = message => ({ confirmed: false, processTreeStopped: false, reason: message })
++  const proof = () => ({ confirmed: true, processTreeStopped: true, method: 'windows-job' })
++  const empty = () => {
++    if (stopped) return true
++    if (native.activeProcesses(job) !== 0) return false
++    // Handles, rather than recycled numeric PIDs, identify the captured processes.
++    if ([...members.values()].some(member => native.isActive(member.handle))) return false
++    stopped = true
++    return true
++  }
++  try {
++    if (!Number.isInteger(rootPid) || rootPid <= 0) throw new Error('invalid root process')
++    job = native.createJob()
++    root = native.open(rootPid)
++    if (!root) throw new Error('root identity unavailable')
++    members.set(rootPid, root)
++    if (!native.isActive(root.handle)) throw new Error('root already exited')
++    native.assign(job, root.handle)
++    let previous, stable = false
++    for (let pass = 0; pass < 4; pass++) {
++      if (!native.isActive(root.handle)) throw new Error('root exited before containment was established')
++      const table = native.snapshot()
++      if (!Array.isArray(table) || !table.some(entry => entry.pid === rootPid)) throw new Error('root missing from process snapshot')
++      const children = new Map()
++      for (const entry of table) {
++        const list = children.get(entry.parentPid) ?? []
++        list.push(entry.pid); children.set(entry.parentPid, list)
++      }
++      const observed = new Set(), identities = []
++      const visit = (pid, parent) => {
++        if (observed.has(pid)) throw new Error('ambiguous process ancestry')
++        observed.add(pid)
++        let member = members.get(pid)
++        const current = native.open(pid)
++        if (!current) throw new Error('process identity is unreadable')
++        if (member) {
++          native.close(current.handle)
++          if (member.started !== current.started) throw new Error('process identity changed during containment')
++        } else {
++          member = current
++          members.set(pid, member)
++        }
++        if (parent && BigInt(member.started) < BigInt(parent.started)) throw new Error('stale parent process identity')
++        if (native.isActive(member.handle)) native.assign(job, member.handle)
++        identities.push(`${pid}:${member.started}`)
++        for (const childPid of children.get(pid) ?? []) visit(childPid, member)
++      }
++      visit(rootPid)
++      const signature = identities.sort().join(',')
++      if (signature === previous) { stable = true; break }
++      previous = signature
++    }
++    if (!stable || !native.isActive(root.handle)) throw new Error('startup process ancestry did not stabilize')
++    // Confirm query rights now; query failures must not later be mistaken for zero.
++    native.activeProcesses(job)
++  } catch (error) {
++    reason = String(error?.message ?? error)
++    close()
++  }
++  return {
++    supported: !reason,
++    reason,
++    quiesceForRecovery() {
++      if (reason) return Promise.resolve(failed(reason))
++      if (stopped) return Promise.resolve(proof())
++      if (recovery) return recovery
++      recovery = (async () => {
++        try {
++          native.terminate(job)
++          const deadline = Date.now() + timeoutMs
++          while (!empty()) {
++            if (Date.now() >= deadline) return failed('Windows job did not become quiescent before the deadline')
++            await new Promise(resolve => setTimeout(resolve, intervalMs))
++          }
++          close()
++          return proof()
++        } catch (error) { return failed(String(error?.message ?? error)) }
++      })().finally(() => {
++        // A failed observation must not prevent an explicit stop from checking
++        // the same owned Job again. Concurrent calls still share one attempt.
++        if (!stopped) recovery = undefined
++      })
++      return recovery
++    },
++    releaseWhenEmpty() {
++      if (reason || released || releaseTimer) return
++      const inspect = () => {
++        try { if (empty()) close() } catch { /* Unknown is never an empty job. Keep the proof handle. */ }
++      }
++      inspect()
++      if (!released) { releaseTimer = setInterval(inspect, intervalMs); releaseTimer.unref?.() }
++    },
++  }
++}
++
++let bindings
++function nativeWindowsFence() {
++  if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Windows recovery containment requires Windows x64')
++  if (!bindings) {
++    const kernel = koffi.load('kernel32.dll')
++    const bind = (name, result, args) => kernel.func('__stdcall', name, result, args)
++    bindings = {
++      create: bind('CreateJobObjectW', 'void *', ['void *', 'void *']),
++      assign: bind('AssignProcessToJobObject', 'int', ['void *', 'void *']),
++      inJob: bind('IsProcessInJob', 'int', ['void *', 'void *', 'void *']),
++      query: bind('QueryInformationJobObject', 'int', ['void *', 'int', 'void *', 'uint32', 'void *']),
++      terminate: bind('TerminateJobObject', 'int', ['void *', 'uint32']),
++      open: bind('OpenProcess', 'void *', ['uint32', 'int', 'uint32']),
++      times: bind('GetProcessTimes', 'int', ['void *', 'void *', 'void *', 'void *', 'void *']),
++      wait: bind('WaitForSingleObject', 'uint32', ['void *', 'uint32']),
++      snapshot: bind('CreateToolhelp32Snapshot', 'void *', ['uint32', 'uint32']),
++      first: bind('Process32FirstW', 'int', ['void *', 'void *']),
++      next: bind('Process32NextW', 'int', ['void *', 'void *']),
++      error: bind('GetLastError', 'uint32', []),
++      close: bind('CloseHandle', 'int', ['void *']),
++    }
++  }
++  const api = bindings
++  const valid = handle => handle != null && handle !== 0n && handle !== -1n && handle !== 18446744073709551615n
++  const checked = (ok, operation) => { if (!ok) throw new Error(`${operation} failed (${api.error()})`) }
++  const close = handle => { if (valid(handle)) api.close(handle) }
++  return {
++    createJob() {
++      const job = api.create(null, null)
++      if (!valid(job)) throw new Error(`CreateJobObjectW failed (${api.error()})`)
++      // A private unnamed Job: no BREAKAWAY flags and no KILL_ON_JOB_CLOSE.
++      return job
++    },
++    open(pid) {
++      const handle = api.open(0x101101, 0, pid) // synchronize, query, set-quota, terminate
++      if (!valid(handle)) throw new Error(`OpenProcess failed (${api.error()})`)
++      try {
++        const creation = Buffer.alloc(8)
++        checked(api.times(handle, creation, Buffer.alloc(8), Buffer.alloc(8), Buffer.alloc(8)), 'GetProcessTimes')
++        return { handle, started: creation.readBigUInt64LE().toString() }
++      } catch (error) { close(handle); throw error }
++    },
++    isActive(handle) {
++      const state = api.wait(handle, 0)
++      if (state === 0) return false
++      if (state === 258) return true
++      throw new Error(`WaitForSingleObject failed (${state})`)
++    },
++    assign(job, processHandle) {
++      const present = Buffer.alloc(4)
++      checked(api.inJob(processHandle, job, present), 'IsProcessInJob')
++      if (present.readUInt32LE() === 0) checked(api.assign(job, processHandle), 'AssignProcessToJobObject')
++    },
++    activeProcesses(job) {
++      // Microsoft JOBOBJECT_BASIC_ACCOUNTING_INFORMATION: four LARGE_INTEGERs
++      // (32 bytes), TotalPageFaultCount DWORD, TotalProcesses DWORD, then
++      // ActiveProcesses DWORD at offset 40; total structure size is 48.
++      const accounting = Buffer.alloc(48)
++      checked(api.query(job, 1, accounting, accounting.length, null), 'QueryInformationJobObject')
++      return accounting.readUInt32LE(40)
++    },
++    terminate(job) { checked(api.terminate(job, 1223), 'TerminateJobObject') },
++    snapshot() {
++      const handle = api.snapshot(2, 0)
++      if (!valid(handle)) throw new Error(`CreateToolhelp32Snapshot failed (${api.error()})`)
++      try {
++        // Windows x64 PROCESSENTRY32W: ULONG_PTR introduces alignment at 16;
++        // th32ProcessID is at 8, th32ParentProcessID at 32, WCHAR[260] at 44.
++        const entry = Buffer.alloc(568); entry.writeUInt32LE(entry.length)
++        const rows = []
++        let ok = api.first(handle, entry)
++        while (ok) {
++          rows.push({ pid: entry.readUInt32LE(8), parentPid: entry.readUInt32LE(32) })
++          ok = api.next(handle, entry)
++        }
++        if (api.error() !== 18) throw new Error('Process enumeration ended without ERROR_NO_MORE_FILES')
++        return rows
++      } finally { close(handle) }
++    },
++    close,
++  }
++}

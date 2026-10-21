@@ -1,9 +1,9 @@
 import { createInterface } from 'node:readline'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 const mode = process.env.PANGEA_FIXTURE_MODE ?? 'ok'
 if (process.argv.includes('--version')) { process.stdout.write('acp-fixture 1.0\n'); process.exit(0) }
 const send = value => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...value })}\n`)
-let sessionId = 'remote-fixture', pendingPrompt, promptCount = 0
+let sessionId = 'remote-fixture', pendingPrompt, promptCount = 0, descendant
 const update = value => send({ method: 'session/update', params: { sessionId, update: value } })
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line)
@@ -15,9 +15,9 @@ createInterface({ input: process.stdin }).on('line', line => {
     else if (request.params.sessionId !== 'original-remote') send({ id: request.id, error: { code: -32001, message: 'wrong session' } })
     else {
       sessionId = request.params.sessionId
-      if (mode === 'resume-replay') {
+      if (mode === 'resume-replay' || mode === 'resume-replay-pending') {
         update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Earlier conversation' } })
-        update({ sessionUpdate: 'tool_call', toolCallId: 'earlier-tool', title: 'earlier tool', status: 'completed' })
+        update({ sessionUpdate: 'tool_call', toolCallId: 'earlier-tool', title: 'earlier tool', kind: 'edit', status: mode === 'resume-replay-pending' ? 'pending' : 'completed', rawInput: {} })
       }
       reply({})
     }
@@ -44,7 +44,24 @@ createInterface({ input: process.stdin }).on('line', line => {
   promptCount++
   if (mode.startsWith('lifecycle-')) {
     const pending = (toolCallId, extra = {}) => update({ sessionUpdate: 'tool_call', toolCallId, title: 'Terminal', kind: 'execute', status: 'pending', rawInput: {}, ...extra })
-    if (mode === 'lifecycle-empty-pending') {
+    if (mode === 'lifecycle-codeagent-edit-pending' || mode.startsWith('lifecycle-codeagent-edit-tree')) {
+      const report = () => {
+        for (const toolCallId of ['chatcmpl-tool-a5d001413b8ce96b', 'chatcmpl-tool-9d4de9f2c34f4134', 'chatcmpl-tool-984abc3da7ac9c06', 'chatcmpl-tool-9f3f38a0ce05f4be']) pending(toolCallId, { title: 'Edit', kind: 'edit' })
+        // Match the reported 208 accepted events without inventing a terminal
+        // update for any of the four unresolved IDs.
+        for (let index = 0; index < 102; index++) {
+          pending(`finished-${index}`, { kind: 'read' })
+          update({ sessionUpdate: 'tool_call_update', toolCallId: `finished-${index}`, status: 'completed' })
+        }
+        if (descendant) update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: JSON.stringify({ descendant_pid: descendant.pid }) } })
+        reply({ stopReason: 'end_turn' })
+      }
+      if (mode.startsWith('lifecycle-codeagent-edit-tree')) {
+        descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000); process.send("ready")'], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] })
+        descendant.once('message', report)
+      } else report()
+      return
+    } else if (mode === 'lifecycle-empty-pending') {
       pending('chatcmpl-tool-a873a78f7e539d5e')
       pending('chatcmpl-tool-9e4b74cbae3ac799')
       pending('completed-tool', { status: 'in_progress', rawInput: { command: 'PRIVATE_COMMAND_BODY' } })
@@ -101,4 +118,8 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (mode === 'delayed') setTimeout(message, 80)
   else message()
   reply({ stopReason: 'end_turn' })
-}).on('close', () => process.exit(0))
+}).on('close', () => {
+  // Keep the owned descendant alive across EOF so the provider must use its
+  // managed-tree teardown, rather than proving only the protocol PID exited.
+  if (!descendant || mode === 'lifecycle-codeagent-edit-tree-root-exit') process.exit(0)
+})
