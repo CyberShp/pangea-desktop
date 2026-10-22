@@ -87,6 +87,20 @@ await createZip(appDirectory, outputPath, [
   'resources/update/pangea-package-manifest.json',
   'resources/update/pangea-package-manifest.json.sig'
 ])
+// Publish a small signed discovery document beside the immutable full package.
+const policy = JSON.parse(await readFile(new URL('../build/portable-update-policy.json', import.meta.url), 'utf8'))
+const packageDigest = createHash('sha256')
+for await (const chunk of createReadStream(outputPath)) packageDigest.update(chunk)
+const onlineManifest = Buffer.from(`${JSON.stringify({
+  schema_version: 1, product: 'PANGEA Desktop', version: packageVersion,
+  channel: packageChannel, platform: 'win32', arch: 'x64',
+  minimum_source_version: policy.minimum_source_version,
+  components: componentManifest.components,
+  package: { name: expectedName, size: (await stat(outputPath)).size, sha256: packageDigest.digest('hex') }
+}, null, 2)}\n`)
+const onlinePath = path.join(path.dirname(outputPath), 'pangea-desktop-update.json')
+await writeFile(onlinePath, onlineManifest)
+await writeFile(`${onlinePath}.sig`, `${sign(null, onlineManifest, privateKey).toString('base64')}\n`)
 console.log(`Signed portable package created at ${outputPath}`)
 
 async function listFiles(root) {

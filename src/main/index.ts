@@ -56,6 +56,7 @@ import {
   type WindowFocusIntent
 } from './window-raise'
 import {
+  checkForOnlineUpdate,
   importPortableUpdatePackage,
   handleInterruptedPortableUpdate,
   registerUpdateHandlers,
@@ -778,6 +779,9 @@ async function executeDesktopMenuCommand(command: DesktopMenuCommand): Promise<n
   const contents = window.webContents
 
   switch (command) {
+    case 'check-for-updates':
+      await checkForOnlineUpdate(true)
+      return
     case 'import-update-package':
       await importPortableUpdatePackage()
       break
@@ -1243,6 +1247,11 @@ function installMenu(): void {
       submenu: [
         ...(process.platform === 'win32'
           ? [
+              {
+                label: isChinese ? '检查在线更新…' : 'Check for Updates…',
+                accelerator: 'CmdOrCtrl+Shift+U',
+                click: () => void checkForOnlineUpdate(true).catch(showUnexpectedError)
+              },
               {
                 label: isChinese ? '导入升级包…' : 'Import Update Package…',
                 accelerator: 'CmdOrCtrl+U',

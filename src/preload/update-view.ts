@@ -4,7 +4,7 @@ export type UpdateLocale = 'en' | 'zh'
 
 export function shouldShowUpdate(status: UpdateStatus): boolean {
   if (['downloading', 'downloaded'].includes(status.phase)) return true
-  return status.manual && ['checking', 'install-error', 'error', 'unsupported'].includes(status.phase)
+  return status.manual && ['checking', 'up-to-date', 'install-error', 'error', 'unsupported'].includes(status.phase)
 }
 
 export function isUpdateDismissed(
@@ -33,14 +33,16 @@ export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): Upda
   const version = status.availableVersion ? `v${status.availableVersion}` : ''
 
   switch (status.phase) {
+    case 'up-to-date':
+      return { title: zh ? '已是最新版本' : 'Up to date', description: `PANGEA Desktop v${status.currentVersion}` }
     case 'checking':
       return {
-        title: zh ? '正在读取升级包' : 'Reading update package',
+        title: status.source === 'github' ? (zh ? '正在检查在线更新' : 'Checking for updates') : (zh ? '正在读取升级包' : 'Reading update package'),
         description: zh ? `当前版本 v${status.currentVersion}` : `Current version v${status.currentVersion}`
       }
     case 'downloading':
       return {
-        title: zh ? '正在校验升级包' : 'Verifying update package',
+        title: status.activity === 'download' ? (zh ? '正在下载升级包' : 'Downloading update') : (zh ? '正在校验升级包' : 'Verifying update package'),
         description: zh ? `${version} · ${Math.round(status.percent ?? 0)}%` : `${version} · ${Math.round(status.percent ?? 0)}%`
       }
     case 'downloaded':
@@ -68,8 +70,8 @@ export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): Upda
       }
     case 'error':
       return {
-        title: zh ? '升级包校验失败' : 'Update package verification failed',
-        description: zh ? '请选择由 PANGEA Desktop 构建生成的完整包或补丁包。' : 'Choose a full or patch package produced by the PANGEA Desktop build.'
+        title: status.source === 'github' ? (zh ? '在线更新失败' : 'Online update failed') : (zh ? '升级包校验失败' : 'Update package verification failed'),
+        description: status.source === 'github' ? (zh ? '可通过菜单重新检查更新，或导入离线升级包。' : 'Retry from the menu or import an offline package.') : zh ? '请选择由 PANGEA Desktop 构建生成的完整包或补丁包。' : 'Choose a full or patch package produced by the PANGEA Desktop build.'
       }
     case 'idle':
       return { title: '', description: '' }
@@ -81,10 +83,14 @@ export function updateMessage(status: UpdateStatus, locale: UpdateLocale): strin
   const version = status.availableVersion ? ` ${status.availableVersion}` : ''
 
   switch (status.phase) {
+    case 'up-to-date':
+      return zh ? '已是最新版本' : 'Up to date'
     case 'checking':
+      if (status.source === 'github') return zh ? '正在检查在线更新…' : 'Checking for updates…'
       return zh ? '正在读取升级包…' : 'Reading update package…'
     case 'downloading': {
       const percent = Math.round(status.percent ?? 0)
+      if (status.activity === 'download') return zh ? `正在下载升级包 ${percent}%` : `Downloading update ${percent}%`
       return zh ? `正在校验升级包 ${percent}%` : `Verifying update package ${percent}%`
     }
     case 'downloaded':
@@ -98,6 +104,7 @@ export function updateMessage(status: UpdateStatus, locale: UpdateLocale): strin
     case 'unsupported':
       return zh ? '当前版本无法导入升级包' : 'Package import is unavailable in this build'
     case 'error':
+      if (status.source === 'github') return zh ? '在线更新失败' : 'Online update failed'
       return zh ? '升级包校验失败' : 'Update package verification failed'
     case 'idle':
       return ''

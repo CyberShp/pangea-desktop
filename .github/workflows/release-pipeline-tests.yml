@@ -6,6 +6,9 @@ on:
       - .github/workflows/release*.yml
       - scripts/*release*.mjs
       - scripts/*historical*.mjs
+      - scripts/create-signed-portable-package.mjs
+      - test/github-update.test.ts
+      - test/online-update-integration.test.ts
       - scripts/create-signed-portable-patch.mjs
       - build/portable-update-policy.json
       - build/apply-portable-update.ps1
@@ -26,6 +29,9 @@ on:
       - .github/workflows/release*.yml
       - scripts/*release*.mjs
       - scripts/*historical*.mjs
+      - scripts/create-signed-portable-package.mjs
+      - test/github-update.test.ts
+      - test/online-update-integration.test.ts
       - scripts/create-signed-portable-patch.mjs
       - build/portable-update-policy.json
       - build/apply-portable-update.ps1
@@ -57,6 +63,8 @@ jobs:
       - name: Verify trust, discovery, retry and immutable publication logic
         # gh and pwsh are mocked by CLI tests; this job cannot publish a release.
         run: npm run test:release-tools
+      - name: Verify online discovery, signed download and install handoff
+        run: npx --no-install vitest run test/github-update.test.ts test/online-update-integration.test.ts test/update-state.test.ts test/update-ui.test.ts test/desktop-bridge.test.ts
       - name: Verify existing package and patch contracts
         run: npx --no-install vitest run test/release.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts test/portable-upgrade-policy.test.ts
   windows-updater:

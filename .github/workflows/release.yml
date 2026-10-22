@@ -239,7 +239,9 @@ jobs:
           $PackageName = "pangea-desktop-$env:RELEASE_VERSION-windows-x64-portable.zip"
           $PackagePath = (Resolve-Path "dist/$PackageName").Path
           $HashPath = (Resolve-Path "dist/$PackageName.sha256").Path
-          $ReleaseAssets = @($PackagePath, $HashPath)
+          $OnlineManifest = (Resolve-Path 'dist/pangea-desktop-update.json').Path
+          $OnlineSignature = (Resolve-Path 'dist/pangea-desktop-update.json.sig').Path
+          $ReleaseAssets = @($PackagePath, $HashPath, $OnlineManifest, $OnlineSignature)
           $PatchAssets = @(node scripts/list-release-patch-assets.mjs --version $env:RELEASE_VERSION --directory ./dist)
           if ($LASTEXITCODE -ne 0) { throw 'Historical patch publication validation failed.' }
           $ReleaseAssets += $PatchAssets
@@ -253,7 +255,7 @@ jobs:
           Minimum supported in-app upgrade source: $MinimumUpgradeSource. Each patch requires its exact base version.
           Older installations require a separate complete-package installation; preserve their original directory and user data.
           "@
-          $CreateArguments = @('release', 'create', $env:RELEASE_TAG)
+          $CreateArguments = @('release', 'create', $env:RELEASE_TAG, '--draft')
           $CreateArguments += $ReleaseAssets
           $CreateArguments += @(
             '--repo', $env:GITHUB_REPOSITORY,
@@ -266,6 +268,9 @@ jobs:
           }
           & gh @CreateArguments
           if ($LASTEXITCODE -ne 0) { throw "GitHub release publish failed with exit code $LASTEXITCODE." }
+          # Discovery cannot see a partially uploaded release.
+          & gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Release assets are uploaded but draft publication failed.' }
 
       - name: Add verified patches to existing release
         if: steps.release_meta.outputs.mode == 'backfill'

@@ -15,6 +15,7 @@ export interface RuntimeSnapshot {
 
 export type UpdatePhase =
   | 'idle'
+  | 'up-to-date'
   | 'checking'
   | 'downloading'
   | 'downloaded'
@@ -25,6 +26,8 @@ export type UpdatePhase =
 export interface UpdateStatus {
   phase: UpdatePhase
   currentVersion: string
+  source?: 'github'
+  activity?: 'download' | 'verify'
   availableVersion?: string
   packageType?: 'full' | 'patch'
   packageName?: string
