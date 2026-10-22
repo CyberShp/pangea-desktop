@@ -34,9 +34,9 @@
 
 ## 当前状态
 
-三阶段已集成并完成首次推送。真实 Run 和本轮原生、导出及离线检查已完成，独立源码核对确认分析质量未通过；完整大 JSON 的浏览器正文可读性也未验通过。验收证据位于 `runtime-validation/analysis-quality-20261022/`。第二次推送以验收通过为条件，本轮不放行。
+三阶段已集成并完成首次推送。真实 Run 和本轮原生、导出及离线检查已完成，独立源码核对确认分析质量未通过；完整大 JSON 的浏览器正文可读性也未验通过。验收证据位于 `runtime-validation/analysis-quality-20261022/`。用户随后明确授权推送验收期间的修复，推送授权不改变本轮验收结论。
 
-已推送并核对的三个 `langgraph` 提交分别为 Agent `58e3be11f1607336ee4a0e54b2e9edb5c4b55efc`、插件 `79175f1ae2e5b646cce1529384b6bd9ac50c64fb`、Desktop `35d8f7c7c49b47e1792de2a5bb053bc2ec922574`。首次推送之后的修复保存在本地，当前组件锁定指向 Agent `d722daf`、插件 `6749573`。
+首次已推送并核对的三个 `langgraph` 提交分别为 Agent `58e3be11f1607336ee4a0e54b2e9edb5c4b55efc`、插件 `79175f1ae2e5b646cce1529384b6bd9ac50c64fb`、Desktop `35d8f7c7c49b47e1792de2a5bb053bc2ec922574`。验收修复基线为 Agent `d722daf`、插件 `6749573`；本次推送前继续集成远端新增提交，组件锁定使用包含双方改动的合并版本。
 
 首次推送检查点：实际 Run `dperf-tcp-http-http-261022-01` 已通过隔离 Desktop 发起，冻结并实际派发模型为中国区 `minimax-cn-coding-plan/MiniMax-M3`。源码快照包含 15 个 C 文件及 37 个头文件，52 项哈希与原始源码一致；请求中的 README/LICENSE 未纳入源码快照。164 项运行代码哈希与审核版一致。规划已完成并拆分为 9 个单元，源码分析正在执行；这些运行信息不代表验收已通过。
 
@@ -93,4 +93,12 @@ Reviewer 已读到并正确记录真实 `-c/-t` 入口，却未把该依据与�
 
 关闭本次测试服务后，最终导出包的独立离线浏览器实测为：DOM 0.627 秒、首屏截图 0.714 秒、60 张图加载完成 0.733 秒；0 HTTP 请求，首尾三类图均有截图，版本、原文及流程事实折叠区均能展开。完整 `facts.json` 链接实际导航到本地文件且完成 DOM 加载，但 53.45 MB JSON 新页截图在 30 秒超时；原始测试保留 `status=failed`。因此大 JSON 浏览器正文可读性尚未验通过，不能以文件哈希一致替代，证据为 `native-exports/offline-performance-final/offline-performance.json`。
 
-独立验收与主 Agent 的最终结论一致：`SEMANTIC FAIL`，第二次推送不放行。完整结论见 `independent-final-acceptance.md` / `.json` 和 `release-gate.json`。本次测试 Desktop、服务与浏览器助手均已退出，用户原有实例的进程、路径和创建时间保持不变，记录于 `independent-final-cleanup.json`。三个远端 `langgraph` 已再次核对为首次推送版本；后续修复和组件锁定保留为本地提交。
+独立验收与主 Agent 的最终结论一致：`SEMANTIC FAIL`。在用户进一步授权前，第二次推送暂缓；用户随后明确要求推送验收期间的修复。完整验收结论见 `independent-final-acceptance.md` / `.json`，推送状态单独记录于 `release-gate.json`。本次测试 Desktop、服务与浏览器助手均已退出，用户原有实例的进程、路径和创建时间保持不变，记录于 `independent-final-cleanup.json`。
+
+## 验收修复集成与推送授权
+
+用户于 2026-10-22 明确要求推送验收期间的修复。推送前集成远端新增的场景化用例规则、紧凑 worker 续接、创建界面调整和在线更新；保留双方改动。Agent 合并提交为 `aeb0d95`，插件合并提交为 `5469052`，Desktop 组件锁同步指向这两个提交。此轮未重新运行模型分析，原有语义质量失败及大 JSON 正文未验通过的结论继续有效。
+
+合并后的验证：Agent 目标合同、场景规则、图合同、当前提示和分页游标共 25 项通过；插件 companion 769 通过/8 跳过、adapter 38 通过、资产插件 108 通过/1 跳过；Desktop 8 个相关测试文件共 55 项通过、staging 1 项通过，类型检查和 Electron 构建通过。日志使用 `push-integration-*` 前缀。
+
+插件首轮全量中一项清理时序测试失败，独立运行 30 项及不改代码的全量复跑通过；负载相关原因仅为推测，原始失败日志保留。Desktop 首轮的恢复路径断言重复出现旧基线中的 Windows 短路径/长路径差异，在本次子进程使用隔离临时目录后 55 项全过，未修改产品逻辑或测试断言。此次工程回归不替代模型产物的语义验收，也不包含正式包发布或在线升级端到端验收。

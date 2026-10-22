@@ -11,6 +11,7 @@ export interface DshDesktopBridge {
   productWorkspaceReady(): Promise<{ ok: boolean }>
   restartHarness(): Promise<{ ok: boolean }>
   getUpdateStatus(): Promise<UpdateStatus>
+  checkForUpdates(): Promise<UpdateStatus>
   importUpdatePackage(): Promise<UpdateStatus>
   installUpdate(): Promise<UpdateInstallResult>
   subscribeUpdateStatus(listener: (status: UpdateStatus) => void): number
@@ -30,6 +31,7 @@ export function createDesktopBridge(ipc: DesktopBridgeIpc): Readonly<DshDesktopB
       ipc.invoke('harness:restart') as Promise<{ ok: boolean }>,
     getUpdateStatus: (): Promise<UpdateStatus> =>
       ipc.invoke('updates:status') as Promise<UpdateStatus>,
+    checkForUpdates: (): Promise<UpdateStatus> => ipc.invoke('updates:check') as Promise<UpdateStatus>,
     importUpdatePackage: (): Promise<UpdateStatus> =>
       ipc.invoke('updates:import') as Promise<UpdateStatus>,
     installUpdate: (): Promise<UpdateInstallResult> => ipc.invoke('updates:install') as Promise<UpdateInstallResult>,

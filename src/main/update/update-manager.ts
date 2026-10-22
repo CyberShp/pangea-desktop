@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, type OpenDialogOptions } from 'electron'
 import type { UpdateInstallResult, UpdateStatus } from '../../shared/contracts'
 import { stagePortablePackage, type StagedPortablePackage } from './portable-package-validator'
 import { isPortablePatchArchive, PortablePatchBaseVersionMismatch, stagePortablePatch, type StagedPortablePatch } from './portable-patch-validator'
+import { GitHubUpdateClient } from './github-update'
+import { assertSupportedPortableUpgradeSource } from './portable-update'
 import type { PortableUpdateConfig } from './portable-update'
 import { initialUpdateStatus, reduceUpdateStatus, type UpdateStateEvent } from './update-state'
 import { launchPortableHelper } from './launch-portable-helper'
@@ -31,6 +33,8 @@ let status = initialUpdateStatus(app.getVersion())
 type ReleaseUpdateAdmission = () => Promise<void>
 let prepareToInstall: (() => Promise<void | ReleaseUpdateAdmission>) | undefined
 let handlersRegistered = false
+let onlineController: AbortController | undefined
+let startupTimer: ReturnType<typeof setTimeout> | undefined
 let importing = false
 let installing = false
 let loadedConfig: LoadedUpdateConfig | undefined
@@ -47,6 +51,7 @@ export function registerUpdateHandlers(): void {
   if (handlersRegistered) return
   handlersRegistered = true
   ipcMain.handle('updates:status', () => getUpdateStatus())
+  ipcMain.handle('updates:check', () => checkForOnlineUpdate(true))
   ipcMain.handle('updates:import', () => importPortableUpdatePackage())
   ipcMain.handle('updates:install', () => installImportedUpdate())
 }
@@ -55,6 +60,73 @@ export function startUpdateManager(options: { prepareToInstall: () => Promise<vo
   prepareToInstall = options.prepareToInstall
   loadedConfig = loadUpdateConfig()
   restoreLastUpdateFailure()
+  if (startupTimer) clearTimeout(startupTimer)
+  if (loadedConfig && app.isPackaged && process.platform === 'win32' && process.arch === 'x64' && status.phase !== 'install-error') {
+    startupTimer = setTimeout(() => { void checkForOnlineUpdate(false) }, 15_000)
+    startupTimer.unref()
+  }
+}
+
+/** Download and local import share a single staging/install lock and trust boundary. */
+export async function checkForOnlineUpdate(manual = true): Promise<UpdateStatus> {
+  if (importing || installing) return getUpdateStatus()
+  if (status.phase === 'downloaded' && stagedPackage) {
+    // Explicit checking also reopens a previously dismissed ready card.
+    const ready = getUpdateStatus()
+    transition({ type: 'check', manual, source: 'github' })
+    transition({ type: 'downloaded', version: ready.availableVersion!, packageType: ready.packageType, baseVersion: ready.baseVersion })
+    return getUpdateStatus()
+  }
+  if (!canImportPortableUpdate(app.isPackaged, process.platform) || process.arch !== 'x64') {
+    transition({ type: 'unsupported', message: '在线升级仅支持已打包的 Windows x64 版本。' }, manual)
+    return getUpdateStatus()
+  }
+  const config = loadedConfig ?? loadUpdateConfig()
+  if (!config) {
+    transition({ type: 'unsupported', message: '当前版本未配置升级包校验密钥。' }, manual)
+    return getUpdateStatus()
+  }
+  importing = true
+  const controller = new AbortController()
+  onlineController = controller
+  transition({ type: 'check', manual, source: 'github' })
+  try {
+    assertSupportedPortableUpgradeSource(app.getVersion())
+    const client = new GitHubUpdateClient((url, init) => net.fetch(url, init), controller.signal)
+    const update = await client.check(app.getVersion(), config.publicKeyPem)
+    if (!update) {
+      transition({ type: 'up-to-date' })
+      return getUpdateStatus()
+    }
+    await clearStagedPackage()
+    const updatesRoot = join(app.getPath('userData'), 'updates')
+    await mkdir(updatesRoot, { recursive: true })
+    const root = await mkdtemp(join(updatesRoot, 'online-'))
+    stagedRoot = root
+    const sourcePath = join(root, 'download.zip')
+    transition({ type: 'online-download', version: update.version, packageName: update.asset.name })
+    await client.download(update, sourcePath, percent => transition({ type: 'progress', percent }))
+    transition({ type: 'verify' })
+    const staged = await stagePortablePackage({
+      sourcePath, destinationPath: join(root, 'pangea-desktop.zip'),
+      publicKeyPem: config.publicKeyPem, currentVersion: app.getVersion(),
+      onProgress: percent => transition({ type: 'progress', percent })
+    })
+    if (staged.manifest.version !== update.version || staged.packageSha256 !== update.sha256 || staged.packageSize !== update.asset.size) {
+      throw new Error('已验证的升级包与锁定的 Release 不一致。')
+    }
+    await rm(sourcePath, { force: true })
+    stagedPackage = staged
+    transition({ type: 'downloaded', version: staged.manifest.version, packageType: 'full' })
+  } catch (error) {
+    try { await clearStagedPackage() }
+    catch (cleanupError) { console.warn('[portable-updater] staging cleanup failed', cleanupError) }
+    transition({ type: 'error', message: controller.signal.aborted ? '在线更新已取消。' : errorMessage(error) }, manual)
+  } finally {
+    onlineController = undefined
+    importing = false
+  }
+  return getUpdateStatus()
 }
 
 /** Run before profile/workspace migration, so a normal launch cannot alter an
@@ -174,7 +246,8 @@ export async function installImportedUpdate(): Promise<UpdateInstallResult> {
   installing = true
   let releaseAdmission: void | ReleaseUpdateAdmission = undefined
   try {
-    releaseAdmission = await prepareToInstall?.()
+    if (!prepareToInstall) throw new Error('升级安装保护尚未就绪，请稍后重试。')
+    releaseAdmission = await prepareToInstall()
     await launchPortableUpdateHelper(imported)
     // Let the IPC reply render the confirmed handoff before Desktop exits.
     setTimeout(() => app.quit(), 1000)
@@ -257,6 +330,9 @@ function restoreLastUpdateFailure(): void {
 }
 
 export function stopUpdateManager(): void {
+  if (startupTimer) clearTimeout(startupTimer)
+  startupTimer = undefined
+  onlineController?.abort()
 }
 
 async function clearStagedPackage(): Promise<void> {

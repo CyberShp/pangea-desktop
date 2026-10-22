@@ -1,7 +1,10 @@
 import type { UpdateStatus } from '../../shared/contracts'
 
 export type UpdateStateEvent =
-  | { type: 'check'; manual: boolean; packageName?: string }
+  | { type: 'check'; manual: boolean; packageName?: string; source?: 'github' }
+  | { type: 'up-to-date' }
+  | { type: 'online-download'; version: string; packageName: string }
+  | { type: 'verify' }
   | { type: 'progress'; percent: number }
   | { type: 'downloaded'; version: string; packageType?: 'full' | 'patch'; baseVersion?: string }
   | { type: 'install-error'; message: string }
@@ -18,11 +21,17 @@ export function reduceUpdateStatus(
   current: UpdateStatus,
   event: UpdateStateEvent
 ): UpdateStatus {
-  const base = { currentVersion: current.currentVersion, manual: current.manual }
+  const base = { currentVersion: current.currentVersion, manual: current.manual, ...(current.source ? { source: current.source } : {}) }
 
   switch (event.type) {
     case 'check':
-      return { ...base, phase: 'checking', manual: event.manual, ...(event.packageName ? { packageName: event.packageName } : {}) }
+      return { ...base, phase: 'checking', manual: event.manual, source: event.source, ...(event.packageName ? { packageName: event.packageName } : {}) }
+    case 'up-to-date':
+      return { ...base, phase: 'up-to-date' }
+    case 'online-download':
+      return { ...current, phase: 'downloading', activity: 'download', percent: 0, availableVersion: event.version, packageName: event.packageName }
+    case 'verify':
+      return { ...current, phase: 'downloading', activity: 'verify', percent: 0 }
     case 'progress':
       return { ...current, phase: 'downloading', percent: clampPercent(event.percent) }
     case 'downloaded':

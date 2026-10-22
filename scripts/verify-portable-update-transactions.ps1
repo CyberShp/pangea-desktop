@@ -115,7 +115,7 @@ try {
     Write-Output "PASS: actual process termination at $Point; independent mutex, durable recovery and preserved data"
   }
 
-  foreach ($Attack in @('outside-workspace','wrong-owner','changed-install','changed-backup','file-at-install','linked-workspace','linked-journal')) {
+  foreach ($Attack in @('missing-owner','outside-workspace','wrong-owner','changed-install','changed-backup','file-at-install','linked-workspace','linked-journal')) {
     $Fixture=New-Fixture (Join-Path $TestRoot $Attack); $Context=Get-PortableTransactionContext $Fixture.Install
     $Lock=Enter-PortableUpdateLock $Context
     try {
@@ -123,6 +123,7 @@ try {
       $Outside=Join-Path $Fixture.Root 'unrelated'; [IO.Directory]::CreateDirectory($Outside) | Out-Null
       [IO.File]::WriteAllText((Join-Path $Outside 'precious.txt'),'untouched')
       switch ($Attack) {
+        'missing-owner' { [IO.File]::Delete((Join-Path $Fixture.Workspace '.pangea-update-owner.json')) }
         'outside-workspace' { $Transaction.workspace=$Outside; Write-PortableTransactionJson $Context.Journal $Transaction }
         'wrong-owner' { $Transaction.owner='untrusted-user'; Write-PortableTransactionJson $Context.Journal $Transaction }
         'changed-install' { Write-FixtureVersion $Fixture.Install '9.9.9' 'unrelated installation' }
@@ -145,6 +146,31 @@ try {
       if ([IO.File]::ReadAllText((Join-Path $Outside 'precious.txt')) -ne 'untouched') { throw 'Recovery modified unrelated data.' }
       Write-Output "PASS: $Attack is rejected without overwriting unrelated data"
     } finally { $Lock.Dispose() }
+  }
+
+  foreach ($Terminal in @('committed','restored')) {
+    foreach ($Cleanup in @('receipt','workspace')) {
+      $Fixture=New-Fixture (Join-Path $TestRoot "$Terminal-missing-$Cleanup"); $Context=Get-PortableTransactionContext $Fixture.Install
+      $Lock=Enter-PortableUpdateLock $Context
+      try {
+        $Transaction=Begin-FixtureTransaction $Fixture $Context
+        if ($Terminal -eq 'committed') {
+          Move-UpdateDirectory $Fixture.Install (Join-Path $Fixture.Workspace 'old')
+          Move-UpdateDirectory (Join-Path $Fixture.Workspace 'new') $Fixture.Install
+        }
+        Set-PortableTransactionState $Context $Transaction $Terminal
+        if ($Cleanup -eq 'receipt') { [IO.File]::Delete((Join-Path $Fixture.Workspace '.pangea-update-owner.json')) }
+        else { Remove-Item -LiteralPath $Fixture.Workspace -Recurse -Force }
+        $Recovered=Restore-PortableUpdateTransaction $Context $Transaction $Fixture.Data
+        if ($Recovered.state -ne $Terminal) { throw 'Completed transaction changed after temporary-file cleanup.' }
+        if ([IO.File]::Exists((Join-Path $Fixture.Workspace '.pangea-update-owner.json'))) { throw 'Recovery fabricated a missing ownership receipt.' }
+        Write-FixtureVersion $Fixture.Install '9.9.9' 'unrelated installation'
+        $Rejected=$false
+        try { Read-PortableUpdateTransaction $Context $Fixture.Data | Out-Null } catch { $Rejected=$true }
+        if (-not $Rejected) { throw 'Terminal journal accepted a changed installation.' }
+        Write-Output "PASS: $Terminal tolerates missing $Cleanup but rejects a changed installation"
+      } finally { $Lock.Dispose() }
+    }
   }
 
   $Fixture=New-Fixture (Join-Path $TestRoot 'restored-user-edits'); $Context=Get-PortableTransactionContext $Fixture.Install
