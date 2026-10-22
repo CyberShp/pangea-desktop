@@ -53,3 +53,5 @@ Desktop 未修改产品源码的 `a23cd31` 基线全量测试为 634 通过、3 
 该修复经主 Agent 审核及独立边界复查，插件最终回归 762 通过、8 跳过、0 失败；Python 当前警告与 closure 身份检查 7 项、观测恢复检查 12 项通过。相关日志为 `plugin-final-warning-tests.log`、`root-current-warning-final-tests.log`、`root-warning-observability-tests.log`。
 
 CLI 合同补充 compact 完整项、片段拼接和跨 action 记录身份的读取说明，未增加工具、门禁或自动回合。此更新来自真实 Reviewer 自写整理脚本遗漏记录的观察；本次活动 Run 保持最初运行代码，等待其自然完成后再同步修复并复验。首次运行的 manifest 已独立保存为 `initial-run-*`，后续展示版本不替换原始生成版本证据。以上工程修复和测试尚不代表真实分析质量验收通过。
+
+对照阶段随后持续重复错误的分页整理，首轮 9 单元和盲审均已完成，对照尚未提交结论。主 Agent 决定通过 Desktop 停止并保存检查点，更新已审核代码和 CLI 说明后续接原 Reviewer；此为显式恢复干预，须保留前后版本与会话证据。compact 游标现绑定提示投影版本，避免升级后旧游标在同 revision 下错指记录；原条件校验提示从头读取，2 项真实 Graph 分页回归通过，结果和历史未改写。
