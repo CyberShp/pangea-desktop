@@ -2173,15 +2173,23 @@ function Read-PortableUpdateTransaction {
       $Transaction.state -notin @('preparing','candidate_ready','original_move_pending','original_moved','activate_pending','activated','rollback_pending','rollback_displaced','restored','committed')) { throw 'The interrupted update transaction has invalid identity or state; no files were moved.' }
   $UpdatesPrefix=(Join-Path ([IO.Path]::GetFullPath($UserDataRoot)) 'updates') + [IO.Path]::DirectorySeparatorChar
   if (-not [IO.Path]::GetFullPath([string]$Transaction.plan_path).StartsWith($UpdatesPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'The interrupted update plan is outside this user profile.' }
+  if ($Transaction.base_identity.version -ne $Transaction.base_version -or ($Transaction.target_identity -and $Transaction.target_identity.version -ne $Transaction.target_version)) { throw 'The transaction version identities do not match.' }
+  # Completed transactions no longer depend on disposable recovery files.
+  # Confirm the installed version before accepting a terminal journal; never
+  # recreate an ownership receipt or mutate an unowned workspace.
+  if ($Transaction.state -in @('restored','committed')) {
+    $Identity=if ($Transaction.state -eq 'committed') { $Transaction.target_identity } else { $Transaction.base_identity }
+    if (-not (Test-PortableRootIdentity $Context.InstallRoot $Identity)) { throw 'Completed update installation identity is missing or changed; no files were moved.' }
+    return $Transaction
+  }
   $Workspace = [IO.Path]::GetFullPath([string]$Transaction.workspace)
   if ([IO.Path]::GetDirectoryName($Workspace) -ine $Context.Parent -or [IO.Path]::GetFileName($Workspace) -notmatch '^p-up-[1-9][0-9]*$') { throw 'The interrupted update workspace is outside its reserved location.' }
   foreach ($Path in @($Workspace, (Join-Path $Workspace 'old'), (Join-Path $Workspace 'new'), (Join-Path $Workspace 'failed'), (Join-Path $Workspace 'profile'))) { Assert-PortableTransactionPath $Path }
   $OwnerPath = Join-Path $Workspace '.pangea-update-owner.json'
   Assert-PortableTransactionPath $OwnerPath
-  if (-not [IO.File]::Exists($OwnerPath)) { throw 'The interrupted update workspace ownership record is missing.' }
+  if (-not [IO.File]::Exists($OwnerPath)) { throw "中断升级的工作区归属记录缺失，无法自动恢复。状态：$($Transaction.state)；事务：$($Context.Journal)；归属记录：$OwnerPath。所有版本目录保持不变。" }
   $Owner = [IO.File]::ReadAllText($OwnerPath) | ConvertFrom-Json
   if ($Owner.schema_version -ne 1 -or $Owner.id -ne $Transaction.id -or $Owner.install_root -ine $Context.InstallRoot -or $Owner.owner -ne $Transaction.owner) { throw 'The interrupted update workspace does not belong to this transaction.' }
-  if ($Transaction.base_identity.version -ne $Transaction.base_version -or ($Transaction.target_identity -and $Transaction.target_identity.version -ne $Transaction.target_version)) { throw 'The transaction version identities do not match.' }
   return $Transaction
 }
 
