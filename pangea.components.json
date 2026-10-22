@@ -8,7 +8,7 @@
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
     "branch": "langgraph",
-    "commit": "6a3c332ff8a875d92ecaac1d4e707b1032a4f60a"
+    "commit": "6749573afb8374f6ee5c00985ec6efcbfe8ae391"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
