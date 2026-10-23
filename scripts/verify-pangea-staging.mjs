@@ -1,7 +1,28 @@
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
+import { parseArgs } from 'node:util'
 
 const root = path.resolve(import.meta.dirname, '..')
+const { values } = parseArgs({
+  options: {
+    platform: { type: 'string', default: 'win32' },
+    arch: { type: 'string', default: 'x64' }
+  }
+})
+const { platform, arch } = values
+if (!((platform === 'win32' && arch === 'x64') || (platform === 'darwin' && arch === 'arm64'))) {
+  throw new Error(`Unsupported PANGEA staging target: ${platform}/${arch}`)
+}
+const platformRequired = platform === 'win32'
+  ? [
+      '.pangea-build/runtime/python/python.exe',
+      '.pangea-build/update/pangea-update.json',
+      'build/apply-portable-update.ps1'
+    ]
+  : [
+      '.pangea-build/runtime/python/bin/python3',
+      'node_modules/node/bin/node'
+    ]
 const required = [
   '.pangea-build/manifest.json',
   '.pangea-build/plugins/dsh-pangea/package.json',
@@ -20,9 +41,7 @@ const required = [
   '.pangea-build/runtime/pangea-runtime/.opencode/agents/pangea-agent.md',
   '.pangea-build/runtime/pangea-runtime/.opencode/plugins/pangea.ts',
   '.pangea-build/runtime/pangea-runtime/.opencode/skills/product-blackbox-test-case/SKILL.md',
-  '.pangea-build/runtime/python/python.exe',
-  '.pangea-build/update/pangea-update.json',
-  'build/apply-portable-update.ps1',
+  ...platformRequired,
   'node_modules/dsh-pangea-product/cordis.patch.yml'
 ]
 
@@ -30,7 +49,9 @@ const missing = required.filter((file) => !existsSync(path.join(root, file)))
 if (missing.length > 0) {
   console.error('PANGEA product staging is incomplete:')
   for (const file of missing) console.error(`- ${file}`)
-  console.error('Run scripts/build-pangea-desktop.ps1 to assemble the locked components.')
+  console.error(platform === 'win32'
+    ? 'Run scripts/build-pangea-desktop.ps1 to assemble the locked components.'
+    : 'Run the macOS build entry point to assemble the locked darwin/arm64 components.')
   process.exit(1)
 }
 
@@ -47,6 +68,10 @@ const companion = JSON.parse(
   readFileSync(path.join(root, '.pangea-build/plugins/dsh-pangea-companion/package.json'), 'utf8')
 )
 const manifest = JSON.parse(readFileSync(path.join(root, '.pangea-build/manifest.json'), 'utf8'))
+if ((platform === 'darwin' || manifest.target) &&
+    (manifest.target?.platform !== platform || manifest.target?.arch !== arch)) {
+  throw new Error(`PANGEA staging manifest does not match target ${platform}/${arch}.`)
+}
 const components = JSON.parse(readFileSync(path.join(root, 'pangea.components.json'), 'utf8'))
 const dshPatch = readFileSync(
   path.join(root, '.pangea-build/plugins/dsh-pangea/cordis.patch.yml'),
@@ -82,4 +107,4 @@ if (!runtimeRules.includes('source-first-v1')) {
 if (!runtimeCli.includes('adapter') || !runtimeAdapter.includes('source-first-v1') || !runtimeAdapter.includes('next_actions')) {
   throw new Error('The staged pangea-agent CLI does not expose source-first capabilities.')
 }
-console.log(`PANGEA source-first staging verified: dsh-pangea ${staged.version}`)
+console.log(`PANGEA source-first staging verified: dsh-pangea ${staged.version} (${platform}/${arch})`)

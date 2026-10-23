@@ -1,0 +1,43 @@
+{
+  "source_repository": "https://github.com/spdk/spdk",
+  "source_commit": "b95c6aa3342e6af15c0f90066600794b4673f690",
+  "license": "BSD-3-Clause",
+  "scope": "six source/API files plus license; not a full SPDK build tree",
+  "files": [
+    {
+      "path": "module/keyring/file/keyring.c",
+      "sha256": "8a5564964ca79465e97518f490d343025e0bb1652d7d5ddb800e95c1fbef34f8",
+      "bytes": 4069
+    },
+    {
+      "path": "module/keyring/file/keyring_rpc.c",
+      "sha256": "9b7b219316a64f96698e275f42d5c4a59e692404e0b9fb1028667c4ffbcabcd8",
+      "bytes": 1870
+    },
+    {
+      "path": "lib/keyring/keyring.c",
+      "sha256": "83ee1f328d76f00305783303a418b87183262f2bd4f009b0c835f114dd7a8056",
+      "bytes": 8977
+    },
+    {
+      "path": "lib/keyring/keyring_rpc.c",
+      "sha256": "0ced01f254f54d26619f6c235366f3c92fd0f87ed142cc47d5bd100accc2bd78",
+      "bytes": 917
+    },
+    {
+      "path": "include/spdk/keyring.h",
+      "sha256": "1be963d88358babbbd79b73d1ebb077606be3d70e77dc5a43d46650cfcc7a5f1",
+      "bytes": 3428
+    },
+    {
+      "path": "include/spdk/module/keyring/file.h",
+      "sha256": "c2ec2dad422217f22f766e877faf962f6b62bf56ecbe429d3b0f4145ac41f8b5",
+      "bytes": 711
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "4478f01615a1bb06a02e51d8d18097d5aa434cda72974ab63f3fd5a9bd29c13f",
+      "bytes": 1127
+    }
+  ]
+}

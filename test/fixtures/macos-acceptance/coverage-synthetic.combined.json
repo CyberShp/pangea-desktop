@@ -1,0 +1,113 @@
+{
+  "status": "success",
+  "message": "SYNTHETIC FIXTURE — NOT COLLECTED COVERAGE; SPDK NOT RUN",
+  "synthetic": true,
+  "execution_status": "not_run",
+  "warnings": [
+    "所有计数及分支坐标均为合成验收数据，不表示真实执行覆盖或覆盖提升。",
+    "block/branch 是夹具坐标，不提供真实 true/false 映射。"
+  ],
+  "query_input": {
+    "product": "synthetic-spdk-keyring",
+    "c_version": "b95c6aa3342e6af15c0f90066600794b4673f690",
+    "source": "synthetic-macos-acceptance"
+  },
+  "scope": {
+    "requested": "module/keyring/file",
+    "matched_dirs": [
+      "module/keyring/file"
+    ],
+    "recursive": true,
+    "module_file_count": 2,
+    "scope_file_count": 2
+  },
+  "snapshot": {
+    "id": "synthetic-keyring-macos-v1",
+    "stable": true,
+    "kind": "synthetic_static_fixture",
+    "collected_at": null,
+    "source_commit": "b95c6aa3342e6af15c0f90066600794b4673f690"
+  },
+  "source_semantics": {
+    "preferred": "synthetic-macos-acceptance",
+    "sources_independent": true,
+    "description": "Only synthetic fixture counts; no production platform queried."
+  },
+  "summary": {
+    "per_source": [
+      {
+        "source": "synthetic-macos-acceptance",
+        "file_count": 1,
+        "uncovered_functions": 1,
+        "uncovered_lines": 1,
+        "uncovered_branches": 1,
+        "indeterminate_branches": 1
+      }
+    ]
+  },
+  "pagination": {
+    "limit": 10,
+    "offset": 0,
+    "has_more": false
+  },
+  "uncovered": {
+    "functions": [
+      {
+        "source": "synthetic-macos-acceptance",
+        "relative_path": "module/keyring/file/keyring.c",
+        "platform_path": null,
+        "uncovered_functions": [
+          {
+            "function": "keyring_file_check_path",
+            "count": 0
+          }
+        ]
+      }
+    ],
+    "lines": [
+      {
+        "source": "synthetic-macos-acceptance",
+        "relative_path": "module/keyring/file/keyring.c",
+        "platform_path": null,
+        "uncovered_lines": [
+          {
+            "line": 107,
+            "count": 0
+          }
+        ]
+      }
+    ],
+    "branches": [
+      {
+        "source": "synthetic-macos-acceptance",
+        "relative_path": "module/keyring/file/keyring.c",
+        "platform_path": null,
+        "uncovered_branches": [
+          {
+            "line": 107,
+            "block": "synthetic-block-1",
+            "branch": "synthetic-branch-0",
+            "count": 0
+          }
+        ]
+      }
+    ]
+  },
+  "indeterminate": {
+    "branches": [
+      {
+        "source": "synthetic-macos-acceptance",
+        "relative_path": "module/keyring/file/keyring.c",
+        "platform_path": null,
+        "indeterminate_branches": [
+          {
+            "line": 113,
+            "block": "synthetic-block-2",
+            "branch": "synthetic-branch-1",
+            "count": "-"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -31,7 +31,7 @@ afterEach(async () => {
 
 describe('PANGEA product runtime', () => {
   it('resolves installation-owned runtime resources', () => {
-    expect(pangeaProductPaths('C:\\PANGEA\\resources')).toEqual({
+    expect(pangeaProductPaths('C:\\PANGEA\\resources', 'win32')).toEqual({
       runtimeRoot: join('C:\\PANGEA\\resources', 'pangea-runtime'),
       pythonExecutable: join('C:\\PANGEA\\resources', 'pangea-python', 'python.exe'),
       manifestPath: join('C:\\PANGEA\\resources', 'pangea-manifest.json')
@@ -103,16 +103,17 @@ describe('PANGEA product runtime', () => {
   })
 
   it('pins the embedded interpreter and source tree into the Harness environment', () => {
-    const paths = pangeaProductPaths('/resources')
+    const paths = pangeaProductPaths('/resources', 'win32')
     const environment = pangeaEnvironment(paths, '/workspace', '/workspace/pangea-data', {
       PYTHONPATH: '/existing'
-    }, '1.2.3')
+    }, '1.2.3', 'win32')
     expect(environment).toMatchObject({
       PANGEA_RUNTIME_ROOT: join('/resources', 'pangea-runtime'),
       PANGEA_PYTHON: join('/resources', 'pangea-python', 'python.exe'),
       PANGEA_WORKSPACE_ROOT: '/workspace',
       PANGEA_DATA_ROOT: '/workspace/pangea-data',
       PANGEA_DESKTOP_VERSION: '1.2.3',
+      PYTHONDONTWRITEBYTECODE: '1',
       PYTHONPATH: `${join('/resources', 'pangea-runtime', 'src')}${delimiter}/existing`
     })
   })
@@ -121,12 +122,32 @@ describe('PANGEA product runtime', () => {
 
 describe('private Skill and diagram runtime paths', () => {
   it('resolves beside installation and preserves explicit development overrides', () => {
-    const paths = pangeaProductPaths('/install/resources')
-    const env = pangeaEnvironment(paths, '/launch', '/data', {})
+    const paths = pangeaProductPaths('/install/resources', 'win32')
+    const env = pangeaEnvironment(paths, '/launch', '/data', {}, undefined, 'win32')
     expect(env.PANGEA_LOCAL_SKILLS_ROOT).toBe(join('/install', 'local-skills'))
     expect(env.PANGEA_ARCHIFY_ROOT).toBeUndefined()
     expect(env.PANGEA_NODE).toBe(join('/install', 'resources', 'app/node_modules/node/bin/node.exe'))
     expect(env.ARCHIFY_UPDATE_CHECK_DISABLED).toBeUndefined()
-    expect(pangeaEnvironment(paths, '/launch', '/data', { PANGEA_LOCAL_SKILLS_ROOT: '/private' }).PANGEA_LOCAL_SKILLS_ROOT).toBe('/private')
+    expect(pangeaEnvironment(paths, '/launch', '/data', { PANGEA_LOCAL_SKILLS_ROOT: '/private' }, undefined, 'win32').PANGEA_LOCAL_SKILLS_ROOT).toBe('/private')
+  })
+
+  it('uses native macOS executables and keeps private skills outside the application bundle', () => {
+    const resources = '/Applications/PANGEA Desktop.app/Contents/Resources'
+    const paths = pangeaProductPaths(resources, 'darwin')
+    expect(paths).toEqual({
+      runtimeRoot: join(resources, 'pangea-runtime'),
+      pythonExecutable: join(resources, 'pangea-python', 'bin', 'python3'),
+      manifestPath: join(resources, 'pangea-manifest.json')
+    })
+    const env = pangeaEnvironment(paths, '/profile/launch-root', '/profile/launch-root/pangea-data', {}, '1.2.3', 'darwin')
+    expect(env.PANGEA_PYTHON).toBe(paths.pythonExecutable)
+    expect(env.PANGEA_NODE).toBe(join(resources, 'app', 'node_modules', 'node', 'bin', 'node'))
+    expect(env.PANGEA_LOCAL_SKILLS_ROOT).toBe(join('/profile', 'local-skills'))
+    expect(env.PYTHONDONTWRITEBYTECODE).toBe('1')
+    const overridden = pangeaEnvironment(paths, '/profile/launch-root', '/data', {
+      PANGEA_LOCAL_SKILLS_ROOT: '/private/skills', PANGEA_NODE: '/custom/node'
+    }, undefined, 'darwin')
+    expect(overridden.PANGEA_LOCAL_SKILLS_ROOT).toBe('/private/skills')
+    expect(overridden.PANGEA_NODE).toBe('/custom/node')
   })
 })

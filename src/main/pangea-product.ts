@@ -26,10 +26,15 @@ export interface PangeaProductPaths {
   pythonExecutable: string
   manifestPath: string
 }
-export function pangeaProductPaths(resourcesPath: string): PangeaProductPaths {
+export function pangeaProductPaths(
+  resourcesPath: string,
+  platform: NodeJS.Platform = process.platform
+): PangeaProductPaths {
   return {
     runtimeRoot: join(resourcesPath, 'pangea-runtime'),
-    pythonExecutable: join(resourcesPath, 'pangea-python', 'python.exe'),
+    pythonExecutable: platform === 'win32'
+      ? join(resourcesPath, 'pangea-python', 'python.exe')
+      : join(resourcesPath, 'pangea-python', 'bin', 'python3'),
     manifestPath: join(resourcesPath, 'pangea-manifest.json')
   }
 }
@@ -90,6 +95,7 @@ async function runPackagedInitData(input: {
         PANGEA_RUNTIME_ROOT: input.runtimeRoot,
         PANGEA_WORKSPACE_ROOT: input.launchRoot,
         PANGEA_DATA_ROOT: join(input.launchRoot, 'pangea-data'),
+        PYTHONDONTWRITEBYTECODE: '1',
         PYTHONPATH: [join(input.runtimeRoot, 'src'), process.env.PYTHONPATH]
           .filter(Boolean)
           .join(delimiter)
@@ -167,16 +173,24 @@ export function pangeaEnvironment(
   launchRoot: string,
   dataRoot: string,
   inherited: NodeJS.ProcessEnv = process.env,
-  desktopVersion?: string
+  desktopVersion?: string,
+  platform: NodeJS.Platform = process.platform
 ): NodeJS.ProcessEnv {
   return {
     PANGEA_RUNTIME_ROOT: paths.runtimeRoot,
-    PANGEA_LOCAL_SKILLS_ROOT: inherited.PANGEA_LOCAL_SKILLS_ROOT || join(dirname(dirname(paths.runtimeRoot)), 'local-skills'),
-    PANGEA_NODE: inherited.PANGEA_NODE || join(dirname(paths.runtimeRoot), 'app/node_modules/node/bin/node.exe'),
+    PANGEA_LOCAL_SKILLS_ROOT: inherited.PANGEA_LOCAL_SKILLS_ROOT || join(
+      platform === 'darwin' ? dirname(launchRoot) : dirname(dirname(paths.runtimeRoot)),
+      'local-skills'
+    ),
+    PANGEA_NODE: inherited.PANGEA_NODE || join(
+      dirname(paths.runtimeRoot), 'app', 'node_modules', 'node', 'bin',
+      platform === 'win32' ? 'node.exe' : 'node'
+    ),
     PANGEA_PYTHON: paths.pythonExecutable,
     PANGEA_WORKSPACE_ROOT: launchRoot,
     PANGEA_DATA_ROOT: dataRoot,
     PANGEA_DESKTOP_VERSION: desktopVersion ?? inherited.PANGEA_DESKTOP_VERSION,
+    PYTHONDONTWRITEBYTECODE: '1',
     PYTHONPATH: [join(paths.runtimeRoot, 'src'), inherited.PYTHONPATH]
       .filter(Boolean)
       .join(delimiter)

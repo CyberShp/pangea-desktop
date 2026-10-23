@@ -197,20 +197,24 @@ function appendPluginRecoveryDetectionLog(plugins: readonly string[]): void {
   }
 }
 
-function isDevelopmentBuild(): boolean {
-  if (!app.isPackaged) return true
+function desktopBuildChannel(): 'development' | 'acceptance' | 'stable' {
+  if (!app.isPackaged) return 'development'
 
   try {
     const metadata = JSON.parse(
       readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')
     ) as { dshDesktopChannel?: unknown }
-    return metadata.dshDesktopChannel === 'development'
+    return metadata.dshDesktopChannel === 'development' || metadata.dshDesktopChannel === 'acceptance'
+      ? metadata.dshDesktopChannel
+      : 'stable'
   } catch {
-    return false
+    return 'stable'
   }
 }
 
-const developmentBuild = isDevelopmentBuild()
+const buildChannel = desktopBuildChannel()
+const developmentBuild = buildChannel === 'development'
+const acceptanceBuild = buildChannel === 'acceptance'
 
 function applyWindowChromeTheme(window: BrowserWindow, isDark: boolean): void {
   if (window.isDestroyed()) return
@@ -218,7 +222,9 @@ function applyWindowChromeTheme(window: BrowserWindow, isDark: boolean): void {
 }
 
 function configureAppIdentity(): void {
-  if (developmentBuild) {
+  if (acceptanceBuild) {
+    app.setName('PANGEA Desktop Acceptance')
+  } else if (developmentBuild) {
     app.setName('PANGEA Desktop Dev')
   } else {
     app.setName('PANGEA Desktop')
@@ -231,7 +237,8 @@ function configureAppIdentity(): void {
   app.setPath('userData', resolveUserDataPath({
     configuredPath: process.env.PANGEA_USER_DATA_DIR,
     appDataPath: app.getPath('appData'),
-    developmentBuild
+    developmentBuild,
+    acceptanceBuild
   }))
 }
 
@@ -1421,7 +1428,7 @@ async function bootstrap(): Promise<void> {
     },
     appIconPath: desktopIconPath(),
     cloudflaredCacheDir: join(app.getPath('userData'), 'bin'),
-    port: configuredMobilePort(process.env.PANGEA_MOBILE_PORT, developmentBuild ? 43128 : 43127),
+    port: configuredMobilePort(process.env.PANGEA_MOBILE_PORT, acceptanceBuild ? 0 : developmentBuild ? 43128 : 43127),
     onReconnectRequested: () => {
       void showMobilePairing().catch(showUnexpectedError)
     }
@@ -1536,7 +1543,7 @@ async function bootstrap(): Promise<void> {
   } else {
     await launchHarness()
   }
-  if (!developmentBuild) {
+  if (!developmentBuild && !acceptanceBuild) {
     startUpdateManager({
       prepareToInstall: async () => {
         const release = await acquirePortableUpdateAdmission(runtime.snapshot().url)

@@ -27,4 +27,22 @@ describe('PANGEA Desktop user data path', () => {
       developmentBuild: true
     })).toBe(join(appDataPath, 'pangea-desktop-dev'))
   })
+
+  it('isolates a directly launched acceptance application without environment overrides', () => {
+    const appDataPath = '/Users/tester/Library/Application Support'
+    expect(resolveUserDataPath({
+      appDataPath,
+      developmentBuild: false,
+      acceptanceBuild: true
+    })).toBe(join(appDataPath, 'pangea-desktop-acceptance'))
+  })
+
+  it('preserves an explicit profile for an acceptance smoke test', () => {
+    expect(resolveUserDataPath({
+      configuredPath: '/tmp/pangea-acceptance-smoke',
+      appDataPath: '/Users/tester/Library/Application Support',
+      developmentBuild: false,
+      acceptanceBuild: true
+    })).toBe(resolve('/tmp/pangea-acceptance-smoke'))
+  })
 })
