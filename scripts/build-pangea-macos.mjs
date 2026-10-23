@@ -104,6 +104,8 @@ run('npx', ['--no-install', 'electron-builder', '--dir', '--mac', '--arm64', '--
 const app = path.join(root, 'dist-macos/mac-arm64/PANGEA Desktop Acceptance.app')
 await reset('macos-acceptance-parent')
 run(process.execPath, ['scripts/verify-packaged-macos.mjs', '--app', app, '--expected-version', pkg.version, '--arch', 'arm64', '--evidence', path.join(stage, 'macos-acceptance-parent/evidence')])
+// Check again after the real launch: mutable state must not break the bundle seal.
+run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])
 const delivery = path.join(root, 'dist-macos/delivery')
 await mkdir(delivery, { recursive: true })
 const filename = `pangea-desktop-${pkg.version}-macos-arm64-acceptance.zip`

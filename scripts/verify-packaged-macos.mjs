@@ -233,8 +233,11 @@ export async function verifyPackagedMac(options) {
     const stdout = createWriteStream(path.join(evidence, 'desktop.stdout.log'), { flags: 'wx' })
     const stderr = createWriteStream(path.join(evidence, 'desktop.stderr.log'), { flags: 'wx' })
     const launchedAt = Date.now()
+    // Exercise the product's own bytecode setting, as a Finder launch would.
+    const desktopEnv = { ...env, PANGEA_MOBILE_PORT: String(await reservePort()) }
+    delete desktopEnv.PYTHONDONTWRITEBYTECODE
     desktop = spawn(desktopExecutable, [`--pangea-update-health=${health}`], {
-      cwd: evidence, env: { ...env, PANGEA_MOBILE_PORT: String(await reservePort()) }, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: evidence, env: desktopEnv, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
     })
     let desktopError
     desktop.once('error', value => { desktopError = value })
