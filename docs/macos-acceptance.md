@@ -2,13 +2,17 @@
 
 本包用于验收当前 `langgraph` 基线。每个业务单元仍由一个 Analysis Worker 完成分析、图文与用例；**行为分析／测试设计／图文表达三个 Worker 的生产拆分尚未实现**。Planning、Reviewer 沿用现有链路。版本以包内 `pangea-manifest.json` 为准，不能把本包视为拆分方案已交付。
 
-本轮只验收分支分析与覆盖率分析，不以风险发现数量为目标。构建成功、界面可打开、模型完成、业务结论正确和实测覆盖率提升分别记录。
+当前登记为“Mac 单 Worker 基线工程交付，业务验收待完成”。本轮只验收分支分析与覆盖率分析，不以风险发现数量为目标。构建成功、下载后的本机首次启动、模型完成、业务结论正确和实测覆盖率提升分别记录。
 
 ## 启动与输入
 
 双击随包的 `PANGEA Desktop Acceptance.app`。验收通道使用独立 appId、默认 profile 和该 profile 下的 `launch-root`；不要改成正式 profile，也不要复制已有 Run、报告、技能或凭据。保留整个验收包供重启续查。界面要求配置真实分析执行器时，在这个隔离实例内完成配置和连通性检查。
 
-本包使用 ad-hoc 验收签名，未做 Developer ID 公证。若 macOS 拦截该应用，核对下载来源后，通过系统“隐私与安全性 → 仍要打开”授权这一应用；不关闭 Gatekeeper。
+本包使用 ad-hoc 验收签名，未做 Developer ID 公证。GitHub runner 的启动通过不证明下载件能通过本机 Gatekeeper。先在 Finder 正常打开应用；系统提示未验证开发者时，核对下载来源后，通过系统“隐私与安全性 → 仍要打开”授权这一应用。脚本不代替这一步，也不关闭 Gatekeeper、删除 quarantine 或重新签名。
+
+`2.1.4-macaccept.2` 的用户本机复验记录为：哈希及启动前签名通过，带 quarantine，`spctl` 拒绝，烟测在独立执行内置 Node 时超时，尚未进入工作台。两者因果未确认；这既不证明包已损坏，也不能登记为本机启动通过。完成首次授权后的 Finder 启动仍须在受影响 Mac 复验。
+
+若仍未进入工作台，随包 `diagnose-macos-startup.sh` 不依赖系统 Python 或内置 Node 来启动诊断。它先采集系统版本、签名、quarantine 和系统评估，再用有时限的独立 Node 探针保留 stdout/stderr、PID、退出码和超时现场；不会启动分析、读取模型凭据或改用户 profile。在验收包所在目录执行一次 `sh diagnose-macos-startup.sh "PANGEA Desktop Acceptance.app"`，即可生成独立 `pangea-macos-startup.*` 证据目录。脚本结束仅表示收集结束，各项结果以 `checks.tsv` 为准；不据 `spctl` 非零或单次超时自动归因。
 
 第一次启动先确认能进入工作台、设置页能识别实际执行器与模型、源码目录可选择。没有模型或认证失败应显示具体原因；不可把“进程存在”作为模型联调成功。
 
@@ -58,7 +62,7 @@ include/spdk/module/keyring/file.h
 
 ## 结论边界与真实业务验收
 
-当前锁定 Agent 还有一项已复现的覆盖率数据传递缺陷：只出现在 combined 响应顶层的 `product/c_version/b_version` 未进入 acquisition 元数据；原始文件仍保留，请求版本也不能替代实际响应版本。因此，实际覆盖率版本传递这一项暂不能判通过，需要单独修复后复验；本附件合成数据不证明这项已解决。
+本次锁定的 Agent 已修复 combined 响应顶层 `product/c_version/b_version` 未进入 acquisition 的问题。三个字段原样保留，缺失、null 和空字符串不以请求值替代。回归覆盖原始资产→解析→冻结诊断→Planning／Analysis／独立盲审／同 Reviewer 对照的实际 `input_read`，并确认重解析资产不改写已有 Run 的冻结输入。构建同时在成品自带 Python 中执行此回归，检查导入路径确属包内运行时。这是数据传递与协议测试，使用人工协议产物，没有调用真实模型，不证明分析质量或拆分有效。
 
 以上小样本用于 Mac 启动、真实模型链路、输入消费、分支语义、图文与导出的基线验收。源码真实，覆盖率计数合成；SPDK 未执行，消费方驱动及故障设施未提供。不存在真实 compaction 事件及前后产物时，压缩保留能力记“未观察”，不能记通过。
 

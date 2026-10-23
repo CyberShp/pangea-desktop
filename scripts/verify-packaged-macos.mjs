@@ -1,6 +1,6 @@
 // Packaged macOS smoke only. No model calls, worker-split acceptance, or measured coverage claims.
 import assert from 'node:assert/strict'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { access, mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
 import { createServer } from 'node:net'
@@ -8,6 +8,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeNativeDiagramFixture, verifyNativeDiagrams } from './native-diagram-smoke.mjs'
+import { runProcessProbe, stopOwnedGroup } from './macos-process-probe.mjs'
+export { parseProcessGroups } from './macos-process-probe.mjs'
 
 const scriptPath = fileURLToPath(import.meta.url)
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
@@ -45,43 +47,9 @@ export function isolatedEnvironment(root, nodeDirectory) {
   }
 }
 
-export function parseProcessGroups(text) {
-  return text.trim().split('\n').filter(Boolean).map(line => {
-    const [pid, ppid, pgid] = line.trim().split(/\s+/).map(Number)
-    assert.ok([pid, ppid, pgid].every(Number.isSafeInteger), 'Invalid process table')
-    return { pid, ppid, pgid }
-  })
-}
-
 export function isWithin(root, candidate) {
   const relative = path.relative(root, candidate)
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
-}
-
-function processGroupMembers(groupId) {
-  const result = spawnSync('/bin/ps', ['-axo', 'pid=,ppid=,pgid='], { encoding: 'utf8', timeout: 5000 })
-  assert.equal(result.status, 0, result.error?.message || result.stderr || 'Cannot inspect child process group')
-  return parseProcessGroups(result.stdout).filter(item => item.pgid === groupId)
-}
-
-async function stopOwnedGroup(child) {
-  if (!child?.pid) return []
-  // detached spawn creates this group. Never match processes by app name/path,
-  // which could terminate a separately running user instance of the same app.
-  const signal = value => {
-    try { process.kill(-child.pid, value) } catch (error) { if (error.code !== 'ESRCH') throw error }
-  }
-  signal('SIGTERM')
-  for (let attempt = 0; attempt < 40; attempt++) {
-    if (!processGroupMembers(child.pid).length) return []
-    await delay(100)
-  }
-  signal('SIGKILL')
-  for (let attempt = 0; attempt < 40; attempt++) {
-    if (!processGroupMembers(child.pid).length) return []
-    await delay(100)
-  }
-  return processGroupMembers(child.pid)
 }
 
 async function reservePort() {
@@ -172,6 +140,8 @@ export async function verifyPackagedMac(options) {
   for (const directory of [env.HOME, env.PANGEA_USER_DATA_DIR, env.TMPDIR, env.PANGEA_LOCAL_SKILLS_ROOT]) await mkdir(directory, { recursive: true })
   const results = { schema_version: 1, status: 'running', app, architecture: options.arch, version: options.version, evidence,
     scope: 'Packaged runtime, synthetic branch/coverage input freeze, deterministic diagrams, and Desktop workspace readiness only',
+    launch_route: 'direct executable from isolated automated runtime probe',
+    downloaded_first_launch_acceptance: 'not_run',
     business_acceptance: 'not_run', worker_split_acceptance: 'not_run', measured_coverage_improvement: 'not_measured', checks: [] }
   let desktop, interrupted
   const onSignal = signal => { interrupted = new Error(`Interrupted by ${signal}`) }
@@ -180,29 +150,37 @@ export async function verifyPackagedMac(options) {
   process.once('SIGTERM', onTerminate)
   async function run(label, executable, args, commandEnv = env) {
     if (interrupted) throw interrupted
-    const child = spawn(executable, args, { env: commandEnv, cwd: evidence, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
-    let stdout = '', stderr = ''
-    child.stdout.on('data', data => { stdout += data; if (stdout.length > 8 * 1024 * 1024) child.kill('SIGTERM') })
-    child.stderr.on('data', data => { stderr += data; if (stderr.length > 8 * 1024 * 1024) child.kill('SIGTERM') })
-    let timeout
-    try {
-      const status = await new Promise((resolve, reject) => {
-        timeout = setTimeout(() => reject(new Error(`${label} timed out`)), 120_000)
-        child.once('error', reject)
-        child.once('close', (code, signal) => resolve({ code, signal }))
-      })
-      await Promise.all([writeFile(path.join(evidence, `${label}.stdout.log`), stdout), writeFile(path.join(evidence, `${label}.stderr.log`), stderr)])
-      assert.equal(status.code, 0, `${label} failed (${status.code ?? status.signal}): ${stderr.slice(-4000) || stdout.slice(-4000)}`)
-      results.checks.push({ name: label, status: 'passed' })
-      return stdout
-    } finally {
-      clearTimeout(timeout)
-      const remaining = await stopOwnedGroup(child)
-      assert.equal(remaining.length, 0, `${label} left child processes: ${JSON.stringify(remaining)}`)
+    const probe = await runProcessProbe({ label, executable, args, cwd: evidence, env: commandEnv, evidence })
+    results.checks.push(probe.record)
+    if (probe.record.status !== 'passed') {
+      const outcome = probe.record.timed_out ? 'timed out' : `failed (${probe.record.failure_kind})`
+      throw new Error(`${label} ${outcome}: ${probe.record.spawn_error?.message || probe.stderr.slice(-4000) || probe.stdout.slice(-4000)}; cleanup=${JSON.stringify(probe.record.cleanup)}`)
     }
+    return probe.stdout
   }
   let error
   try {
+    // Policy assessment is evidence, separate from runtime success. In particular,
+    // an ad-hoc app can have a valid seal while the distribution policy rejects it.
+    const preflightSpecs = [
+      ['macos-version', '/usr/bin/sw_vers', []],
+      ['host-architecture', '/usr/bin/uname', ['-m']],
+      ['signature-verify', '/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]],
+      ['signature-identity', '/usr/bin/codesign', ['--display', '--verbose=4', app]],
+      ...[['app', app], ['node', node], ['python', python]].map(([name, target]) =>
+        [`quarantine-${name}`, '/usr/bin/xattr', ['-p', 'com.apple.quarantine', target]]),
+      ['gatekeeper-assessment', '/usr/sbin/spctl', ['--assess', '--type', 'exec', '--verbose=4', app]],
+    ]
+    results.preflight = { probes: [], quarantine_modified: false,
+      runtime_timeout_cause: 'not_established', downloaded_finder_launch: 'not_tested' }
+    for (const [label, executable, args] of preflightSpecs) {
+      if (interrupted) throw interrupted
+      const probe = await runProcessProbe({ label, executable, args, cwd: evidence, env, evidence })
+      results.preflight.probes.push(probe.record)
+    }
+    await writeFile(path.join(evidence, 'preflight.json'), JSON.stringify(results.preflight, null, 2) + '\n')
+    const signature = results.preflight.probes.find(item => item.name === 'signature-verify')
+    assert.equal(signature.status, 'passed', 'Bundle signature integrity verification failed; see all preflight evidence')
     for (const file of [python, node, path.join(resources, 'pangea-manifest.json'), path.join(appRoot, 'package.json')]) await access(file)
     const executableName = (await run('bundle-executable', '/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleExecutable', path.join(app, 'Contents/Info.plist')])).trim()
     assert.equal(path.basename(executableName), executableName, 'Invalid CFBundleExecutable')

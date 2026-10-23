@@ -12,8 +12,8 @@
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
-    "branch": "langgraph",
-    "commit": "aeb0d95d6c96731396aeabcab7be4b4acf13326b"
+    "branch": "codex/coverage-identity-acceptance",
+    "commit": "8ae5d22ae970ea7244b4294d7766d6879ae06fa8"
   },
   "python": {
     "version": "3.12.10",

@@ -2,7 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import os from 'node:os'
 import { isolatedEnvironment, isWithin, parseOptions, parseProcessGroups } from '../scripts/verify-packaged-macos.mjs'
+import { runProcessProbe } from '../scripts/macos-process-probe.mjs'
 
 test('packaged smoke requires an explicit version and rejects invalid target/options', () => {
   assert.throws(() => parseOptions(['--app', '/tmp/Product.app']), /Usage:/)
@@ -56,4 +59,60 @@ test('non-macOS execution fails instead of reporting packaged acceptance', { ski
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /must run on a macOS runner/)
   assert.doesNotMatch(result.stdout, /"status":"passed"/)
+})
+
+test('a real timed-out subprocess retains both streams and termination evidence', { skip: process.platform === 'win32' }, async () => {
+  const evidence = await mkdtemp(path.join(os.tmpdir(), 'pangea-probe-timeout-'))
+  try {
+    const { record } = await runProcessProbe({ label: 'waiting-node', executable: process.execPath,
+      args: ['-e', 'console.log("stdout-before-timeout"); console.error("stderr-before-timeout"); setInterval(() => {}, 1000)'],
+      cwd: evidence, env: { PATH: process.env.PATH }, evidence, timeoutMs: 1000 })
+    assert.equal(record.status, 'timed_out')
+    assert.equal(record.timed_out, true)
+    assert.ok(record.pid > 0)
+    assert.ok(record.elapsed_ms >= 900)
+    assert.match(await readFile(record.stdout_log, 'utf8'), /stdout-before-timeout/)
+    assert.match(await readFile(record.stderr_log, 'utf8'), /stderr-before-timeout/)
+    assert.deepEqual(record.cleanup, { remaining_processes: [], error: null })
+    assert.equal(record.signal, 'SIGTERM')
+    assert.throws(() => process.kill(record.pid, 0), { code: 'ESRCH' })
+    const saved = JSON.parse(await readFile(path.join(evidence, 'waiting-node.process.json'), 'utf8'))
+    assert.equal(saved.pid, record.pid)
+    assert.equal(saved.status, 'timed_out')
+  } finally { await rm(evidence, { recursive: true, force: true }) }
+})
+
+test('a nonzero subprocess preserves the actual exit code without inventing a cause', { skip: process.platform === 'win32' }, async () => {
+  const evidence = await mkdtemp(path.join(os.tmpdir(), 'pangea-probe-nonzero-'))
+  try {
+    const { record, stdout, stderr } = await runProcessProbe({ label: 'failed-node', executable: process.execPath,
+      args: ['-e', 'console.log("probe-output"); console.error("specific-rejection"); process.exitCode = 23'],
+      cwd: evidence, env: { PATH: process.env.PATH }, evidence })
+    assert.equal(record.status, 'failed')
+    assert.equal(record.failure_kind, 'nonzero_exit')
+    assert.equal(record.exit_code, 23)
+    assert.equal(record.timed_out, false)
+    assert.equal(record.signal, null)
+    assert.match(stdout, /probe-output/)
+    assert.match(stderr, /specific-rejection/)
+    assert.equal(await readFile(record.stderr_log, 'utf8'), stderr)
+    assert.deepEqual(record.cleanup.remaining_processes, [])
+    assert.equal(JSON.parse(await readFile(path.join(evidence, 'failed-node.process.json'), 'utf8')).exit_code, 23)
+  } finally { await rm(evidence, { recursive: true, force: true }) }
+})
+
+test('a spawn failure writes an explicit error record and empty stream files', { skip: process.platform === 'win32' }, async () => {
+  const evidence = await mkdtemp(path.join(os.tmpdir(), 'pangea-probe-missing-'))
+  try {
+    const { record } = await runProcessProbe({ label: 'missing-node', executable: path.join(evidence, 'not-an-executable'),
+      cwd: evidence, env: { PATH: process.env.PATH }, evidence })
+    assert.equal(record.status, 'failed')
+    assert.equal(record.failure_kind, 'spawn_error')
+    assert.equal(record.spawn_error.code, 'ENOENT')
+    assert.equal(record.pid, null)
+    assert.equal(record.timed_out, false)
+    assert.equal(await readFile(record.stdout_log, 'utf8'), '')
+    assert.equal(await readFile(record.stderr_log, 'utf8'), '')
+    assert.deepEqual(record.cleanup.remaining_processes, [])
+  } finally { await rm(evidence, { recursive: true, force: true }) }
 })

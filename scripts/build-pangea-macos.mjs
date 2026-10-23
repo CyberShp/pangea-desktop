@@ -84,6 +84,7 @@ for (const script of ['verify-source-snapshot.py', 'verify-analysis-scenes.py', 
 for (const script of ['test_case_contract.py', 'branch_behavior_contract.py', 'report_delivery_smoke.py']) {
   run(python, [path.join(agent, 'verification', script)], runtime, env)
 }
+run(python, [path.join(agent, 'verification/coverage_identity.py'), '--expected-runtime-root', runtime], runtime, env)
 await writeFile(path.join(stage, 'manifest.json'), JSON.stringify({
   schema_version: 1, built_at: new Date().toISOString(),
   product: { name: 'PANGEA Desktop Acceptance', version: pkg.version },
@@ -102,8 +103,13 @@ run('npm', ['run', 'typecheck'])
 run('npm', ['run', 'build'])
 run('npx', ['--no-install', 'electron-builder', '--dir', '--mac', '--arm64', '--config', 'electron-builder.macos.cjs', '--publish', 'never'])
 const app = path.join(root, 'dist-macos/mac-arm64/PANGEA Desktop Acceptance.app')
+// Use the shipped interpreter and relocatable .pth, never the source checkout.
+const packagedResources = path.join(app, 'Contents/Resources')
+const packagedEnv = { PYTHONPATH: '', PYTHONHOME: '', PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1' }
+run(path.join(packagedResources, 'pangea-python/bin/python3'), [path.join(agent, 'verification/coverage_identity.py'), '--expected-runtime-root', path.join(packagedResources, 'pangea-runtime')], root, packagedEnv)
 await reset('macos-acceptance-parent')
 run(process.execPath, ['scripts/verify-packaged-macos.mjs', '--app', app, '--expected-version', pkg.version, '--arch', 'arm64', '--evidence', path.join(stage, 'macos-acceptance-parent/evidence')])
+run('/bin/sh', ['scripts/diagnose-macos-startup.sh', app, await reset('macos-startup-diagnostics')])
 // Check again after the real launch: mutable state must not break the bundle seal.
 run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])
 const delivery = path.join(root, 'dist-macos/delivery')
@@ -113,5 +119,6 @@ run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, path.join(deli
 await writeFile(path.join(delivery, `${filename}.sha256`), `${await digest(path.join(delivery, filename))}  ${filename}\n`)
 await cp(path.join(stage, 'manifest.json'), path.join(delivery, 'pangea-manifest.json'))
 await cp(path.join(root, 'docs/macos-acceptance.md'), path.join(delivery, '验收说明.md'))
+await cp(path.join(root, 'scripts/diagnose-macos-startup.sh'), path.join(delivery, 'diagnose-macos-startup.sh'))
 await cp(path.join(root, 'test/fixtures/macos-acceptance'), path.join(delivery, 'acceptance-fixtures'), { recursive: true })
 console.log(`Verified macOS acceptance artifact: ${path.join(delivery, filename)}`)
