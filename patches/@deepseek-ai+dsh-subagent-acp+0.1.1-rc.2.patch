@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
-index b89ccf2..9774a41 100644
+index b89ccf2..eb2cc11 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 @@ -1,10 +1,12 @@
@@ -17,7 +17,7 @@ index b89ccf2..9774a41 100644
  import { SessionId } from "@deepseek-ai/dsh-session";
  import { AssistantOutputFold } from "@deepseek-ai/dsh-subagent";
  //#region lib/types/run.js
-@@ -94,6 +96,266 @@ function toError(value) {
+@@ -94,6 +96,285 @@ function toError(value) {
  	/* v8 ignore next */
  	return value instanceof Error ? value : new Error(String(value));
  }
@@ -43,6 +43,25 @@ index b89ccf2..9774a41 100644
 +			existing = parent;
 +		}
 +	}
++}
++// CodeAgent permission requests carry a single edit target in rawInput.filepath.
++// Do not infer delete/move targets or reinterpret malformed explicit locations.
++function permissionLocations(toolCall, codeagent) {
++	const locations = toolCall.locations;
++	if (!codeagent || toolCall.kind !== "edit") return locations;
++	const raw = toolCall.rawInput;
++	if (!raw || typeof raw !== "object" || Array.isArray(raw) || !("filepath" in raw)) return locations;
++	const path = raw.filepath;
++	if (typeof path !== "string" || !path.trim()) return [];
++	if (locations === void 0) return [{ path }];
++	if (!Array.isArray(locations) || locations.length === 0) return locations;
++	// Validate both representations; an in-scratch location cannot hide an outside raw target.
++	return [...locations, { path }];
++}
++function rejectedPermission(options) {
++	const reject = options.find((option) => option.kind === "reject_once");
++	// Never invent an option ID or select a persistent reject_always policy.
++	return reject ? { outcome: "selected", optionId: reject.optionId } : { outcome: "cancelled" };
 +}
 +function scratchEditPermission(env) {
 +	const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT ?? "{}");
@@ -284,7 +303,7 @@ index b89ccf2..9774a41 100644
  /**
  * Start and publish one ACP child after initialization and session creation.
  * Child failures resolve through the run result; startup failures reject after
-@@ -105,50 +367,173 @@ function toError(value) {
+@@ -105,50 +386,185 @@ function toError(value) {
  */
  async function startAcpRun(request, spec) {
  	if (request.signal.aborted) throw new Error("subagent request was aborted before the ACP child started");
@@ -452,22 +471,34 @@ index b89ccf2..9774a41 100644
 +					request_id: permissionRequestId, request: params, outcome });
 +				return { outcome };
 +			};
++			const deny = async () => {
++				const outcome = rejectedPermission(params.options);
++				if (outcome.outcome === "cancelled" && !flags.cancelled && !request.signal.aborted) {
++					// No one-shot rejection was offered. Cancel the turn explicitly instead
++					// of leaving an agent waiting for a selected permission indefinitely.
++					emitDiagnostic("permission_cancel_requested");
++					await _agent.cancel({ sessionId: params.sessionId });
++				}
++				return respond(outcome);
++			};
++			if (flags.cancelled || request.signal.aborted) return respond({ outcome: "cancelled" });
 +			if (!request.discoverOnly && spec.permission === "allow") {
 +				const constrained = request.scratchDirectory !== void 0 && ["edit", "delete", "move"].includes(params.toolCall.kind);
 +				if (constrained) {
-+					const locations = params.toolCall.locations;
++					const locations = permissionLocations(params.toolCall, spec.codeagentPermissionInput === true);
 +					const allowed = params.options.some((o) => o.kind === "allow_once") && Array.isArray(locations) && locations.length > 0 && (await Promise.all(locations.map((location) => isScratchLocation(request.scratchDirectory, location?.path)))).every(Boolean);
 +					diagnostics.lastPermissionKind = params.toolCall.kind;
-+					diagnostics.lastPermissionPaths = locations?.map((location) => location?.path) ?? [];
++					diagnostics.lastPermissionPaths = Array.isArray(locations) ? locations.map((location) => location?.path) : [];
 +					diagnostics.lastPermissionDecision = allowed ? "allow_once" : "reject";
 +					emitDiagnostic("file_permission");
-+					if (!allowed) return respond({ outcome: "cancelled" });
++					if (flags.cancelled || request.signal.aborted) return respond({ outcome: "cancelled" });
++					if (!allowed) return deny();
 +				}
 +				const allow = params.options.find((o) => o.kind === "allow_once" || (!constrained && o.kind === "allow_always"));
 +				if (allow !== void 0) return respond({ outcome: "selected", optionId: allow.optionId });
  			}
 -			return Promise.resolve({ outcome: { outcome: "cancelled" } });
-+			return respond({ outcome: "cancelled" });
++			return flags.cancelled || request.signal.aborted ? respond({ outcome: "cancelled" }) : deny();
  		}
  	});
 -	const conn = new ClientSideConnection(makeClient, ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout)));
@@ -482,7 +513,7 @@ index b89ccf2..9774a41 100644
  	let signalCancelSettled;
  	const cancelSettled = new Promise((resolve) => {
  		signalCancelSettled = resolve;
-@@ -164,21 +549,39 @@ async function startAcpRun(request, spec) {
+@@ -164,21 +580,39 @@ async function startAcpRun(request, spec) {
  		requestCancel();
  	};
  	request.signal.addEventListener("abort", onAbort, { once: true });
@@ -531,7 +562,7 @@ index b89ccf2..9774a41 100644
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -189,48 +592,160 @@ async function startAcpRun(request, spec) {
+@@ -189,48 +623,160 @@ async function startAcpRun(request, spec) {
  	} catch (error) {
  		request.signal.removeEventListener("abort", onAbort);
  		await disposeProcess();
@@ -710,7 +741,7 @@ index b89ccf2..9774a41 100644
  		localAgent: void 0,
  		result,
  		dispose() {
-@@ -257,10 +772,12 @@ const inject = ["subagents", "subprocess"];
+@@ -257,10 +803,12 @@ const inject = ["subagents", "subprocess"];
  const Config = z.object({
  	providerName: z.string().default("acp"),
  	command: z.string().required(),
@@ -723,7 +754,7 @@ index b89ccf2..9774a41 100644
  	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
  	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
  });
-@@ -331,24 +848,80 @@ var AcpProvider = class {
+@@ -331,24 +879,81 @@ var AcpProvider = class {
  		this.ctx = ctx;
  		this.config = config;
  	}
@@ -787,6 +818,7 @@ index b89ccf2..9774a41 100644
 +			env,
  			disposeEofGraceMs: this.config.disposeEofGraceMs,
  			disposeGraceMs: this.config.disposeGraceMs,
++			codeagentPermissionInput: this.name === "pangea-codeagent",
 +			recoveryFence: this.name === "pangea-codeagent" && !request.discoverOnly,
 +			windowsBatch,
 +			launch,
@@ -849,10 +881,10 @@ index 76b04b9..76e43ec 100644
       * Grace period (ms) for the child's EOF-driven quiesce on dispose — its
       * window to flush persistence and tear down its own nested subprocesses
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
-index 764ff1d..6c4b6c8 100644
+index 764ff1d..8d3efa5 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/types/run.d.ts
-@@ -19,6 +19,18 @@ export interface AcpRunSpec {
+@@ -19,6 +19,20 @@ export interface AcpRunSpec {
      command: string;
      /** Arguments passed to {@link command}. */
      args: string[];
@@ -860,6 +892,8 @@ index 764ff1d..6c4b6c8 100644
 +    windowsBatch?: boolean;
 +    /** Establish Windows process containment before the ACP handshake. */
 +    recoveryFence?: boolean;
++    /** CodeAgent edit permission payload uses rawInput.filepath. */
++    codeagentPermissionInput?: boolean;
 +    /** Sanitized launch metadata exposed to the owning Job/log lifecycle. */
 +    launch?: {
 +        configuredCommand: string;

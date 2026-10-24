@@ -22,6 +22,7 @@ class FixtureAgent {
     this.sessions = new Set()
     this.turns = new Map()
     this.pending = new Map()
+    this.cancelledTurns = new Set()
   }
 
   async initialize() {
@@ -48,6 +49,7 @@ class FixtureAgent {
 
   async prompt({ sessionId, prompt }) {
     if (!this.sessions.has(sessionId)) throw new Error(`unknown fixture session: ${sessionId}`)
+    this.cancelledTurns.delete(sessionId)
     const turn = (this.turns.get(sessionId) ?? 0) + 1
     this.turns.set(sessionId, turn)
     const promptText = (prompt ?? []).map(item => item?.type === 'text' ? item.text : '').join('')
@@ -70,7 +72,7 @@ class FixtureAgent {
         ],
       })
       if (request.write && result.outcome.outcome === 'selected' && ['once', 'always'].includes(result.outcome.optionId)) {
-        for (const location of request.locations) {
+        for (const location of request.locations ?? [{ path: request.rawInput?.filepath }]) {
           await mkdir(path.dirname(location.path), { recursive: true })
           await writeFile(location.path, 'fixture native write')
         }
@@ -91,10 +93,11 @@ class FixtureAgent {
       this.pending.delete(sessionId)
       return { stopReason: 'cancelled' }
     }
-    return { stopReason: 'end_turn' }
+    return { stopReason: this.cancelledTurns.has(sessionId) ? 'cancelled' : 'end_turn' }
   }
 
   async cancel({ sessionId }) {
+    this.cancelledTurns.add(sessionId)
     this.pending.get(sessionId)?.abort()
   }
 }

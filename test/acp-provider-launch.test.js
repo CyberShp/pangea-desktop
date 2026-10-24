@@ -149,6 +149,60 @@ describe('patched ACP provider launch', () => {
     }
   }, 15000)
 
+  for (const providerName of ['pangea-codeagent', 'native-fixture']) {
+    it(`handles CodeAgent raw paths and explicit reject options for ${providerName}`, async () => {
+      const root = await mkdtemp(path.join(tmpdir(), 'pangea-permission-'))
+      const scratchDirectory = path.join(root, 'scratch')
+      const context = new Context()
+      let provider, run
+      applyAcpProvider({ logger: { warn() {} }, subprocess: new LocalSubprocessRuntime(context), subagents: { registerProvider(value) { provider = value } } }, {
+        providerName, command: process.execPath, args: [fixture], cwd: projectRoot, permission: 'allow',
+        env: { PANGEA_TEST_APP_ROOT: projectRoot }, disposeEofGraceMs: 1000, disposeGraceMs: 1000,
+      })
+      const allowed = { outcome: { outcome: 'selected', optionId: 'once' } }
+      const rejected = { outcome: { outcome: 'selected', optionId: 'reject' } }
+      try {
+        run = await provider.start({ scratchDirectory, prompt: [], signal: new AbortController().signal,
+          parent: { session: { header: { cwd: root } } } })
+        await run.result
+        const probe = async (request, stopReason = 'end_turn') => {
+          const result = await run.continuePrompt([{ type: 'text', text: `PERMISSION ${JSON.stringify(request)}` }])
+          expect(result.protocolStopReason).toBe(stopReason)
+          return JSON.parse(result.output.map(item => item.text ?? '').join(''))
+        }
+        const inside = path.join(scratchDirectory, 'new', 'unit1.json')
+        const outside = path.join(root, 'outside.json')
+        const edit = (filepath, extra = {}) => ({ kind: 'edit', rawInput: { filepath, diff: 'fixture', is_danger: false }, ...extra })
+        expect(await probe(edit(inside, { write: true }))).toEqual(providerName === 'pangea-codeagent' ? allowed : rejected)
+        expect(await access(inside).then(() => true, () => false)).toBe(providerName === 'pangea-codeagent')
+        for (const filepath of [outside, '', 'relative.json', null]) expect(await probe(edit(filepath, { write: true }))).toEqual(rejected)
+        expect(await probe({ kind: 'edit' })).toEqual(rejected)
+        for (const locations of [[], [{ path: outside }]]) expect(await probe(edit(inside, { locations }))).toEqual(rejected)
+        if (providerName === 'pangea-codeagent') {
+          expect(await probe(edit(outside, { locations: [{ path: inside }] }))).toEqual(rejected)
+          const escape = path.join(scratchDirectory, 'escape')
+          await symlink(root, escape, process.platform === 'win32' ? 'junction' : 'dir')
+          expect(await probe(edit(path.join(escape, 'outside.json')))).toEqual(rejected)
+        }
+        for (const kind of ['delete', 'move']) expect(await probe(edit(inside, { kind }))).toEqual(rejected)
+        // Use the offered opaque reject ID, never a hardcoded option name or persistent policy.
+        expect(await probe(edit(outside, { options: [
+          { optionId: 'persistent', kind: 'reject_always', name: 'Never' },
+          { optionId: 'deny-opaque-42', kind: 'reject_once', name: 'No' },
+        ] }))).toEqual({ outcome: { outcome: 'selected', optionId: 'deny-opaque-42' } })
+        expect(await probe(edit(outside, { options: [{ optionId: 'always', kind: 'allow_always', name: 'Always' }] }), 'cancelled'))
+          .toEqual({ outcome: { outcome: 'cancelled' } })
+        expect(await access(outside).then(() => true, () => false)).toBe(false)
+        // A denied permission must not strand the next turn in the ACP fixture.
+        expect(await probe({ kind: 'read' })).toEqual({ outcome: { outcome: 'selected', optionId: 'always' } })
+      } finally {
+        await run?.dispose()
+        await context.fiber.dispose()
+        await rm(root, { recursive: true, force: true })
+      }
+    }, 20000)
+  }
+
   it('limits native edits to each worker scratch while preserving reads and shell permissions', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'pangea-acp-native-'))
     const directories = [path.join(root, 'one'), path.join(root, 'two')]
@@ -163,7 +217,7 @@ describe('patched ACP provider launch', () => {
     const probe = async (run, request) => JSON.parse((await run.continuePrompt([{ type: 'text', text: `PERMISSION ${JSON.stringify(request)}` }])).output.map(item => item.text ?? '').join(''))
     const native = (file, extra = {}) => ({ kind: 'edit', locations: [{ path: file }], write: true, ...extra })
     const allowed = { outcome: { outcome: 'selected', optionId: 'once' } }
-    const rejected = { outcome: { outcome: 'cancelled' } }
+    const rejected = { outcome: { outcome: 'selected', optionId: 'reject' } }
     try {
       for (const scratchDirectory of directories) {
         const run = await provider.start({ scratchDirectory, prompt: [], signal: new AbortController().signal,
@@ -189,7 +243,7 @@ describe('patched ACP provider launch', () => {
       expect(await probe(runs[0], native(path.join(directories[0], 'dangling', 'file.json')))).toEqual(rejected)
       await symlink(path.dirname(targets[0]), path.join(directories[0], 'inside'), process.platform === 'win32' ? 'junction' : 'dir')
       expect(await probe(runs[0], native(path.join(directories[0], 'inside', 'linked.json')))).toEqual(allowed)
-      expect(await probe(runs[0], native(targets[0], { options: [{ optionId: 'always', kind: 'allow_always', name: 'Always' }] }))).toEqual(rejected)
+      expect(await probe(runs[0], native(targets[0], { options: [{ optionId: 'always', kind: 'allow_always', name: 'Always' }] }))).toEqual({ outcome: { outcome: 'cancelled' } })
       for (const kind of ['read', 'execute']) expect(await probe(runs[0], { kind, locations: [{ path: outside }] })).toEqual({ outcome: { outcome: 'selected', optionId: 'always' } })
       const identity = { taskId: runs[0].id, remoteSessionId: runs[0].remoteSessionId }
       await runs[0].dispose()
