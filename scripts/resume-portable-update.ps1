@@ -61,7 +61,7 @@ if ($Plan.schema_version -notin @(1,2) -or $PackageType -notin @('patch','full')
 # The helper owns the installation-scoped lock before reading current version
 # or recovering an interrupted rename. The installation may be absent here.
 # It recovers a pending transaction and restarts the old version only; applying
-# the verified patch then requires a fresh retry. It enforces source >= 2.0.20.
+# the verified patch then requires a fresh retry. It enforces source >= 2.1.5.
 # Keep the original plan, including its verified package hash, for diagnosis.
 # The old PID may have been reused; do not wait for an unrelated process.
 $Plan.parent_pid = 0

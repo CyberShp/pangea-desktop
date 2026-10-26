@@ -35,6 +35,7 @@ export interface UpdateStatus {
   percent?: number
   message?: string
   manual: boolean
+  canForceStop?: boolean
 }
 
 export interface UpdateInstallResult {

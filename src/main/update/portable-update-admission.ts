@@ -1,19 +1,19 @@
 import { randomUUID } from 'node:crypto'
 
 /** Freeze the authoritative Harness admission gate before inspecting sessions. */
-export async function acquirePortableUpdateAdmission(harnessUrl: string | undefined): Promise<() => Promise<void>> {
+export async function acquirePortableUpdateAdmission(harnessUrl: string | undefined, force = false): Promise<() => Promise<void>> {
   if (!harnessUrl) throw new Error('工作台尚未就绪，无法确认任务状态，请稍后重试升级。')
   const endpoint = new URL('/api/pangea-product/update-admission', harnessUrl)
   const token = randomUUID()
-  const request = async (action: 'freeze' | 'release'): Promise<void> => {
+  const request = async (action: 'freeze' | 'force-stop' | 'release'): Promise<void> => {
     const response = await fetch(endpoint, {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-pangea-desktop-update': '1' },
-      body: JSON.stringify({ action, token }), signal: AbortSignal.timeout(10_000)
+      body: JSON.stringify({ action, token }), signal: AbortSignal.timeout(action === 'force-stop' ? 120_000 : 10_000)
     })
     if (response.status === 404) throw new Error('当前工作台运行时不支持升级任务保护，请重新启动工作台后重试。')
-    const value = await response.json() as { ok?: boolean; frozen?: boolean; token?: string; error?: string; message?: string }
-    if (!response.ok || value.ok !== true) throw new Error(typeof value.message === 'string' ? value.message : typeof value.error === 'string' ? value.error : '无法确认升级任务保护状态。')
-    if (action === 'freeze' && (value.frozen !== true || value.token !== token)) throw new Error('升级任务保护未确认，已取消升级。')
+    const value = await response.json() as { ok?: boolean; frozen?: boolean; token?: string; error?: string; message?: string; code?: string }
+    if (!response.ok || value.ok !== true) throw Object.assign(new Error(typeof value.message === 'string' ? value.message : typeof value.error === 'string' ? value.error : '无法确认升级任务保护状态。'), { code: value.code })
+    if (action !== 'release' && (value.frozen !== true || value.token !== token)) throw new Error('升级任务保护未确认，已取消升级。')
   }
   const release = async () => {
     let failure: unknown
@@ -23,7 +23,7 @@ export async function acquirePortableUpdateAdmission(harnessUrl: string | undefi
     throw failure
   }
   try {
-    await request('freeze')
+    await request(force ? 'force-stop' : 'freeze')
   } catch (error) {
     // A lost response can follow a successful freeze. Release the same token;
     // never leave the workbench frozen merely because the handshake failed.

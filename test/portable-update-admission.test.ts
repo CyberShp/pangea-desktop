@@ -40,3 +40,22 @@ it('releases a possibly accepted freeze after an unsuccessful handshake', async 
   expect(f.actions.map(item => item.action)).toEqual(['freeze', 'release'])
   expect(f.actions[1]!.token).toBe(f.actions[0]!.token)
 })
+
+it('sends explicit force-stop and preserves the busy code for the force button', async () => {
+  const actions: string[] = []
+  const server = createServer(async (req, res) => {
+    const chunks = []
+    for await (const chunk of req) chunks.push(chunk)
+    const body = JSON.parse(Buffer.concat(chunks).toString())
+    actions.push(body.action)
+    if (body.action === 'freeze') res.writeHead(409).end(JSON.stringify({ ok: false, code: 'PANGEA_UPDATE_BUSY', message: 'busy' }))
+    else res.end(JSON.stringify({ ok: true, frozen: body.action === 'force-stop', token: body.token }))
+  })
+  servers.push(server)
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  await expect(acquirePortableUpdateAdmission(url)).rejects.toMatchObject({ code: 'PANGEA_UPDATE_BUSY' })
+  const release = await acquirePortableUpdateAdmission(url, true)
+  await release()
+  expect(actions).toEqual(['freeze', 'release', 'force-stop', 'release'])
+})

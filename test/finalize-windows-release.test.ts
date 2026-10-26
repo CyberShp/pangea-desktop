@@ -15,12 +15,12 @@ afterEach(async () => {
 
 describe('signed portable Windows package', () => {
   it('uses one ZIP for extraction and in-app package import', async () => {
-    const packageVersion = process.env.RELEASE_VERSION ?? '2.0.21'
+    const packageVersion = process.env.RELEASE_VERSION ?? '2.1.6'
     const packageChannel = process.env.PANGEA_PACKAGE_CHANNEL ??
       (packageVersion.includes('-test.') ? 'test' : 'stable')
     const currentVersion = packageChannel === 'test'
-      ? '2.0.20-test.0.0000000'
-      : '2.0.20'
+      ? '2.1.5-test.0.0000000'
+      : '2.1.5'
     const root = await mkdtemp(path.join(tmpdir(), 'pangea-portable-package-'))
     temporaryRoots.push(root)
     const appDirectory = path.join(root, 'win-unpacked')

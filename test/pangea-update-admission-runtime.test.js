@@ -8,6 +8,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { LocalSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-local'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import * as admissionPlugin from '../packages/dsh-pangea-product/update-admission.js'
 import { UpdateAdmission, installUpdateAdmission, UPDATE_ADMISSION_PATH } from '../packages/dsh-pangea-product/update-admission.js'
@@ -17,7 +18,7 @@ const cleanup = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 
-function fixture({ start = async () => ({}) } = {}) {
+function fixture({ start = async () => ({}), subprocess: providedSubprocess } = {}) {
   const routes = new Map()
   const events = new Map()
   const live = []
@@ -29,7 +30,7 @@ function fixture({ start = async () => ({}) } = {}) {
     agents: { list: () => live, create: vi.fn(async () => { const agent = createAgent(); ctx.agents.enter(agent); return { agent } }),
       resume: vi.fn(async () => { const agent = createAgent(); ctx.agents.enter(agent); return { agent } }), enter: agent => { live.push(agent) } },
     jobs: { list: owner => ownedJobs.get(owner?.id ?? '') ?? [], start: vi.fn() },
-    subprocess: { live: new Set(), terminals: new Set(), spawn: vi.fn(), spawnTerminal: vi.fn() },
+    subprocess: providedSubprocess ?? { live: new Set(), terminals: new Set(), spawn: vi.fn(), spawnTerminal: vi.fn() },
     subagents: { start: vi.fn(start), startContinuable: vi.fn(async () => ({})), followup: vi.fn(async () => ({})) },
     tools: { prepareExecution: vi.fn(async (_input, next) => next()), guard: fn => { events.set('toolGuard', fn); return () => events.delete('toolGuard') } },
     apiProxy: { sessions: { create: apiCall, fork: apiCall, prompt: apiCall, updateQueue: apiCall }, subagents: { prompt: apiCall }, goals: { create: apiCall }, respond: vi.fn() },
@@ -227,4 +228,65 @@ describe('atomic reversible upgrade admission', () => {
     expect((await fetch(base + '/api/pangea-companion/workbench', { method: 'POST' })).status).toBe(200)
     expect(work).toHaveBeenCalledOnce()
   })
+})
+
+it('force stop closes admission before cancelling owners and clears queued work before cleanup', async () => {
+  const { admission, existing, ctx } = fixture()
+  const order = []
+  existing.status = 'running'
+  existing.inbox.hasPending = true
+  existing.cancel = vi.fn((_cause, options) => {
+    expect(options.keepInbox).toBe(false)
+    expect(() => existing.send({})).toThrow(/正在准备升级/)
+    order.push('cancel')
+    existing.status = 'idle'
+    existing.inbox.hasPending = false
+  })
+  existing.whenIdle = async () => { order.push('idle') }
+  ctx.subprocess.disposeManagedProcesses = async () => { order.push('cleanup') }
+  expect(() => admission.freeze(TOKEN)).toThrow(/仍有运行/)
+  expect(await admission.forceStop(TOKEN)).toEqual({ ok: true, frozen: true, token: TOKEN })
+  expect(order).toEqual(['cancel', 'idle', 'cleanup', 'cleanup'])
+  expect(() => existing.send({})).toThrow(/正在准备升级/)
+  admission.release(TOKEN)
+})
+
+it('force stop waits for every participant and does not release admission during a pending stop', async () => {
+  const held = deferred()
+  const gate = new UpdateAdmission(() => [], ['companion'])
+  let busy = true
+  gate.registerParticipant('companion', () => busy, async () => { await held.promise; busy = false })
+  const stopping = gate.forceStop(TOKEN)
+  expect(() => gate.release(TOKEN)).toThrow(/尚未结束/)
+  expect(() => gate.run(() => 1)).toThrow(/正在准备升级/)
+  held.resolve()
+  await stopping
+  expect(gate.token).toBeNull() // a timed-out caller requested release; no stranded upgrade lock
+})
+
+it('failed or unavailable stop cannot authorize installation, and supports retry', async () => {
+  const gate = new UpdateAdmission(() => [], ['companion'])
+  gate.registerParticipant('companion', () => true)
+  await expect(gate.forceStop(TOKEN)).rejects.toThrow(/不支持强制停止/)
+  expect(gate.token).toBeNull()
+  gate.stoppers.set('companion', async () => { throw new Error('tree still alive') })
+  await expect(gate.forceStop(TOKEN)).rejects.toMatchObject({ code: 'PANGEA_UPDATE_BUSY', message: 'tree still alive' })
+  expect(gate.token).toBeNull()
+})
+
+it('force stop kills real owned Node descendants while an unrelated runtime stays alive', async () => {
+  const owner = new Context(), unrelated = new Context()
+  const owned = new LocalSubprocessRuntime(owner), other = new LocalSubprocessRuntime(unrelated)
+  cleanup.push(() => owner.fiber.dispose(), () => unrelated.fiber.dispose())
+  const script = `const {spawn}=require('node:child_process'); const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log(c.pid); setInterval(()=>{},1000)`
+  const spec = { argv: [process.execPath, '-e', script], cwd: process.cwd(), graceMs: 100,
+    stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' } }
+  const child = owned.spawn(spec), otherChild = other.spawn(spec)
+  await Promise.all([once(child.stdout, 'data'), once(otherChild.stdout, 'data')])
+  const { admission, live } = fixture({ subprocess: owned })
+  live.splice(0)
+  await admission.forceStop(TOKEN)
+  await child.waitForExit()
+  expect(owned.live.size).toBe(0)
+  expect(() => process.kill(otherChild.pid, 0)).not.toThrow()
 })

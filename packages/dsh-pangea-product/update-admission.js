@@ -20,6 +20,7 @@ export class UpdateAdmission {
     this.checkBusy = checkBusy
     this.requiredParticipants = requiredParticipants
     this.participants = new Map()
+    this.stoppers = new Map()
     this.inFlight = 0
     this.token = null
   }
@@ -39,12 +40,13 @@ export class UpdateAdmission {
     this.inFlight--
     return result
   }
-  registerParticipant(id, checkBusy) {
+  registerParticipant(id, checkBusy, stop) {
     if (this.participants.has(id)) throw new Error(`Duplicate upgrade participant: ${id}`)
     this.participants.set(id, checkBusy)
-    return () => { if (this.participants.get(id) === checkBusy) this.participants.delete(id) }
+    if (stop) this.stoppers.set(id, stop)
+    return () => { if (this.participants.get(id) === checkBusy) this.participants.delete(id); this.stoppers.delete(id) }
   }
-  freeze(token) {
+  freeze(token, allowBusy = false) {
     if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(token)) {
       throw failure('PANGEA_UPDATE_BAD_TOKEN', '升级锁标识无效。')
     }
@@ -59,15 +61,46 @@ export class UpdateAdmission {
       const busy = this.inFlight ? ['在途请求或工具操作'] : []
       busy.push(...this.checkBusy())
       for (const [id, check] of this.participants) if (check()) busy.push(id)
-      if (busy.length) throw failure('PANGEA_UPDATE_BUSY', `当前仍有运行、排队或收尾中的任务，请结束后再升级（${[...new Set(busy)].join('、')}）。`)
+      if (busy.length && !allowBusy) throw failure('PANGEA_UPDATE_BUSY', `当前仍有运行、排队或收尾中的任务，请结束后再升级（${[...new Set(busy)].join('、')}）。`)
       return { ok: true, frozen: true, token }
     } catch (error) {
       this.token = null
       throw error
     }
   }
+  async forceStop(token) {
+    if (this.forcing) throw failure('PANGEA_UPDATE_BUSY', '正在强制停止任务，请等待清理完成。')
+    this.freeze(token, true)
+    this.forcing = true
+    try {
+      const missing = this.requiredParticipants.filter(id => !this.stoppers.has(id))
+      if (missing.length) throw failure('PANGEA_UPDATE_UNAVAILABLE', `当前组件不支持强制停止：${missing.join('、')}。`)
+      const results = await Promise.allSettled([...this.stoppers.values()].map(stop => Promise.resolve().then(stop)))
+      const errors = results.filter(result => result.status === 'rejected')
+      if (errors.length) throw failure('PANGEA_UPDATE_BUSY', errors.map(result => result.reason?.message ?? String(result.reason)).join('；'))
+      // Requests admitted before the freeze may still be unwinding. Never
+      // hand off the installation while their writers are alive.
+      const deadline = Date.now() + 15000
+      while (this.inFlight || this.checkBusy().length || [...this.participants.values()].some(check => check())) {
+        if (Date.now() >= deadline) throw failure('PANGEA_UPDATE_BUSY', '停止尚未确认，已保留升级包，请重试强制停止。')
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      await this.cleanupProcesses?.()
+      return { ok: true, frozen: true, token }
+    } catch (error) {
+      this.token = null
+      throw error
+    } finally {
+      this.forcing = false
+      if (this.releaseRequested === token) { this.token = null; this.releaseRequested = null }
+    }
+  }
   release(token) {
     if (this.token && this.token !== token) throw failure('PANGEA_UPDATE_BAD_TOKEN', '不能释放另一项升级的任务锁。')
+    if (this.forcing) {
+      this.releaseRequested = token
+      throw failure('PANGEA_UPDATE_BUSY', '停止操作尚未结束，暂不能解除升级保护。')
+    }
     this.token = null
     return { ok: true, frozen: false }
   }
@@ -95,8 +128,8 @@ export function createControlHandler(admission) {
         if (body.length > 2048) throw failure('PANGEA_UPDATE_BAD_REQUEST', '升级请求过大。')
       }
       const input = JSON.parse(body)
-      if (!['freeze', 'release'].includes(input.action)) throw failure('PANGEA_UPDATE_BAD_REQUEST', '未知升级操作。')
-      json(res, 200, admission[input.action](input.token))
+      if (!['freeze', 'force-stop', 'release'].includes(input.action)) throw failure('PANGEA_UPDATE_BAD_REQUEST', '未知升级操作。')
+      json(res, 200, await (input.action === 'force-stop' ? admission.forceStop(input.token) : admission[input.action](input.token)))
     } catch (error) {
       json(res, error.code === 'PANGEA_UPDATE_BUSY' ? 409 : 400, {
         ok: false, code: error.code ?? 'PANGEA_UPDATE_UNAVAILABLE', message: error.message,
@@ -132,6 +165,28 @@ export function installUpdateAdmission(ctx, { requiredParticipants = ['companion
     // jobs, participants or an admitted tool/request, not process existence.
     return busy
   }, requiredParticipants)
+  admission.stoppers.set('harness', async () => {
+    const live = agents.list()
+    const operations = live.map(agent => (async () => {
+      agent.cancel({ kind: 'user' }, { keepInbox: false })
+      await agent.whenIdle?.()
+    })())
+    if (jobs.store instanceof Map) for (const job of jobs.store.values()) {
+      if (!terminalJobs.has(job.status)) operations.push(Promise.resolve().then(() => jobs.kill(job.id, job.owner, '强制停止并升级')))
+    }
+    // Escalate owned process/terminal trees now; waiting for whenIdle first
+    // would deadlock on an executor that ignores cancellation.
+    if (typeof subprocess.disposeManagedProcesses !== 'function') throw new Error('当前运行时不支持进程清理')
+    const settled = Promise.allSettled(operations)
+    await subprocess.disposeManagedProcesses()
+    const results = await settled
+    const errors = results.filter(result => result.status === 'rejected')
+    if (errors.length) throw new AggregateError(errors.map(result => result.reason), '分析会话停止失败')
+  })
+  admission.cleanupProcesses = async () => {
+    if (typeof subprocess.disposeManagedProcesses !== 'function') throw new Error('当前运行时不支持进程清理，无法确认升级安全。')
+    await subprocess.disposeManagedProcesses()
+  }
   function wrap(target, key, make, required = true) {
     target = original(target)
     const previous = target?.[key]

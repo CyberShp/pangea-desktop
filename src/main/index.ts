@@ -1538,11 +1538,11 @@ async function bootstrap(): Promise<void> {
   }
   if (!developmentBuild) {
     startUpdateManager({
-      prepareToInstall: async () => {
-        const release = await acquirePortableUpdateAdmission(runtime.snapshot().url)
+      prepareToInstall: async (force = false) => {
+        const release = await acquirePortableUpdateAdmission(runtime.snapshot().url, force)
         try {
           if (await mobileBridge.hasRunningSessions()) {
-            throw new Error('当前仍有分析会话运行，请等待任务结束后再重启升级。')
+            throw Object.assign(new Error('当前仍有分析会话运行，可强制停止并升级。'), { code: 'PANGEA_UPDATE_BUSY' })
           }
           return release
         } catch (error) {

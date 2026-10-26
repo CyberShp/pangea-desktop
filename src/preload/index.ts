@@ -352,7 +352,7 @@ function render(): void {
   // The failure's own words beat ours, when it has any.
   const description = element('p', 'description')
   description.textContent = installing
-    ? (updateLocale === 'zh' ? '正在打开独立升级窗口，确认窗口就绪后将自动退出。' : 'Opening the update progress window. Desktop will exit once it is ready.')
+    ? (updateLocale === 'zh' ? '正在停止相关任务、清理进程并打开升级窗口，请稍候。' : 'Opening the update progress window. Desktop will exit once it is ready.')
     : status.message ?? (productShell && status.phase === 'downloaded' && status.availableVersion
     ? `${status.availableVersion} 已验证。完成当前分析后，可以重启升级。`
     : headline.description)
@@ -378,8 +378,8 @@ function render(): void {
           ? '正在打开升级窗口…'
           : 'Opening update window…'
         : updateLocale === 'zh'
-          ? '重启并升级'
-          : 'Restart and update',
+          ? (status.canForceStop ? '强制停止并升级' : '重启并升级')
+          : (status.canForceStop ? 'Force stop and update' : 'Restart and update'),
       'primary'
     )
     if (productShell) install.insertAdjacentHTML('afterbegin', updateIcon)
@@ -387,7 +387,7 @@ function render(): void {
     install.addEventListener('click', () => {
       installing = true
       render()
-      void ipcRenderer.invoke('updates:install').then((result: UpdateInstallResult) => {
+      void ipcRenderer.invoke('updates:install', status.canForceStop === true).then((result: UpdateInstallResult) => {
         if (!result.helperLaunched) {
           installing = false
           render()

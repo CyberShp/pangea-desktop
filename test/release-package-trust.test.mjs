@@ -273,13 +273,13 @@ async function patchFixture(t) {
   const root = await temporary(t)
   const base = path.join(root, 'base')
   const target = path.join(root, 'target')
-  await writePackage(base, { version: '2.0.20', files: { 'resources/old.txt': 'delete me' } })
-  const result = await writePackage(target, { version: '2.0.21', compact: true, files: { 'PANGEA Desktop.exe': 'new executable', 'resources/new.txt': 'add me' } })
+  await writePackage(base, { version: '2.1.5', files: { 'resources/old.txt': 'delete me' } })
+  const result = await writePackage(target, { version: '2.1.6', compact: true, files: { 'PANGEA Desktop.exe': 'new executable', 'resources/new.txt': 'add me' } })
   const key = path.join(root, 'key.pem')
   await writeFile(key, keys.privateKey.export({ format: 'pem', type: 'pkcs8' }))
   const run = output => spawnSync(process.execPath, [
     patchScript, '--base-dir', base, '--target-dir', target, '--private-key', key,
-    '--from-version', '2.0.20', '--to-version', '2.0.21', '--channel', 'stable', '--output', output
+    '--from-version', '2.1.5', '--to-version', '2.1.6', '--channel', 'stable', '--output', output
   ], { encoding: 'utf8' })
   return { root, base, target, run, ...result }
 }
@@ -377,13 +377,13 @@ function crc32(bytes) {
 }
 
 test('direct patch generator rejects retired sources before reading package files', patchOptions, async () => {
-  for (const fromVersion of ['1.0.9', '2.0.0', '2.0.6', '2.0.6-test.99.abcdef0', '2.0.19', '2.0.19-test.99.abcdef0']) {
+  for (const fromVersion of ['1.0.9', '2.0.0', '2.0.6', '2.0.6-test.99.abcdef0', '2.1.4', '2.1.4-test.99.abcdef0']) {
     const result = spawnSync(process.execPath, [
       patchScript, '--base-dir', 'absent-base', '--target-dir', 'absent-target', '--private-key', 'absent-key',
-      '--from-version', fromVersion, '--to-version', '2.0.21', '--channel', 'stable', '--output', 'absent-output.zip'
+      '--from-version', fromVersion, '--to-version', '2.1.6', '--channel', 'stable', '--output', 'absent-output.zip'
     ], { encoding: 'utf8' })
     assert.notEqual(result.status, 0)
-    assert.match(result.stderr, /Patch base must be 2.0.20 or newer/)
+    assert.match(result.stderr, /Patch base must be 2.1.5 or newer/)
     assert.doesNotMatch(result.stderr, /ENOENT/)
   }
 })

@@ -120,7 +120,7 @@ describe('online update feedback', () => {
   it('separates download, verification and no-update states', () => {
     expect(updateMessage({ ...downloading, source: 'github', activity: 'download' }, 'zh')).toBe('正在下载升级包 42%')
     expect(updateMessage({ ...downloading, source: 'github', activity: 'verify' }, 'zh')).toBe('正在校验升级包 42%')
-    const latest: UpdateStatus = { phase: 'up-to-date', currentVersion: '2.0.22', manual: true, source: 'github' }
+    const latest: UpdateStatus = { phase: 'up-to-date', currentVersion: '2.1.7', manual: true, source: 'github' }
     expect(shouldShowUpdate(latest)).toBe(true)
     expect(shouldShowUpdate({ ...latest, manual: false })).toBe(false)
     expect(updateMessage(latest, 'zh')).toBe('已是最新版本')

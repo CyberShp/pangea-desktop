@@ -7,7 +7,7 @@ export type UpdateStateEvent =
   | { type: 'verify' }
   | { type: 'progress'; percent: number }
   | { type: 'downloaded'; version: string; packageType?: 'full' | 'patch'; baseVersion?: string }
-  | { type: 'install-error'; message: string }
+  | { type: 'install-error'; message: string; canForceStop?: boolean }
   | { type: 'restore-error'; version: string; message: string }
   | { type: 'error'; message: string; packageType?: 'patch'; baseVersion?: string; availableVersion?: string }
   | { type: 'unsupported'; message: string }
@@ -44,7 +44,7 @@ export function reduceUpdateStatus(
         ...(event.baseVersion ? { baseVersion: event.baseVersion } : {})
       }
     case 'install-error':
-      return { ...current, phase: 'downloaded', message: event.message }
+      return { ...current, phase: 'downloaded', message: event.message, canForceStop: event.canForceStop === true }
     case 'restore-error':
       return {
         ...base,

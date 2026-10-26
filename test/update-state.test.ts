@@ -121,3 +121,11 @@ describe('desktop update state', () => {
     })
   })
 })
+
+it('offers force stop only for task-blocked installs and clears it on another failure', () => {
+  const initial = initialUpdateStatus('2.1.4')
+  const downloaded = reduceUpdateStatus(initial, { type: 'downloaded', version: '2.1.5' })
+  const busy = reduceUpdateStatus(downloaded, { type: 'install-error', message: 'busy', canForceStop: true })
+  expect(busy.canForceStop).toBe(true)
+  expect(reduceUpdateStatus(busy, { type: 'install-error', message: 'bad package' }).canForceStop).toBe(false)
+})

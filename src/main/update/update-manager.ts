@@ -31,7 +31,7 @@ const LAST_UPDATE_RESULT = 'last-update-result.json'
 
 let status = initialUpdateStatus(app.getVersion())
 type ReleaseUpdateAdmission = () => Promise<void>
-let prepareToInstall: (() => Promise<void | ReleaseUpdateAdmission>) | undefined
+let prepareToInstall: ((force?: boolean) => Promise<void | ReleaseUpdateAdmission>) | undefined
 let handlersRegistered = false
 let onlineController: AbortController | undefined
 let startupTimer: ReturnType<typeof setTimeout> | undefined
@@ -53,10 +53,10 @@ export function registerUpdateHandlers(): void {
   ipcMain.handle('updates:status', () => getUpdateStatus())
   ipcMain.handle('updates:check', () => checkForOnlineUpdate(true))
   ipcMain.handle('updates:import', () => importPortableUpdatePackage())
-  ipcMain.handle('updates:install', () => installImportedUpdate())
+  ipcMain.handle('updates:install', (_event, force?: unknown) => installImportedUpdate(force === true))
 }
 
-export function startUpdateManager(options: { prepareToInstall: () => Promise<void | ReleaseUpdateAdmission> }): void {
+export function startUpdateManager(options: { prepareToInstall: (force?: boolean) => Promise<void | ReleaseUpdateAdmission> }): void {
   prepareToInstall = options.prepareToInstall
   loadedConfig = loadUpdateConfig()
   restoreLastUpdateFailure()
@@ -240,14 +240,15 @@ export async function importPortableUpdatePackage(): Promise<UpdateStatus> {
   return getUpdateStatus()
 }
 
-export async function installImportedUpdate(): Promise<UpdateInstallResult> {
+export async function installImportedUpdate(force = false): Promise<UpdateInstallResult> {
   const imported = stagedPackage
   if (status.phase !== 'downloaded' || !imported || installing) return { helperLaunched: false }
   installing = true
   let releaseAdmission: void | ReleaseUpdateAdmission = undefined
   try {
     if (!prepareToInstall) throw new Error('升级安装保护尚未就绪，请稍后重试。')
-    releaseAdmission = await prepareToInstall()
+    if (force && status.canForceStop !== true) throw new Error('请先检查升级任务状态。')
+    releaseAdmission = await prepareToInstall(force)
     await launchPortableUpdateHelper(imported)
     // Let the IPC reply render the confirmed handoff before Desktop exits.
     setTimeout(() => app.quit(), 1000)
@@ -259,7 +260,7 @@ export async function installImportedUpdate(): Promise<UpdateInstallResult> {
       catch { message += ' 任务保护解除未确认，请重新启动工作台后继续使用。' }
     }
     installing = false
-    transition({ type: 'install-error', message }, true)
+    transition({ type: 'install-error', message, canForceStop: (error as { code?: string })?.code === 'PANGEA_UPDATE_BUSY' }, true)
     return { helperLaunched: false }
   }
 }
