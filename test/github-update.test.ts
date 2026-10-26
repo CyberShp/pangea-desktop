@@ -115,3 +115,33 @@ it('aborts a stalled metadata request after 60 seconds', async () => {
     await check
   } finally { vi.useRealTimers() }
 })
+
+
+describe('online update network diagnostics', () => {
+  it.each([
+    [407, '代理要求认证'], [504, '网关等待上游超时'], [403, '访问被拒绝']
+  ])('identifies discovery failure HTTP %s without echoing gateway HTML', async (status, message) => {
+    const client = new GitHubUpdateClient(async () => new Response('company confidential gateway HTML', { status: Number(status) }), new AbortController().signal)
+    await expect(client.check('2.1.6', publicKey)).rejects.toThrow(`查询版本（api.github.com）：HTTP ${status}：${message}`)
+  })
+  it('distinguishes API rate limit from generic forbidden', async () => {
+    const client = new GitHubUpdateClient(async () => new Response('', { status: 403, headers: { 'x-ratelimit-remaining': '0' } }), new AbortController().signal)
+    await expect(client.check('2.1.6', publicKey)).rejects.toThrow('限额已耗尽')
+  })
+  it('reports the failing manifest redirect host without exposing signed query strings', async () => {
+    const f = fixture()
+    const target = 'https://release-assets.githubusercontent.com/file?token=private'
+    f.responses.set(f.url(UPDATE_MANIFEST_NAME), () => new Response(null, { status: 302, headers: { location: target } }))
+    f.responses.set(target, () => new Response('private gateway details', { status: 504 }))
+    try { await f.client.check('2.1.6', publicKey); expect.fail() } catch (error) {
+      expect(String(error)).toContain('下载更新清单（release-assets.githubusercontent.com）：HTTP 504')
+      expect(String(error)).not.toContain('private')
+    }
+  })
+  it('rejects redirected untrusted hosts before fetching them', async () => {
+    const f = fixture()
+    f.responses.set(f.url(UPDATE_MANIFEST_NAME), () => new Response(null, { status: 302, headers: { location: 'https://other.example/asset' } }))
+    await expect(f.client.check('2.1.6', publicKey)).rejects.toThrow('允许列表')
+    expect(f.fetcher.mock.calls.some(([url]) => url.includes('other.example'))).toBe(false)
+  })
+})

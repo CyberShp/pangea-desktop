@@ -19,7 +19,7 @@ export interface OnlineUpdate {
 export class GitHubUpdateClient {
   constructor(private readonly fetcher: UpdateFetch, private readonly signal: AbortSignal) {}
 
-  private async consume(url: string, limit: number, consume: (chunk: Uint8Array) => Promise<void>): Promise<number> {
+  private async consume(url: string, limit: number, stage: string, consume: (chunk: Uint8Array) => Promise<void>): Promise<number> {
     const controller = new AbortController()
     const abort = () => controller.abort()
     this.signal.addEventListener('abort', abort, { once: true })
@@ -43,7 +43,16 @@ export class GitHubUpdateClient {
         if (!location || redirects === 5) throw new Error('GitHub 下载重定向无效。')
         url = new URL(location, url).href
       }
-      if (!response?.ok || !response.body) throw new Error(`GitHub 更新请求失败（HTTP ${response?.status ?? 'unknown'}）。请检查网络或仓库访问权限。`)
+      if (!response?.ok || !response.body) {
+        const status = response?.status
+        const reason = status === 407 ? '代理要求认证，请配置代理账号和密码。'
+          : status === 504 ? '网关等待上游超时；请对比浏览器能否下载同一附件。'
+          : (status === 403 || status === 429) && response?.headers.get('x-ratelimit-remaining') === '0' ? 'GitHub API 限额已耗尽，请稍后再试。'
+          : status === 403 ? '访问被拒绝；可能是网关策略或 GitHub 限制，请检查网络设置。'
+          : '请检查代理、网络或发布附件是否可访问。'
+        await response?.body?.cancel()
+        throw new Error(`HTTP ${status ?? 'unknown'}：${reason}`)
+      }
       if (Number(response.headers.get('content-length')) > limit) {
         await response.body.cancel()
         throw new Error('GitHub 更新内容超过大小限制。')
@@ -61,15 +70,18 @@ export class GitHubUpdateClient {
         }
       } finally { await reader.cancel(); reader.releaseLock() }
       return received
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '更新请求失败。'
+      throw new Error(`${stage}（${new URL(url).hostname}）：${message}`)
     } finally {
       clearTimeout(timer!)
       this.signal.removeEventListener('abort', abort)
     }
   }
 
-  private async bytes(url: string, limit = 2 * 1024 * 1024): Promise<Buffer> {
+  private async bytes(url: string, stage: string, limit = 2 * 1024 * 1024): Promise<Buffer> {
     const chunks: Buffer[] = []
-    await this.consume(url, limit, async chunk => { chunks.push(Buffer.from(chunk)) })
+    await this.consume(url, limit, stage, async chunk => { chunks.push(Buffer.from(chunk)) })
     return Buffer.concat(chunks)
   }
 
@@ -79,7 +91,7 @@ export class GitHubUpdateClient {
     // Enumerate by channel instead of relying on /latest, which omits test releases.
     for (let page = 1; ; page++) {
       if (page > 100) throw new Error('GitHub Release 数量超过检查上限，请稍后重试。')
-      const releases = JSON.parse((await this.bytes(`https://api.github.com/repos/${UPDATE_REPOSITORY}/releases?per_page=100&page=${page}`)).toString()) as Release[]
+      const releases = JSON.parse((await this.bytes(`https://api.github.com/repos/${UPDATE_REPOSITORY}/releases?per_page=100&page=${page}`, '查询版本')).toString()) as Release[]
       if (!Array.isArray(releases)) throw new Error('GitHub Release 响应无效。')
       for (const release of releases) {
         if (release.draft || release.prerelease !== (channel === 'test') || !release.tag_name?.startsWith('v')) continue
@@ -98,8 +110,8 @@ export class GitHubUpdateClient {
       if (item.browser_download_url !== expected) throw new Error('Release 附件地址与锁定版本不一致。')
       return item
     }
-    const manifestBytes = await this.bytes(asset(UPDATE_MANIFEST_NAME).browser_download_url)
-    const signature = await this.bytes(asset(`${UPDATE_MANIFEST_NAME}.sig`).browser_download_url, 1024)
+    const manifestBytes = await this.bytes(asset(UPDATE_MANIFEST_NAME).browser_download_url, '下载更新清单')
+    const signature = await this.bytes(asset(`${UPDATE_MANIFEST_NAME}.sig`).browser_download_url, '下载清单签名', 1024)
     const key = createPublicKey(publicKeyPem)
     if (key.asymmetricKeyType !== 'ed25519' || !verify(null, manifestBytes, key, Buffer.from(signature.toString().trim(), 'base64'))) {
       throw new Error('在线更新清单签名校验失败。')
@@ -128,7 +140,7 @@ export class GitHubUpdateClient {
     try {
       const hash = createHash('sha256')
       let received = 0
-      await this.consume(update.asset.browser_download_url, update.asset.size, async chunk => {
+      await this.consume(update.asset.browser_download_url, update.asset.size, '下载安装包', async chunk => {
         await file.writeFile(chunk)
         hash.update(chunk)
         received += chunk.byteLength

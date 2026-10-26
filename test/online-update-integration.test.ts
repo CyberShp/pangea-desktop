@@ -11,6 +11,7 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: (_: string, status: unknown) => mocks.messages.push(status) } }] },
   dialog: {}, ipcMain: { handle: vi.fn() }, net: { fetch: mocks.fetch }
 }))
+vi.mock('../src/main/update/update-network', async importOriginal => ({ ...(await importOriginal<any>()), createUpdateTransport: async () => ({ fetch: mocks.fetch, close: async () => {} }) }))
 vi.mock('../src/main/update/update-capability', () => ({ canImportPortableUpdate: () => true }))
 vi.mock('../src/main/update/launch-portable-helper', () => ({ launchPortableHelper: mocks.launch }))
 

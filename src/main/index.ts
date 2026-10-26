@@ -1253,6 +1253,10 @@ function installMenu(): void {
                 click: () => void checkForOnlineUpdate(true).catch(showUnexpectedError)
               },
               {
+                label: isChinese ? '在线更新网络设置…' : 'Update Network Settings…',
+                click: () => mainWindow?.webContents.send('updates:network-open')
+              },
+              {
                 label: isChinese ? '导入升级包…' : 'Import Update Package…',
                 accelerator: 'CmdOrCtrl+U',
                 click: () => void importPortableUpdatePackage().catch(showUnexpectedError)

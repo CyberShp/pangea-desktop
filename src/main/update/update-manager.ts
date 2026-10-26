@@ -1,10 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, net, type OpenDialogOptions } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import type { UpdateInstallResult, UpdateStatus } from '../../shared/contracts'
 import { stagePortablePackage, type StagedPortablePackage } from './portable-package-validator'
 import { isPortablePatchArchive, PortablePatchBaseVersionMismatch, stagePortablePatch, type StagedPortablePatch } from './portable-patch-validator'
+import { createUpdateTransport, UpdateNetworkStore } from './update-network'
 import { GitHubUpdateClient } from './github-update'
 import { assertSupportedPortableUpgradeSource } from './portable-update'
 import type { PortableUpdateConfig } from './portable-update'
@@ -40,6 +41,11 @@ let installing = false
 let loadedConfig: LoadedUpdateConfig | undefined
 type StagedImport = StagedPortablePackage | StagedPortablePatch
 
+let networkStore: UpdateNetworkStore | undefined
+function getNetworkStore(): UpdateNetworkStore {
+  return networkStore ??= new UpdateNetworkStore(join(app.getPath('userData'), 'update-network.json'))
+}
+
 let stagedPackage: StagedImport | undefined
 let stagedRoot: string | undefined
 
@@ -50,6 +56,17 @@ export function getUpdateStatus(): UpdateStatus {
 export function registerUpdateHandlers(): void {
   if (handlersRegistered) return
   handlersRegistered = true
+  const authorizeNetworkSettings = (event: Electron.IpcMainInvokeEvent) => {
+    if (!BrowserWindow.fromWebContents(event.sender) || event.senderFrame !== event.sender.mainFrame) {
+      throw new Error('不允许从此窗口修改更新网络设置。')
+    }
+  }
+  ipcMain.handle('updates:network-get', event => { authorizeNetworkSettings(event); return getNetworkStore().view() })
+  ipcMain.handle('updates:network-save', async (event, input: unknown) => {
+    authorizeNetworkSettings(event)
+    if (importing || installing) throw new Error('请等待当前更新操作结束后再修改网络设置。')
+    return getNetworkStore().save(input)
+  })
   ipcMain.handle('updates:status', () => getUpdateStatus())
   ipcMain.handle('updates:check', () => checkForOnlineUpdate(true))
   ipcMain.handle('updates:import', () => importPortableUpdatePackage())
@@ -90,9 +107,11 @@ export async function checkForOnlineUpdate(manual = true): Promise<UpdateStatus>
   const controller = new AbortController()
   onlineController = controller
   transition({ type: 'check', manual, source: 'github' })
+  let transport: Awaited<ReturnType<typeof createUpdateTransport>> | undefined
   try {
     assertSupportedPortableUpgradeSource(app.getVersion())
-    const client = new GitHubUpdateClient((url, init) => net.fetch(url, init), controller.signal)
+    transport = await createUpdateTransport(await getNetworkStore().get())
+    const client = new GitHubUpdateClient(transport.fetch, controller.signal)
     const update = await client.check(app.getVersion(), config.publicKeyPem)
     if (!update) {
       transition({ type: 'up-to-date' })
@@ -123,6 +142,7 @@ export async function checkForOnlineUpdate(manual = true): Promise<UpdateStatus>
     catch (cleanupError) { console.warn('[portable-updater] staging cleanup failed', cleanupError) }
     transition({ type: 'error', message: controller.signal.aborted ? '在线更新已取消。' : errorMessage(error) }, manual)
   } finally {
+    try { await transport?.close() } catch { console.warn('[portable-updater] network session cleanup failed') }
     onlineController = undefined
     importing = false
   }

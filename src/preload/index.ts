@@ -1,3 +1,4 @@
+import { openUpdateNetworkSettings } from './update-network-view'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { UpdateInstallResult, UpdateStatus } from '../shared/contracts'
 import {
@@ -370,6 +371,12 @@ function render(): void {
     body.appendChild(progress)
   }
 
+  if (status.phase === 'error' && status.source === 'github') {
+    const settings = button('在线更新网络设置', 'primary')
+    settings.addEventListener('click', () => { void openUpdateNetworkSettings() })
+    body.appendChild(settings)
+  }
+
   if (status.phase === 'downloaded') {
     const actions = element('div', 'actions')
     const install = button(
@@ -596,6 +603,8 @@ const mobileButtonStyles = `
   #${MOBILE_BUTTON_ID} > span { position:absolute; top:4px; right:4px; width:7px; height:7px; border:1.5px solid var(--dsw-specific-sidebar-fill,#fff); border-radius:50%; background:#4da66d; opacity:0; }
   #${MOBILE_BUTTON_ID}.is-connected > span { opacity:1; }
 `
+
+ipcRenderer.on('updates:network-open', () => { void openUpdateNetworkSettings() })
 
 ipcRenderer.on('updates:status-changed', (_event, status: UpdateStatus) => {
   receivedStatusEvent = true
