@@ -75,12 +75,17 @@ createInterface({ input: process.stdin }).on('line', line => {
       for (let index = 0; index < 320; index++) pending(`bounded-${index}`)
       for (let index = 0; index < 20; index++) update({ sessionUpdate: 'tool_call_update', toolCallId: 'bounded-0', status: 'completed', title: { invalid: 'PRIVATE_INVALID_TITLE' } })
     } else if (mode === 'lifecycle-cross-request') {
-      if (promptCount === 1) pending('old-tool')
-      else {
+      if (promptCount === 1) {
+        pending('old-tool')
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'old-tool', status: 'completed', rawOutput: { stdout: 'old-done', exitCode: 0 } })
+      } else {
         update({ sessionUpdate: 'tool_call_update', toolCallId: 'old-tool', title: 'late metadata' })
         send({ method: 'session/update', params: { sessionId: 'foreign-fixture', update: { sessionUpdate: 'tool_call', toolCallId: 'foreign-tool', title: 'Terminal', kind: 'execute', status: 'pending', rawInput: {} } } })
         update({ sessionUpdate: 'tool_call_update', toolCallId: 'foreign-tool', status: 'completed' })
       }
+    } else if (mode === 'lifecycle-unclosed-continue') {
+      pending('stuck-read')
+      setTimeout(() => update({ sessionUpdate: 'tool_call_update', toolCallId: 'stuck-read', status: 'completed', rawOutput: { stdout: 'read-done', exitCode: 0 } }), 40)
     } else {
       pending('lifecycle-tool', { title: 'PRIVATE_TITLE_BODY', rawInput: { command: 'PRIVATE_COMMAND_BODY', token: 'PRIVATE_TOKEN_BODY' } })
       update({ sessionUpdate: 'tool_call_update', toolCallId: 'lifecycle-tool', status: 'in_progress' })

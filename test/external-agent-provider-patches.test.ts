@@ -69,6 +69,9 @@ describe('external Agent provider patches', () => {
     expect(acpProvider).toContain('const windowsBatch = process.platform === "win32"')
     expect(acpProvider).toContain('windowsBatch: spec.windowsBatch')
     expect(acpProvider).toContain('launchStage: "spawn_process"')
+    expect(acpProvider).toContain('ACP_CONTINUATION_NOT_IDLE')
+    expect(acpProvider).toContain('continuation_rejected')
+    expect(acpProvider).toContain('unclosed_tools')
   })
 
   it('ships the shared command probe through the product package export', async () => {

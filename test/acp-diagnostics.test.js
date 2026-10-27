@@ -187,9 +187,35 @@ it('continues observing late terminal updates and preserves the earlier end-of-t
   }, {}, { onSessionEvent: event => { events.push(event); if (event.type === 'session_update' && event.update.status === 'completed') notifyLate() } })
 })
 
-it('retains prior request and actual remote session provenance without changing existing active-tool policy', async () => {
+it('rejects continuation while tools from the prior turn still lack a terminal status', async () => {
+  const events = []
+  await fixtureRun('lifecycle-unclosed-continue', 'inspect', async (run, result) => {
+    expect(result).toMatchObject({ stopReason: 'completed', protocolStopReason: 'end_turn' })
+    expect(run.readDiagnostics()).toMatchObject({ activeToolCount: 1 })
+    expect(run.readDiagnostics().toolLifecycle).toMatchObject({ unclosed_count: 1, pending_count: 1 })
+    const promptsBefore = events.filter(event => event.type === 'prompt').length
+    await expect(run.continuePrompt([{ type: 'text', text: 'must not interrupt live tools' }]))
+      .rejects.toThrow(/not idle for continuation/)
+    expect(events.filter(event => event.type === 'prompt')).toHaveLength(promptsBefore)
+    expect(events.find(event => event.type === 'continuation_rejected')).toMatchObject({
+      reason: 'unclosed_tools', unclosed_count: 1, active_tool_count: 1,
+    })
+    expect(run.readDiagnostics().toolLifecycle.tools[0]).toMatchObject({ tool_id: 'stuck-read', status: 'pending' })
+    await vi.waitFor(() => {
+      expect(run.readDiagnostics()).toMatchObject({ activeToolCount: 0 })
+      expect(run.readDiagnostics().toolLifecycle.unclosed_count).toBe(0)
+    }, { timeout: 1000 })
+    const resumed = await run.continuePrompt([{ type: 'text', text: 'safe after terminal' }])
+    expect(resumed).toMatchObject({ stopReason: 'completed', protocolStopReason: 'end_turn' })
+    expect(events.filter(event => event.type === 'prompt')).toHaveLength(promptsBefore + 1)
+    expect(events.filter(event => event.type === 'continuation_rejected')).toHaveLength(1)
+  }, {}, { onSessionEvent: event => events.push(event) })
+})
+
+it('retains prior request and remote session provenance after an idle prior turn', async () => {
   const events = []
   await fixtureRun('lifecycle-cross-request', 'inspect', async run => {
+    expect(run.readDiagnostics().toolLifecycle.unclosed_count).toBe(0)
     await run.continuePrompt([{ type: 'text', text: 'next request' }])
     const prompts = events.filter(event => event.type === 'prompt')
     const lifecycle = run.readDiagnostics().toolLifecycle
@@ -197,7 +223,7 @@ it('retains prior request and actual remote session provenance without changing 
     // The existing execution map still resets statuses each turn. This change
     // reports that behavior and the original owner; it does not silently fix it.
     expect(lifecycle.tools[0]).toMatchObject({ tool_id: 'old-tool', status: 'unknown', request_id: prompts[0].request_id,
-      remote_session_id: 'remote-fixture', received_update_count: 2, accepted_update_count: 2 })
+      remote_session_id: 'remote-fixture', received_update_count: 3, accepted_update_count: 3 })
     const foreign = events.filter(event => event.type === 'acp_tool_transport' && event.tool_id === 'foreign-tool')
     expect(foreign).toEqual([
       expect.objectContaining({ remote_session_id: 'foreign-fixture', request_id: prompts[1].request_id, status: 'pending' }),

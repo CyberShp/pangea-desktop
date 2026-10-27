@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
-index b89ccf2..eb2cc11 100644
+index b89ccf2..312acb4 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-subagent-acp/lib/index.js
 @@ -1,10 +1,12 @@
@@ -562,7 +562,7 @@ index b89ccf2..eb2cc11 100644
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -189,48 +623,160 @@ async function startAcpRun(request, spec) {
+@@ -189,48 +623,186 @@ async function startAcpRun(request, spec) {
  	} catch (error) {
  		request.signal.removeEventListener("abort", onAbort);
  		await disposeProcess();
@@ -697,11 +697,37 @@ index b89ccf2..eb2cc11 100644
 +		},
 +		continuePrompt(prompt) {
 +			if (recoveryStarted) return Promise.reject(new Error("ACP worker stopped for recovery; restore the original session before continuing"));
-+			turn = turn.then(() => {
++			// Preserve the last successful turn as the chain head when admission
++			// rejects. Otherwise one blocked continue would poison later resumes
++			// after tools finally report a terminal status.
++			const prior = turn;
++			const attempt = prior.then(() => {
 +				if (recoveryStarted) throw new Error("ACP worker stopped for recovery; restore the original session before continuing");
-+				return flags.cancelled ? { output: collectOutput(), stopReason: "aborted" } : runPrompt(prompt);
++				if (flags.cancelled) return { output: collectOutput(), stopReason: "aborted" };
++				// end_turn alone does not prove the worker is idle. A host that
++				// continues while tools still lack a terminal status can interrupt
++				// live reads and blow the next prompt past the model input limit.
++				const lifecycle = toolLifecycle.snapshot();
++				const activeTools = diagnostics.activeToolCount ?? 0;
++				if (lifecycle.unclosed_count > 0 || activeTools > 0) {
++					emitSessionEvent("continuation_rejected", {
++						reason: "unclosed_tools",
++						unclosed_count: lifecycle.unclosed_count,
++						active_tool_count: activeTools,
++						tool_lifecycle: lifecycle
++					});
++					throw Object.assign(
++						new Error(`ACP turn is not idle for continuation; ${lifecycle.unclosed_count || activeTools} tool(s) still lack a terminal status`),
++						{ code: "ACP_CONTINUATION_NOT_IDLE" }
++					);
++				}
++				return runPrompt(prompt);
 +			});
-+			return turn;
++			turn = attempt.catch((error) => {
++				if (error?.code === "ACP_CONTINUATION_NOT_IDLE") return prior;
++				throw error;
++			});
++			return attempt;
 +		},
 +		quiesceForRecovery() {
 +			if (recoveryQuiescence) return recoveryQuiescence;
@@ -741,7 +767,7 @@ index b89ccf2..eb2cc11 100644
  		localAgent: void 0,
  		result,
  		dispose() {
-@@ -257,10 +803,12 @@ const inject = ["subagents", "subprocess"];
+@@ -257,10 +829,12 @@ const inject = ["subagents", "subprocess"];
  const Config = z.object({
  	providerName: z.string().default("acp"),
  	command: z.string().required(),
@@ -754,7 +780,7 @@ index b89ccf2..eb2cc11 100644
  	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
  	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
  });
-@@ -331,24 +879,81 @@ var AcpProvider = class {
+@@ -331,24 +905,81 @@ var AcpProvider = class {
  		this.ctx = ctx;
  		this.config = config;
  	}
