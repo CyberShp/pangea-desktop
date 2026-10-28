@@ -284,6 +284,10 @@ it('observes real cancellation followed by a late tool result without inventing 
     await late
     expect(events.at(-1)).toMatchObject({ type: 'session_update', request_id: end.request_id, update: { status: 'completed', rawOutput: { stdout: 'late tool result' } } })
     expect(events.filter(event => event.type === 'prompt')).toHaveLength(1)
+    if (process.platform !== 'win32') {
+      expect(await run.stopExecution()).toMatchObject({ confirmed: true, processTreeStopped: true })
+      expect(run.readDiagnostics().processExited).toBe(true)
+    }
   } finally { await run?.dispose(); await context.fiber.dispose() }
 })
 

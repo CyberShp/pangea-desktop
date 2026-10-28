@@ -134,7 +134,7 @@ diff --git a/node_modules/@deepseek-ai/dsh-subprocess-local/lib/windows-recovery
 new file mode 100644
 --- /dev/null
 +++ b/node_modules/@deepseek-ai/dsh-subprocess-local/lib/windows-recovery-fence.js
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,200 @@
 +import koffi from 'koffi'
 +
 +// Recovery-only containment, established synchronously before the ACP handshake.
@@ -156,9 +156,15 @@ new file mode 100644
 +  const proof = () => ({ confirmed: true, processTreeStopped: true, method: 'windows-job' })
 +  const empty = () => {
 +    if (stopped) return true
-+    if (native.activeProcesses(job) !== 0) return false
-+    // Handles, rather than recycled numeric PIDs, identify the captured processes.
-+    if ([...members.values()].some(member => native.isActive(member.handle))) return false
++    // Release exited process references before querying Job accounting.
++    // Retaining these handles can itself delay the accounting decrement.
++    for (const [pid, member] of members) {
++      if (!native.isActive(member.handle)) {
++        native.close(member.handle)
++        members.delete(pid)
++      }
++    }
++    if (native.activeProcesses(job) !== 0 || members.size !== 0) return false
 +    stopped = true
 +    return true
 +  }

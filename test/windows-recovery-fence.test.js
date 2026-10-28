@@ -123,3 +123,16 @@ it.runIf(process.platform === 'win32')('native Windows job stops a child after i
     await context.fiber.dispose()
   }
 }, 20000)
+
+ it('releases exited process references before requiring zero Job accounting', async () => {
+  const { state, native } = fixture()
+  const openHandles = new Set()
+  const open = native.open, close = native.close
+  native.open = pid => { const value = open(pid); openHandles.add(value.handle); return value }
+  native.close = handle => { openHandles.delete(handle); close(handle) }
+  native.activeProcesses = () => [...state.assigned].filter(pid => state.live.get(pid)
+    || [...openHandles].some(handle => handle.pid === pid)).length
+  const fence = createWindowsRecoveryFence(10, native, { timeoutMs: 20, intervalMs: 1 })
+  expect(await fence.quiesceForRecovery()).toMatchObject({ confirmed: true, processTreeStopped: true })
+  expect(openHandles.size).toBe(0)
+})

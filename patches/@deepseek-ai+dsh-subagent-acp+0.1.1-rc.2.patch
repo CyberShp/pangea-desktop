@@ -562,7 +562,7 @@ index b89ccf2..312acb4 100644
  				if (flags.cancelled) throw new Error("subagent cancelled before the ACP session started");
  			})(),
  			spawnFailed,
-@@ -189,48 +623,186 @@ async function startAcpRun(request, spec) {
+@@ -189,48 +623,187 @@ async function startAcpRun(request, spec) {
  	} catch (error) {
  		request.signal.removeEventListener("abort", onAbort);
  		await disposeProcess();
@@ -729,12 +729,13 @@ index b89ccf2..312acb4 100644
 +			});
 +			return attempt;
 +		},
-+		quiesceForRecovery() {
++		stopExecution() { return this.quiesceForRecovery({ explicitStop: true }); },
++		quiesceForRecovery({ explicitStop = false } = {}) {
 +			if (recoveryQuiescence) return recoveryQuiescence;
 +			// Neither an empty tool input nor a root PID exit proves execution has
 +			// stopped. This capability requires a real normal prompt response and
 +			// the owned subprocess seam's awaited whole-tree exit proof.
-+			if (diagnostics.promptPending !== false || diagnostics.protocolStopReason !== "end_turn" || (flags.cancelled && !recoveryStarted)) {
++			if (!explicitStop && (diagnostics.promptPending !== false || diagnostics.protocolStopReason !== "end_turn" || (flags.cancelled && !recoveryStarted))) {
 +				return Promise.resolve({ confirmed: false, processTreeStopped: false });
 +			}
 +			if (process.platform === "win32" && typeof child.quiesceForRecovery !== "function") {
@@ -747,7 +748,7 @@ index b89ccf2..312acb4 100644
 +				// Require launch-time Job containment and its kernel membership proof.
 +				if (process.platform === "win32") {
 +					const proof = await child.quiesceForRecovery();
-+					if (proof?.confirmed !== true || proof.processTreeStopped !== true) return { confirmed: false, processTreeStopped: false };
++					if (proof?.confirmed !== true || proof.processTreeStopped !== true) return { confirmed: false, processTreeStopped: false, reason: proof?.reason ?? "Windows Job stop inspection failed" };
 +				}
 +				request.signal.removeEventListener("abort", onAbort);
 +				disposal ??= disposeProcess();
@@ -767,7 +768,7 @@ index b89ccf2..312acb4 100644
  		localAgent: void 0,
  		result,
  		dispose() {
-@@ -257,10 +829,12 @@ const inject = ["subagents", "subprocess"];
+@@ -257,10 +830,12 @@ const inject = ["subagents", "subprocess"];
  const Config = z.object({
  	providerName: z.string().default("acp"),
  	command: z.string().required(),
@@ -780,7 +781,7 @@ index b89ccf2..312acb4 100644
  	disposeEofGraceMs: z.number().default(DEFAULT_DISPOSE_EOF_GRACE_MS),
  	disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS)
  });
-@@ -331,24 +905,81 @@ var AcpProvider = class {
+@@ -331,24 +906,81 @@ var AcpProvider = class {
  		this.ctx = ctx;
  		this.config = config;
  	}
@@ -845,7 +846,7 @@ index b89ccf2..312acb4 100644
  			disposeEofGraceMs: this.config.disposeEofGraceMs,
  			disposeGraceMs: this.config.disposeGraceMs,
 +			codeagentPermissionInput: this.name === "pangea-codeagent",
-+			recoveryFence: this.name === "pangea-codeagent" && !request.discoverOnly,
++			recoveryFence: ["pangea-codeagent", "pangea-nga"].includes(this.name) && !request.discoverOnly,
 +			windowsBatch,
 +			launch,
  			spawn: (spec) => this.ctx.subprocess.spawn(spec),
