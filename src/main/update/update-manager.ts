@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
@@ -69,6 +69,7 @@ export function registerUpdateHandlers(): void {
   })
   ipcMain.handle('updates:status', () => getUpdateStatus())
   ipcMain.handle('updates:check', () => checkForOnlineUpdate(true))
+  ipcMain.handle('updates:download', () => downloadOnlineUpdate())
   ipcMain.handle('updates:import', () => importPortableUpdatePackage())
   ipcMain.handle('updates:install', (_event, force?: unknown) => installImportedUpdate(force === true))
 }
@@ -85,8 +86,19 @@ export function startUpdateManager(options: { prepareToInstall: (force?: boolean
 }
 
 /** Download and local import share a single staging/install lock and trust boundary. */
-export async function checkForOnlineUpdate(manual = true): Promise<UpdateStatus> {
+export function checkForOnlineUpdate(manual = true): Promise<UpdateStatus> {
+  return runOnlineUpdate(manual, false)
+}
+
+/** Revalidate signed release metadata when the user explicitly requests a download. */
+export function downloadOnlineUpdate(): Promise<UpdateStatus> {
+  return runOnlineUpdate(true, true)
+}
+
+async function runOnlineUpdate(manual: boolean, download: boolean): Promise<UpdateStatus> {
+  if (manual && startupTimer) { clearTimeout(startupTimer); startupTimer = undefined }
   if (importing || installing) return getUpdateStatus()
+  recordUpdateEvent(download ? 'download-requested' : 'check-requested', { manual })
   if (status.phase === 'downloaded' && stagedPackage) {
     // Explicit checking also reopens a previously dismissed ready card.
     const ready = getUpdateStatus()
@@ -110,11 +122,17 @@ export async function checkForOnlineUpdate(manual = true): Promise<UpdateStatus>
   let transport: Awaited<ReturnType<typeof createUpdateTransport>> | undefined
   try {
     assertSupportedPortableUpgradeSource(app.getVersion())
-    transport = await createUpdateTransport(await getNetworkStore().get())
+    transport = await createUpdateTransport(await getNetworkStore().get(), summary => {
+      transition({ type: 'network', summary })
+    })
     const client = new GitHubUpdateClient(transport.fetch, controller.signal)
     const update = await client.check(app.getVersion(), config.publicKeyPem)
     if (!update) {
       transition({ type: 'up-to-date' })
+      return getUpdateStatus()
+    }
+    if (!download) {
+      transition({ type: 'available', version: update.version, packageSize: update.asset.size })
       return getUpdateStatus()
     }
     await clearStagedPackage()
@@ -264,12 +282,14 @@ export async function installImportedUpdate(force = false): Promise<UpdateInstal
   const imported = stagedPackage
   if (status.phase !== 'downloaded' || !imported || installing) return { helperLaunched: false }
   installing = true
+  recordUpdateEvent('install-requested', { force, version: status.availableVersion })
   let releaseAdmission: void | ReleaseUpdateAdmission = undefined
   try {
     if (!prepareToInstall) throw new Error('升级安装保护尚未就绪，请稍后重试。')
     if (force && status.canForceStop !== true) throw new Error('请先检查升级任务状态。')
     releaseAdmission = await prepareToInstall(force)
     await launchPortableUpdateHelper(imported)
+    recordUpdateEvent('installer-started', { version: status.availableVersion })
     // Let the IPC reply render the confirmed handoff before Desktop exits.
     setTimeout(() => app.quit(), 1000)
     return { helperLaunched: true }
@@ -382,9 +402,23 @@ function loadUpdateConfig(): LoadedUpdateConfig | undefined {
   }
 }
 
+/** Only explicit, non-secret fields are persisted; never serialize transport settings or URLs. */
+function recordUpdateEvent(event: string, details: Record<string, unknown>): void {
+  try {
+    const logs = app.getPath('logs')
+    mkdirSync(logs, { recursive: true })
+    appendFileSync(join(logs, 'online-update.log'), JSON.stringify({ at: new Date().toISOString(), event, ...details }) + '\n', 'utf8')
+  } catch {
+    console.warn('[portable-updater] unable to persist update diagnostics')
+  }
+}
+
 function transition(event: UpdateStateEvent, manualOverride?: boolean): void {
   status = reduceUpdateStatus(status, event)
   if (manualOverride !== undefined) status.manual = manualOverride
+  if (event.type !== 'progress') recordUpdateEvent(event.type, {
+    phase: status.phase, manual: status.manual, version: status.availableVersion, network: status.networkSummary
+  })
   console.info('[portable-updater] status', status.phase, status.percent ?? '')
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send('updates:status-changed', getUpdateStatus())

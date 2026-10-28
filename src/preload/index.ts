@@ -371,8 +371,26 @@ function render(): void {
     body.appendChild(progress)
   }
 
+  if (status.networkSummary) {
+    const network = element('p', 'network')
+    network.textContent = status.networkSummary
+    body.appendChild(network)
+  }
+
+  if (status.phase === 'available' || (status.phase === 'error' && status.source === 'github')) {
+    const action = button(status.phase === 'available'
+      ? (updateLocale === 'zh' ? '下载安装包' : 'Download update')
+      : (updateLocale === 'zh' ? '重试检查' : 'Retry check'), 'primary')
+    action.addEventListener('click', () => {
+      action.disabled = true
+      void ipcRenderer.invoke(status.phase === 'available' ? 'updates:download' : 'updates:check')
+        .catch(() => { action.disabled = false })
+    })
+    body.appendChild(action)
+  }
+
   if (status.phase === 'error' && status.source === 'github') {
-    const settings = button('在线更新网络设置', 'primary')
+    const settings = button('在线更新网络设置', 'secondary')
     settings.addEventListener('click', () => { void openUpdateNetworkSettings() })
     body.appendChild(settings)
   }
@@ -473,8 +491,10 @@ const styles = `
     display: -webkit-box;
     overflow: hidden;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 6;
+    overflow-wrap: anywhere;
   }
+  .network { font-size:11px; line-height:1.5; color:#73777f; overflow-wrap:anywhere; }
   .badge {
     width: 34px;
     height: 34px;

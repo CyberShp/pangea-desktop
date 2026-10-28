@@ -17,6 +17,7 @@ export type UpdatePhase =
   | 'idle'
   | 'up-to-date'
   | 'checking'
+  | 'available'
   | 'downloading'
   | 'downloaded'
   | 'install-error'
@@ -32,6 +33,8 @@ export interface UpdateStatus {
   packageType?: 'full' | 'patch'
   packageName?: string
   baseVersion?: string
+  networkSummary?: string
+  packageSize?: number
   percent?: number
   message?: string
   manual: boolean

@@ -7,10 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn(), fromPartition: vi.fn(), network: {
   closeAllConnections: vi.fn(async () => {}), clearAuthCache: vi.fn(async () => {}),
+  resolveProxy: vi.fn(async () => 'DIRECT'),
   setProxy: vi.fn(async () => {}), setCertificateVerifyProc: vi.fn()
 } }))
 vi.mock('electron', () => ({ net: { request: mocks.request }, session: { fromPartition: mocks.fromPartition } }))
-import { createUpdateTransport, matchesProxy, parseUpdateNetwork, UpdateNetworkStore } from '../src/main/update/update-network'
+import { createUpdateTransport, matchesProxy, parseUpdateNetwork, updateRouteSummary, UpdateNetworkStore } from '../src/main/update/update-network'
 
 const settings = { proxyUrl: 'http://proxy.example:8080', username: 'employee', password: 'secret', skipCertificateCheck: false }
 let request: EventEmitter & { abort: ReturnType<typeof vi.fn>; setHeader: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
@@ -52,6 +53,30 @@ describe('update proxy configuration and credential boundary', () => {
 })
 
 describe('isolated Electron update transport', () => {
+  it('reports system routing without including PAC credentials or asserting authentication', async () => {
+    const diagnostic = vi.fn()
+    mocks.network.resolveProxy.mockResolvedValueOnce('PROXY employee:secret@proxy.example:8080; DIRECT')
+    const transport = await createUpdateTransport({ ...settings, proxyUrl: '', username: '', password: '' }, diagnostic)
+    const pending = transport.fetch('https://github.com/asset', {})
+    await Promise.resolve()
+    expect(diagnostic).toHaveBeenLastCalledWith('系统网络 · github.com · 代理配置（实际连接及认证待确认）')
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('secret')
+    request.emit('redirect', 302, 'GET', 'https://github.com/next')
+    await pending
+    await transport.close()
+    expect(updateRouteSummary('', 'github.com', 'DIRECT')).toContain('直连')
+  })
+  it('fails visibly when system proxy requires explicit credentials, without sending empty credentials', async () => {
+    const transport = await createUpdateTransport({ ...settings, proxyUrl: '', username: '', password: '' })
+    const pending = transport.fetch('https://api.github.com/releases', {})
+    const failure = expect(pending).rejects.toThrow('系统代理要求认证（407）')
+    const callback = vi.fn()
+    request.emit('login', { isProxy: true, host: 'proxy.example', port: 8080 }, callback)
+    expect(callback).toHaveBeenCalledWith()
+    await failure
+    await transport.close()
+  })
+
   it('uses system proxy by default and limits optional certificate override to update hosts', async () => {
     const transport = await createUpdateTransport({ ...settings, proxyUrl: '', skipCertificateCheck: true })
     expect(mocks.fromPartition).toHaveBeenLastCalledWith('pangea-online-update-diagnostic', { cache: false })

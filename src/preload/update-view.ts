@@ -3,7 +3,8 @@ import type { UpdateStatus } from '../shared/contracts'
 export type UpdateLocale = 'en' | 'zh'
 
 export function shouldShowUpdate(status: UpdateStatus): boolean {
-  if (['downloading', 'downloaded'].includes(status.phase)) return true
+  if (['available', 'downloading', 'downloaded'].includes(status.phase)) return true
+  if (status.phase === 'error' && status.source === 'github') return true
   return status.manual && ['checking', 'up-to-date', 'install-error', 'error', 'unsupported'].includes(status.phase)
 }
 
@@ -44,6 +45,13 @@ export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): Upda
       return {
         title: status.activity === 'download' ? (zh ? '正在下载升级包' : 'Downloading update') : (zh ? '正在校验升级包' : 'Verifying update package'),
         description: zh ? `${version} · ${Math.round(status.percent ?? 0)}%` : `${version} · ${Math.round(status.percent ?? 0)}%`
+      }
+    case 'available':
+      return {
+        title: zh ? '发现新版本' : 'Update available',
+        description: zh
+          ? `${version} · ${Math.ceil((status.packageSize ?? 0) / 1024 / 1024)} MB。点击下载；安装需要另行确认。`
+          : `${version} · ${Math.ceil((status.packageSize ?? 0) / 1024 / 1024)} MB. Download first; installation requires confirmation.`
       }
     case 'downloaded':
       return {
@@ -93,6 +101,8 @@ export function updateMessage(status: UpdateStatus, locale: UpdateLocale): strin
       if (status.activity === 'download') return zh ? `正在下载升级包 ${percent}%` : `Downloading update ${percent}%`
       return zh ? `正在校验升级包 ${percent}%` : `Verifying update package ${percent}%`
     }
+    case 'available':
+      return zh ? `发现新版本${version}，等待下载` : `Update${version} available for download`
     case 'downloaded':
       return status.packageType === 'patch'
         ? (zh

@@ -117,6 +117,13 @@ describe('portable package selection', () => {
 })
 
 describe('online update feedback', () => {
+  it('shows automatic check failures and available versions without pretending they are installed', () => {
+    expect(shouldShowUpdate({ phase: 'error', source: 'github', currentVersion: '2.1.7', manual: false })).toBe(true)
+    const available: UpdateStatus = { phase: 'available', source: 'github', currentVersion: '2.1.7', availableVersion: '2.1.8', manual: false }
+    expect(shouldShowUpdate(available)).toBe(true)
+    expect(updateMessage(available, 'zh')).toContain('等待下载')
+  })
+
   it('separates download, verification and no-update states', () => {
     expect(updateMessage({ ...downloading, source: 'github', activity: 'download' }, 'zh')).toBe('正在下载升级包 42%')
     expect(updateMessage({ ...downloading, source: 'github', activity: 'verify' }, 'zh')).toBe('正在校验升级包 42%')

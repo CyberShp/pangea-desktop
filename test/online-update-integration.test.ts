@@ -66,8 +66,26 @@ afterAll(async () => {
 })
 
 describe('online update production pipeline with simulated GitHub and Windows launcher', () => {
+  it.each([false, true])('checks metadata without downloading or installing (manual=%s)', async manual => {
+    expect(await manager.checkForOnlineUpdate(manual)).toMatchObject({ phase: 'available', availableVersion: version, manual })
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).not.toContain(prefix + name)
+    expect(mocks.admission).not.toHaveBeenCalled()
+    expect(mocks.launch).not.toHaveBeenCalled()
+    expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
+    await manager.downloadOnlineUpdate()
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).toContain(prefix + name)
+    expect(manager.getUpdateStatus().phase).toBe('downloaded')
+    expect(mocks.launch).not.toHaveBeenCalled()
+  })
+  it('revalidates a changed release before an explicit download', async () => {
+    await manager.checkForOnlineUpdate(false)
+    release.tag_name = 'v2.1.6'
+    expect((await manager.downloadOnlineUpdate()).phase).toBe('up-to-date')
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).not.toContain(prefix + name)
+  })
+
   it('signs release metadata, downloads, verifies real ZIP, stages signed helper and hands off health plan', async () => {
-    expect(await manager.checkForOnlineUpdate()).toMatchObject({ phase: 'downloaded', availableVersion: version, source: 'github', packageType: 'full' })
+    expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'downloaded', availableVersion: version, source: 'github', packageType: 'full' })
     expect(mocks.messages.some(s => s.activity === 'download')).toBe(true)
     expect(mocks.messages.some(s => s.activity === 'verify')).toBe(true)
     mocks.launch.mockImplementation(async (helper: string, planPath: string) => {
@@ -85,8 +103,23 @@ describe('online update production pipeline with simulated GitHub and Windows la
     await vi.advanceTimersByTimeAsync(1000)
     expect(mocks.quit).toHaveBeenCalledOnce()
   })
+  it('does not launch or quit when forced task stop cannot be confirmed', async () => {
+    await manager.downloadOnlineUpdate()
+    mocks.admission.mockRejectedValueOnce(Object.assign(new Error('任务仍在运行'), { code: 'PANGEA_UPDATE_BUSY' }))
+    expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
+    expect(manager.getUpdateStatus().canForceStop).toBe(true)
+    mocks.admission.mockRejectedValueOnce(new Error('ACP Job 身份不匹配，旧执行停止尚未确认'))
+    expect(await manager.installImportedUpdate(true)).toEqual({ helperLaunched: false })
+    expect(mocks.admission).toHaveBeenLastCalledWith(true)
+    expect(mocks.launch).not.toHaveBeenCalled()
+    expect(mocks.quit).not.toHaveBeenCalled()
+    expect(manager.getUpdateStatus()).toMatchObject({ phase: 'downloaded', canForceStop: false })
+    const log = await readFile(join(root, 'profile', 'online-update.log'), 'utf8')
+    expect(log).toContain('install-requested')
+    expect(log).toContain('"force":true')
+  })
   it('retains verified package when active task admission denies install, then retries', async () => {
-    await manager.checkForOnlineUpdate()
+    await manager.downloadOnlineUpdate()
     mocks.admission.mockRejectedValueOnce(new Error('存在正在运行的分析任务'))
     expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
     expect(manager.getUpdateStatus()).toMatchObject({ phase: 'downloaded', message: '存在正在运行的分析任务' })
@@ -102,20 +135,20 @@ describe('online update production pipeline with simulated GitHub and Windows la
     let resolveCheck!: () => void
     const wait = new Promise<void>(r => { resolveCheck = r })
     mocks.fetch.mockImplementationOnce(async () => { await wait; return Response.json([release]) })
-    const first = manager.checkForOnlineUpdate()
-    expect((await manager.checkForOnlineUpdate()).phase).toBe('checking')
+    const first = manager.downloadOnlineUpdate()
+    expect((await manager.downloadOnlineUpdate()).phase).toBe('checking')
     expect((await manager.importPortableUpdatePackage()).phase).toBe('checking')
     resolveCheck()
     await first
     const count = mocks.fetch.mock.calls.length
-    expect((await manager.checkForOnlineUpdate()).phase).toBe('downloaded')
+    expect((await manager.downloadOnlineUpdate()).phase).toBe('downloaded')
     expect(mocks.fetch).toHaveBeenCalledTimes(count)
   })
   it('reports no-update and network failures without invoking installation', async () => {
     release.tag_name = 'v2.1.6'
-    expect((await manager.checkForOnlineUpdate()).phase).toBe('up-to-date')
+    expect((await manager.downloadOnlineUpdate()).phase).toBe('up-to-date')
     mocks.fetch.mockResolvedValueOnce(new Response('', { status: 403 }))
-    expect(await manager.checkForOnlineUpdate()).toMatchObject({ phase: 'error', source: 'github', manual: true })
+    expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'error', source: 'github', manual: true })
     expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
     expect(mocks.launch).not.toHaveBeenCalled()
   })

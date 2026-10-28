@@ -13,7 +13,7 @@ export async function openUpdateNetworkSettings(): Promise<void> {
     h2{margin:0 0 12px;font-size:20px}p{font-size:13px;line-height:1.6;opacity:.8}label{display:block;margin:14px 0;font-size:14px}input:not([type=checkbox]){display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #8887;border-radius:7px;background:Field;color:FieldText}button{padding:9px 15px;border:1px solid #8887;border-radius:8px;cursor:pointer}button[type=submit]{background:#2563eb;color:white;border-color:transparent}.actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}.error{color:#dc4545;white-space:pre-wrap}input:focus-visible,button:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
   </style><form role="dialog" aria-modal="true" aria-labelledby="network-title">
     <h2 id="network-title">在线更新网络设置</h2>
-    <p>仅用于检查更新和下载安装包。代理地址留空时使用系统代理。</p>
+    <p>默认使用系统网络配置，通常无需填写代理或密码。仅在系统网络无法连接或明确要求代理认证时配置下列内容。</p>
     <label>代理地址<input name="proxyUrl" type="password" autocomplete="off" placeholder="http://主机:端口 或 http://工号:密码@主机:端口"></label>
     <label>代理账号<input name="username" autocomplete="off"></label>
     <label>代理密码<input name="password" type="password" autocomplete="off"></label>
@@ -21,7 +21,7 @@ export async function openUpdateNetworkSettings(): Promise<void> {
     <label><input name="skipCertificateCheck" type="checkbox"> 本次运行跳过更新服务器证书校验（排障）</label>
     <p>默认验证证书。跳过校验会降低连接安全性，但仍强制校验更新清单签名和安装包完整性；重启后恢复证书校验。</p>
     <p class="error" role="alert"></p>
-    <div class="actions"><button type="button">取消</button><button type="submit">保存并检查更新</button></div>
+    <div class="actions"><button type="button">取消</button><button type="submit">保存并检查（不下载）</button></div>
   </form>`
   const form = root.querySelector('form')!
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement

@@ -66,8 +66,19 @@ export function matchesProxy(auth: { isProxy: boolean; host: string; port: numbe
   return auth.host.toLowerCase() === proxy.hostname.toLowerCase() && auth.port === Number(proxy.port || (proxy.protocol === 'https:' ? 443 : 80))
 }
 
+/** Never include raw proxy rules: PAC results may contain credentials. */
+export function updateRouteSummary(proxyUrl: string, hostname: string, route?: string): string {
+  const mode = proxyUrl ? '手动代理' : '系统网络'
+  const hops = route?.split(';').map(item => item.trim()).filter(Boolean) ?? []
+  const direct = hops.length === 1 && hops[0] === 'DIRECT'
+  const proxied = hops.some(item => /^(PROXY|HTTPS?|SOCKS[45]?)\s/i.test(item))
+  const path = direct ? '直连' : proxied ? '代理配置（实际连接及认证待确认）' : '路由未确认'
+  // hostname comes exclusively from the allowlisted request URL.
+  return `${mode} · ${hostname} · ${path}`
+}
+
 /** Dedicated ephemeral session: no changes to renderer/Agent networking or trust. */
-export async function createUpdateTransport(settings: UpdateNetworkSettings): Promise<{ fetch: UpdateFetch; close: () => Promise<void> }> {
+export async function createUpdateTransport(settings: UpdateNetworkSettings, onDiagnostic: (summary: string) => void = () => {}): Promise<{ fetch: UpdateFetch; close: () => Promise<void> }> {
   // Keep diagnostic certificate decisions out of the normal session's verifier cache.
   const network = session.fromPartition(settings.skipCertificateCheck ? 'pangea-online-update-diagnostic' : 'pangea-online-update', { cache: false })
   await network.closeAllConnections()
@@ -76,6 +87,7 @@ export async function createUpdateTransport(settings: UpdateNetworkSettings): Pr
   network.setCertificateVerifyProc(settings.skipCertificateCheck
     ? (request, callback) => callback(UPDATE_HOSTS.includes(request.hostname) ? 0 : -3)
     : null)
+  onDiagnostic(settings.proxyUrl ? '网络模式：手动代理' : '网络模式：系统网络（无需预先填写代理账号密码）')
   const active = new Set<Electron.ClientRequest>()
   const fetch: UpdateFetch = (url, init) => new Promise((resolve, reject) => {
     const target = new URL(url)
@@ -88,6 +100,12 @@ export async function createUpdateTransport(settings: UpdateNetworkSettings): Pr
     let stream: ReadableStreamDefaultController<Uint8Array> | undefined
     let ended = false
     let attempts = 0
+    // Diagnostics must not delay a request or turn a successful transfer into a failure.
+    void network.resolveProxy(url).then(route => {
+      if (!ended) onDiagnostic(updateRouteSummary(settings.proxyUrl, target.hostname, route))
+    }).catch(() => {
+      if (!ended) onDiagnostic(updateRouteSummary(settings.proxyUrl, target.hostname))
+    })
     const cleanup = () => { active.delete(request); init.signal?.removeEventListener('abort', abort) }
     const fail = (error: Error) => {
       if (ended) return
@@ -99,7 +117,14 @@ export async function createUpdateTransport(settings: UpdateNetworkSettings): Pr
     request.on('login', (auth, callback) => {
       // Never send company credentials to a release server or another proxy.
       if (matchesProxy(auth, settings) && attempts++ === 0) callback(settings.username, settings.password)
-      else { callback(); fail(new Error('代理认证失败（407）：请检查在线更新网络设置中的代理地址、账号和密码。')) }
+      else {
+        callback()
+        fail(new Error(!auth.isProxy
+          ? '更新服务器要求身份认证，已拒绝发送代理凭据。'
+          : settings.proxyUrl
+            ? '代理认证失败（407）：请在在线更新网络设置中确认代理地址并重新填写账号密码。密码仅在本次运行有效。'
+            : '系统代理要求认证（407）：系统网络未能自动完成认证，请在在线更新网络设置中填写代理地址、账号和密码。'))
+      }
     })
     request.on('error', error => {
       const code = error.message.match(/net::ERR_[A-Z_]+/)?.[0] ?? '网络连接失败'

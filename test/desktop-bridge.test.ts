@@ -43,10 +43,11 @@ describe('PANGEA Desktop renderer bridge', () => {
       phase: 'downloaded', packageType: 'patch', baseVersion: '0.1.9'
     })
     await bridge.checkForUpdates()
+    await bridge.downloadUpdate()
     await expect(bridge.installUpdate()).resolves.toEqual({ helperLaunched: true })
 
     expect(ipc.invoke.mock.calls.map(([channel]) => channel)).toEqual([
-      'updates:status', 'updates:import', 'updates:check', 'updates:install'
+      'updates:status', 'updates:import', 'updates:check', 'updates:download', 'updates:install'
     ])
   })
 
