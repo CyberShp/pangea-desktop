@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), getPath: vi.fn(), launch: vi.fn(), quit: vi.fn(), admission: vi.fn(), messages: [] as any[] }))
 vi.mock('electron', () => ({
-  app: { getVersion: () => '2.1.6', getPath: mocks.getPath, isPackaged: true, quit: mocks.quit },
+  app: { getVersion: () => '2.1.8', getPath: mocks.getPath, isPackaged: true, quit: mocks.quit },
   BrowserWindow: { getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: (_: string, status: unknown) => mocks.messages.push(status) } }] },
   dialog: {}, ipcMain: { handle: vi.fn() }, net: { fetch: mocks.fetch }
 }))
@@ -20,7 +20,7 @@ let resourcesDescriptor: PropertyDescriptor | undefined
 let manager: typeof import('../src/main/update/update-manager')
 let release: any
 const responses = new Map<string, Buffer>()
-const version = '2.1.7'
+const version = '2.1.9'
 const name = `pangea-desktop-${version}-windows-x64-portable.zip`
 const prefix = `https://github.com/CyberShp/pangea-desktop/releases/download/v${version}/`
 
@@ -79,7 +79,7 @@ describe('online update production pipeline with simulated GitHub and Windows la
   })
   it('revalidates a changed release before an explicit download', async () => {
     await manager.checkForOnlineUpdate(false)
-    release.tag_name = 'v2.1.6'
+    release.tag_name = 'v2.1.8'
     expect((await manager.downloadOnlineUpdate()).phase).toBe('up-to-date')
     expect(mocks.fetch.mock.calls.map(([url]) => url)).not.toContain(prefix + name)
   })
@@ -145,7 +145,7 @@ describe('online update production pipeline with simulated GitHub and Windows la
     expect(mocks.fetch).toHaveBeenCalledTimes(count)
   })
   it('reports no-update and network failures without invoking installation', async () => {
-    release.tag_name = 'v2.1.6'
+    release.tag_name = 'v2.1.8'
     expect((await manager.downloadOnlineUpdate()).phase).toBe('up-to-date')
     mocks.fetch.mockResolvedValueOnce(new Response('', { status: 403 }))
     expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'error', source: 'github', manual: true })

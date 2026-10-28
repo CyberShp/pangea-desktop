@@ -11,7 +11,7 @@ import { patchName } from '../scripts/historical-release-lib.mjs'
 const script = fileURLToPath(new URL('../scripts/list-release-patch-assets.mjs', import.meta.url))
 const digest = value => createHash('sha256').update(value).digest('hex')
 
-async function fixture(t, { base = '2.1.5', badChecksum = false, badReportDigest = false } = {}) {
+async function fixture(t, { base = '2.1.8', badChecksum = false, badReportDigest = false } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'pangea-release-assets-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const patch = patchName('2.1.11', base)
@@ -29,8 +29,8 @@ async function fixture(t, { base = '2.1.5', badChecksum = false, badReportDigest
 
 test('new-release asset listing omits stale retired and unreported patches without modifying files', async t => {
   const f = await fixture(t)
-  const stale = patchName('2.1.11', '2.1.4')
-  const unreported = patchName('2.1.11', '2.1.6')
+  const stale = patchName('2.1.11', '2.1.7')
+  const unreported = patchName('2.1.11', '2.1.9')
   await writeFile(path.join(f.root, stale), 'old build output')
   await writeFile(path.join(f.root, unreported), 'not verified')
   const result = f.run()
@@ -40,9 +40,9 @@ test('new-release asset listing omits stale retired and unreported patches witho
 })
 
 for (const [name, options, error] of [
-  ['retired verified baseline', { base: '2.1.4' }, /Invalid verified patch record/],
+  ['retired verified baseline', { base: '2.1.7' }, /Invalid verified patch record/],
   ['future verified baseline', { base: '2.1.12' }, /Invalid verified patch record/],
-  ['cross-channel baseline', { base: '2.1.5-test.1.abcdef0' }, /Invalid verified patch record/],
+  ['cross-channel baseline', { base: '2.1.8-test.1.abcdef0' }, /Invalid verified patch record/],
   ['changed patch checksum', { badChecksum: true }, /Checksum mismatch/],
   ['changed report bytes', { badReportDigest: true }, /Report filename digest mismatch/]
 ]) {
