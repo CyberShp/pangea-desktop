@@ -212,24 +212,38 @@ it('rejects continuation while tools from the prior turn still lack a terminal s
   }, {}, { onSessionEvent: event => events.push(event) })
 })
 
-it('retains prior request and remote session provenance after an idle prior turn', async () => {
+for (const terminal of ['completed', 'failed']) it(`preserves ${terminal} tools across three turns with late metadata`, async () => {
   const events = []
-  await fixtureRun('lifecycle-cross-request', 'inspect', async run => {
+  await fixtureRun(terminal === 'failed' ? 'lifecycle-cross-request-failed' : 'lifecycle-cross-request', 'inspect', async run => {
     expect(run.readDiagnostics().toolLifecycle.unclosed_count).toBe(0)
     await run.continuePrompt([{ type: 'text', text: 'next request' }])
     const prompts = events.filter(event => event.type === 'prompt')
     const lifecycle = run.readDiagnostics().toolLifecycle
     expect(lifecycle.request_id).toBe(prompts[1].request_id)
-    // The existing execution map still resets statuses each turn. This change
-    // reports that behavior and the original owner; it does not silently fix it.
-    expect(lifecycle.tools[0]).toMatchObject({ tool_id: 'old-tool', status: 'unknown', request_id: prompts[0].request_id,
-      remote_session_id: 'remote-fixture', received_update_count: 3, accepted_update_count: 3 })
+    expect(lifecycle).toMatchObject({ unclosed_count: 0, tools: [] })
+    expect(run.readDiagnostics().activeToolCount).toBe(0)
+    const late = events.find(event => event.type === 'session_update' && event.update.title === 'late metadata')
+    expect(late).toMatchObject({ request_id: prompts[0].request_id, remote_session_id: 'remote-fixture' })
     const foreign = events.filter(event => event.type === 'acp_tool_transport' && event.tool_id === 'foreign-tool')
     expect(foreign).toEqual([
       expect.objectContaining({ remote_session_id: 'foreign-fixture', request_id: prompts[1].request_id, status: 'pending' }),
       expect.objectContaining({ remote_session_id: 'remote-fixture', request_id: null, status: 'completed' }),
     ])
+    expect(await run.continuePrompt([{ type: 'text', text: 'third turn must remain usable' }]))
+      .toMatchObject({ stopReason: 'completed', protocolStopReason: 'end_turn' })
+    expect(events.filter(event => event.type === 'prompt')).toHaveLength(3)
+    expect(events.some(event => event.type === 'continuation_rejected')).toBe(false)
+    expect(run.readDiagnostics().toolLifecycle.unclosed_count).toBe(0)
   }, {}, { onSessionEvent: event => events.push(event) })
+})
+
+for (const mode of ['reuse', 'unknown', 'foreign-history']) it(`does not hide ${mode} tools behind a prior terminal status`, async () => {
+  await fixtureRun(`lifecycle-cross-request-${mode}`, 'inspect', async run => {
+    await run.continuePrompt([{ type: 'text', text: 'second turn' }])
+    expect(run.readDiagnostics().toolLifecycle.unclosed_count).toBe(1)
+    await expect(run.continuePrompt([{ type: 'text', text: 'unsafe third turn' }]))
+      .rejects.toMatchObject({ code: 'ACP_CONTINUATION_NOT_IDLE' })
+  })
 })
 
 it('bounds retained evidence and summaries while keeping totals and old unresolved tools', async () => {

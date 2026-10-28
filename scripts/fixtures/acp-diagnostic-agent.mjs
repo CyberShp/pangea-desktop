@@ -42,9 +42,17 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   const text = request.params.prompt.map(block => block.text ?? '').join('')
   promptCount++
+  if (mode === 'lifecycle-companion' && promptCount === 1) {
+    reply({ stopReason: 'end_turn' })
+    return
+  }
   if (mode.startsWith('lifecycle-')) {
     const pending = (toolCallId, extra = {}) => update({ sessionUpdate: 'tool_call', toolCallId, title: 'Terminal', kind: 'execute', status: 'pending', rawInput: {}, ...extra })
-    if (mode === 'lifecycle-codeagent-edit-pending' || mode.startsWith('lifecycle-codeagent-edit-tree')) {
+    if (mode === 'lifecycle-companion') {
+      if (promptCount > 2) update({ sessionUpdate: 'tool_call_update', toolCallId: 'action-2', title: 'late metadata from first action' })
+      pending(`action-${promptCount}`, { kind: 'read' })
+      update({ sessionUpdate: 'tool_call_update', toolCallId: `action-${promptCount}`, status: 'completed', rawOutput: { stdout: 'done' } })
+    } else if (mode === 'lifecycle-codeagent-edit-pending' || mode.startsWith('lifecycle-codeagent-edit-tree')) {
       const report = () => {
         for (const toolCallId of ['chatcmpl-tool-a5d001413b8ce96b', 'chatcmpl-tool-9d4de9f2c34f4134', 'chatcmpl-tool-984abc3da7ac9c06', 'chatcmpl-tool-9f3f38a0ce05f4be']) pending(toolCallId, { title: 'Edit', kind: 'edit' })
         // Match the reported 208 accepted events without inventing a terminal
@@ -74,14 +82,19 @@ createInterface({ input: process.stdin }).on('line', line => {
     } else if (mode === 'lifecycle-bounded') {
       for (let index = 0; index < 320; index++) pending(`bounded-${index}`)
       for (let index = 0; index < 20; index++) update({ sessionUpdate: 'tool_call_update', toolCallId: 'bounded-0', status: 'completed', title: { invalid: 'PRIVATE_INVALID_TITLE' } })
-    } else if (mode === 'lifecycle-cross-request') {
+    } else if (mode.startsWith('lifecycle-cross-request')) {
       if (promptCount === 1) {
         pending('old-tool')
-        update({ sessionUpdate: 'tool_call_update', toolCallId: 'old-tool', status: 'completed', rawOutput: { stdout: 'old-done', exitCode: 0 } })
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'old-tool', status: mode.endsWith('-failed') ? 'failed' : 'completed', rawOutput: { stdout: 'old-done', exitCode: 0 } })
+        if (mode.endsWith('-foreign-history')) send({ method: 'session/update', params: { sessionId: 'foreign-fixture',
+          update: { sessionUpdate: 'tool_call', toolCallId: 'foreign-only-tool', title: 'foreign completed tool', status: 'completed' } } })
       } else {
         update({ sessionUpdate: 'tool_call_update', toolCallId: 'old-tool', title: 'late metadata' })
         send({ method: 'session/update', params: { sessionId: 'foreign-fixture', update: { sessionUpdate: 'tool_call', toolCallId: 'foreign-tool', title: 'Terminal', kind: 'execute', status: 'pending', rawInput: {} } } })
         update({ sessionUpdate: 'tool_call_update', toolCallId: 'foreign-tool', status: 'completed' })
+        if (mode.endsWith('-reuse')) update({ sessionUpdate: 'tool_call', toolCallId: 'old-tool', title: 'new invocation', kind: 'read', status: 'pending' })
+        if (mode.endsWith('-unknown')) update({ sessionUpdate: 'tool_call_update', toolCallId: 'unseen-tool', title: 'unknown invocation' })
+        if (mode.endsWith('-foreign-history')) update({ sessionUpdate: 'tool_call_update', toolCallId: 'foreign-only-tool', title: 'no terminal in this session' })
       }
     } else if (mode === 'lifecycle-unclosed-continue') {
       pending('stuck-read')
