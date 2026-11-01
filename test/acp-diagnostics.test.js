@@ -428,3 +428,39 @@ for (const mode of ['resume', 'resume-missing', 'no-model']) {
     } finally { await run?.dispose(); await context.fiber.dispose() }
   })
 }
+
+ it('blocks a continuation before transport when context headroom is exhausted', async () => {
+ const events = []
+ await fixtureRun('context-headroom', 'read', async run => {
+   const before = events.filter(e => e.type === 'prompt').length
+   await expect(run.continuePrompt([{type:'text',text:'continue'}])).rejects.toMatchObject({code:'ACP_CONTEXT_LIMIT'})
+   await expect(run.continuePrompt([{type:'text',text:'again'}])).rejects.toMatchObject({code:'ACP_CONTEXT_LIMIT'})
+   expect(events.filter(e => e.type === 'prompt')).toHaveLength(before)
+ }, {}, {onSessionEvent:e=>events.push(e)})
+ })
+
+it('blocks lost tool evidence even when the accepted active-tool count is zero', async () => {
+ const events=[]
+ await fixtureRun('invalid-start-only','inspect',async run=>{
+ expect(run.readDiagnostics().activeToolCount).toBe(0)
+ expect(run.readDiagnostics().toolLifecycle.validation_error_count).toBeGreaterThan(0)
+ const before=events.filter(e=>e.type==='prompt').length
+ await expect(run.continuePrompt([{type:'text',text:'continue'}])).rejects.toMatchObject({code:'ACP_CONTINUATION_NOT_IDLE'})
+ expect(events.filter(e=>e.type==='prompt')).toHaveLength(before)
+ },{},{onSessionEvent:e=>events.push(e)})
+})
+
+it('a compact usage update unlocks the original chain without replaying rejected prompts', async()=>{
+ const events=[]
+ await fixtureRun('context-compact','initial',async run=>{
+ const id=run.remoteSessionId
+ await expect(run.continuePrompt([{type:'text',text:'blocked-one'}])).rejects.toMatchObject({code:'ACP_CONTEXT_LIMIT'})
+ await expect(run.continuePrompt([{type:'text',text:'blocked-two'}])).rejects.toMatchObject({code:'ACP_CONTEXT_LIMIT'})
+ expect(events.filter(e=>e.type==='prompt')).toHaveLength(1)
+ await vi.waitFor(()=>expect(run.readDiagnostics().contextUsage.used).toBe(10000))
+ expect(events.filter(e=>e.type==='prompt')).toHaveLength(1)
+ await run.continuePrompt([{type:'text',text:'explicit-resume'}])
+ expect(run.remoteSessionId).toBe(id)
+ expect(events.filter(e=>e.type==='prompt').map(e=>e.prompt[0].text)).toEqual(['initial','explicit-resume'])
+ },{},{onSessionEvent:e=>events.push(e)})
+})

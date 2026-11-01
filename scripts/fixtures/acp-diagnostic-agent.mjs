@@ -8,13 +8,17 @@ const update = value => send({ method: 'session/update', params: { sessionId, up
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line)
   const reply = result => send({ id: request.id, result })
-  if (request.method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: { loadSession: mode.startsWith('resume') }, agentInfo: { name: 'fixture', version: '1.0' } })
+  if (request.method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: { loadSession: mode.startsWith('resume') || mode === 'lifecycle-companion' }, agentInfo: { name: 'fixture', version: '1.0' } })
   if (request.method === 'session/new' && mode.startsWith('resume')) { process.stderr.write('UNEXPECTED_NEW_SESSION'); process.exit(4) }
   if (request.method === 'session/load') {
     if (mode === 'resume-missing') send({ id: request.id, error: { code: -32001, message: 'session not found' } })
-    else if (request.params.sessionId !== 'original-remote') send({ id: request.id, error: { code: -32001, message: 'wrong session' } })
+    else if (request.params.sessionId !== (mode === 'lifecycle-companion' ? 'remote-fixture' : 'original-remote')) send({ id: request.id, error: { code: -32001, message: 'wrong session' } })
     else {
       sessionId = request.params.sessionId
+      if (mode === 'lifecycle-companion') {
+        promptCount = 1
+        if (process.env.PANGEA_FIXTURE_CONTEXT === 'compacted') update({sessionUpdate:'usage_update',used:10000,size:196608})
+      }
       if (mode === 'resume-replay' || mode === 'resume-replay-pending') {
         update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Earlier conversation' } })
         update({ sessionUpdate: 'tool_call', toolCallId: 'earlier-tool', title: 'earlier tool', kind: 'edit', status: mode === 'resume-replay-pending' ? 'pending' : 'completed', rawInput: {} })
@@ -42,6 +46,13 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   const text = request.params.prompt.map(block => block.text ?? '').join('')
   promptCount++
+  if (mode === 'lifecycle-companion' && promptCount > 1 && process.env.PANGEA_FIXTURE_CONTEXT && process.env.PANGEA_FIXTURE_CONTEXT !== 'missing') update({sessionUpdate:'usage_update',used:process.env.PANGEA_FIXTURE_CONTEXT === 'near' ? 195000 : process.env.PANGEA_FIXTURE_CONTEXT === 'safe' ? 180000 : 10000,size:196608})
+  if (mode === 'context-compact') {
+    update({sessionUpdate:'usage_update',used:promptCount === 1 ? 195000 : 10000,size:196608})
+    if (promptCount === 1) setTimeout(()=>update({sessionUpdate:'usage_update',used:10000,size:196608}),200)
+  }
+  if (mode === "invalid-start-only") update({sessionUpdate:"tool_call",toolCallId:"hidden-tool",title:{invalid:true},status:"pending"});
+  if (mode === "context-headroom") update({ sessionUpdate: "usage_update", used: 195000, size: 196608 });
   if (mode === 'lifecycle-companion' && promptCount === 1) {
     reply({ stopReason: 'end_turn' })
     return

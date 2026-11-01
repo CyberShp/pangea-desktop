@@ -1,5 +1,20 @@
+diff --git a/node_modules/@deepseek-ai/dsh-subagent/lib/index.js b/node_modules/@deepseek-ai/dsh-subagent/lib/index.js
+index bd9741e..6210662 100644
+--- a/node_modules/@deepseek-ai/dsh-subagent/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-subagent/lib/index.js
+@@ -2618,7 +2618,9 @@ var SubagentRuntime = class extends Service {
+ 			...request,
+ 			descriptor
+ 		};
+-		return observeRun(this.emitLifecycle, name, request.parent, await provider.start(resolved));
++		// PANGEA owns the multi-turn lifecycle; its first result is only a readiness handshake.
++			const run = await provider.start(resolved);
++			return request.pangeaCliWorker === true ? run : observeRun(this.emitLifecycle, name, request.parent, run);
+ 	}
+ 	/**
+ 	* Resolve one provider's detached continuable-creation contribution. Method
 diff --git a/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts b/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts
-index 4c2adb0..8627e84 100644
+index 4c2adb0..224e920 100644
 --- a/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts
 +++ b/node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts
 @@ -258,6 +258,31 @@ export interface SubagentRun {
