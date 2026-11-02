@@ -1385,7 +1385,16 @@ async function bootstrap(): Promise<void> {
   launchDirectory = await ensureLaunchRoot(app.getPath('userData'))
   await configurePangeaProduct()
   process.env.PANGEA_DESKTOP_PROVENANCE = JSON.stringify(desktopRuntimeIdentity(app.getAppPath(), app.getVersion()))
-  registerUpdateHandlers()
+  registerUpdateHandlers({ authorizeGitProxy: event => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false
+    const url = runtime.snapshot().url
+    if (!url) return false
+    try {
+      const expected = new URL(desktopHarnessUrl(url, process.platform))
+      return expected.origin !== 'null' && new URL(event.senderFrame!.url).origin === expected.origin
+    }
+    catch { return false }
+  } })
   nativeTheme.themeSource = harnessThemePreference()
   createWindow()
   const writeUpdateHealth = createPortableHealthReporter(updateHealthMarker, app.getVersion())

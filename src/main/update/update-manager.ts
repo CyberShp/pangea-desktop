@@ -6,6 +6,7 @@ import type { UpdateInstallResult, UpdateStatus } from '../../shared/contracts'
 import { stagePortablePackage, type StagedPortablePackage } from './portable-package-validator'
 import { isPortablePatchArchive, PortablePatchBaseVersionMismatch, stagePortablePatch, type StagedPortablePatch } from './portable-patch-validator'
 import { createUpdateTransport, UpdateNetworkStore } from './update-network'
+import { configureGlobalGitProxy } from './git-proxy'
 import { GitHubUpdateClient } from './github-update'
 import { assertSupportedPortableUpgradeSource } from './portable-update'
 import type { PortableUpdateConfig } from './portable-update'
@@ -53,7 +54,7 @@ export function getUpdateStatus(): UpdateStatus {
   return { ...status }
 }
 
-export function registerUpdateHandlers(): void {
+export function registerUpdateHandlers(options: { authorizeGitProxy?: (event: Electron.IpcMainInvokeEvent) => boolean } = {}): void {
   if (handlersRegistered) return
   handlersRegistered = true
   const authorizeNetworkSettings = (event: Electron.IpcMainInvokeEvent) => {
@@ -66,6 +67,27 @@ export function registerUpdateHandlers(): void {
     authorizeNetworkSettings(event)
     if (importing || installing) throw new Error('请等待当前更新操作结束后再修改网络设置。')
     return getNetworkStore().save(input)
+  })
+  const authorizeGitProxy = (event: Electron.IpcMainInvokeEvent) => {
+    authorizeNetworkSettings(event)
+    if (event.sender.isDestroyed() || !options.authorizeGitProxy?.(event)) throw new Error('不允许从此页面配置 Git 代理。')
+  }
+  let configuringGit = false
+  ipcMain.handle('updates:git-proxy', async (event, username: unknown) => {
+    authorizeGitProxy(event)
+    if (configuringGit) throw new Error('Git 代理配置正在进行，请稍候。')
+    configuringGit = true
+    try {
+      return await configureGlobalGitProxy(username, async ({ proxyUrl, hasExistingProxy }) => {
+        const result = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender)!, {
+          type: 'warning', title: '配置 Git 全局代理', buttons: ['取消', '确认配置'], defaultId: 0, cancelId: 0,
+          message: '此操作会修改当前用户的 Git 全局代理，影响所有仓库。',
+          detail: `${hasExistingProxy ? '已有全局代理，将被替换。\n' : ''}新代理：${proxyUrl}\n不会写入密码。密码需由现有凭据管理器获取；此操作不验证 Git 网络连接。`
+        })
+        authorizeGitProxy(event)
+        return result.response === 1
+      })
+    } finally { configuringGit = false }
   })
   ipcMain.handle('updates:status', () => getUpdateStatus())
   ipcMain.handle('updates:check', () => checkForOnlineUpdate(true))

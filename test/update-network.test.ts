@@ -160,3 +160,22 @@ describe('isolated Electron update transport', () => {
     await transport.close()
   })
 })
+
+describe('company proxy preset', () => {
+  it('constructs fixed proxy server-side and leaves separate credentials unescaped', () => {
+    expect(parseUpdateNetwork({ mode: 'company', proxyUrl: 'http://attacker.invalid', username: 'id@domain', password: 'p@ss:%#', skipCertificateCheck: false })).toEqual({ proxyUrl: 'http://proxy.huawei.com:8080', username: 'id@domain', password: 'p@ss:%#', skipCertificateCheck: false })
+  })
+  it.each(['', '   ', 'id\nother', 'id\r', 'id\0'])('rejects invalid employee identifier %j', username => {
+    expect(() => parseUpdateNetwork({ ...settings, mode: 'company', username })).toThrow('有效工号')
+  })
+  it('system selection clears credentials and legacy settings retain their old address', () => {
+    expect(parseUpdateNetwork({ ...settings, mode: 'system' })).toEqual({ ...settings, proxyUrl: '', username: '', password: '' })
+    expect(parseUpdateNetwork({ ...settings, mode: 'custom' })).toEqual(settings)
+  })
+  it('only authenticates the fixed company proxy and never an origin', () => {
+    const company = parseUpdateNetwork({ ...settings, mode: 'company' })
+    expect(matchesProxy({ isProxy: true, host: 'proxy.huawei.com', port: 8080 }, company)).toBe(true)
+    expect(matchesProxy({ isProxy: false, host: 'proxy.huawei.com', port: 8080 }, company)).toBe(false)
+    expect(matchesProxy({ isProxy: true, host: 'proxy.example', port: 8080 }, company)).toBe(false)
+  })
+})

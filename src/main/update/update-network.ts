@@ -4,6 +4,8 @@ import type { Readable } from 'node:stream'
 import { net, session } from 'electron'
 import type { UpdateFetch } from './github-update'
 
+export const COMPANY_PROXY_URL = 'http://proxy.huawei.com:8080'
+
 export interface UpdateNetworkSettings {
   proxyUrl: string
   username: string
@@ -11,7 +13,10 @@ export interface UpdateNetworkSettings {
   skipCertificateCheck: boolean
 }
 export function parseUpdateNetwork(input: unknown): UpdateNetworkSettings {
-  const value = input as Partial<UpdateNetworkSettings> | null
+  const source = input as (Partial<UpdateNetworkSettings> & { mode?: unknown }) | null
+  if (source?.mode !== undefined && !['company', 'system', 'custom'].includes(String(source.mode))) throw new Error('在线更新网络模式无效。')
+  const value = source && { ...source, proxyUrl: source.mode === 'company' ? COMPANY_PROXY_URL : source.mode === 'system' ? '' : source.proxyUrl }
+  if (source?.mode === 'company' && (typeof source.username !== 'string' || !source.username.trim() || /[\r\n\0]/.test(source.username))) throw new Error('请输入有效工号（不能包含换行或空字符）。')
   if (!value || typeof value.proxyUrl !== 'string' || typeof value.username !== 'string' || typeof value.password !== 'string' || typeof value.skipCertificateCheck !== 'boolean') {
     throw new Error('在线更新网络配置无效。')
   }
