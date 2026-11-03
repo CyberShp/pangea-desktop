@@ -114,12 +114,12 @@ class OnDemandPlanningAcceptance(unittest.TestCase):
             data = root / "data"
             repo = data / "repositories" / "sample"
             (repo / "backend").mkdir(parents=True)
-            (repo / "tls.c").write_text("int tls_connect(void) { return 0; }\n")
+            (repo / "backend" / "tls.c").write_text("int tls_connect(void) { return 0; }\n")
             for i in range(500):
                 (repo / "backend" / f"disk{i}.c").write_text(f"int disk{i}(void) {{ return 0; }}\n")
             request = root / "request.json"
             write_json(request, {"data_root": str(data), "run_id": "lazy-run", "repository": "sample",
-                "target": "TLS connect", "source_scope": ["."], "workflow_version": "source-first-v1"})
+                "target": "TLS connect", "source_scope": ["backend"], "workflow_version": "source-first-v1"})
             with patch("pangea_agent.inventory.source_scanner.parse_cpp_file", side_effect=AssertionError("eager parse")):
                 run_module_analysis(str(request))
             run = data / "runs" / "lazy-run"
@@ -134,12 +134,12 @@ class OnDemandPlanningAcceptance(unittest.TestCase):
             page = source_index(*binding, repo_id="sample", path="backend", page_size=4)
             self.assertEqual(len(page["files"]), 4)
             self.assertFalse((run / "inputs/source-details").exists())
-            selected = source_index(*binding, repo_id="sample", path="tls.c")
-            self.assertTrue((run / "inputs/source-details/sample/tls.c.json").is_file())
+            selected = source_index(*binding, repo_id="sample", path="backend/tls.c")
+            self.assertTrue((run / "inputs/source-details/sample/backend/tls.c.json").is_file())
             self.assertEqual(len(list((run / "inputs/source-details").rglob("*.json"))), 1)
             function = next(r for r in selected["files"][0]["regions"] if r["kind"] == "function")
             self.assertIn("tls_connect", json.dumps(source_read(*binding, repo_id="sample", region_id=function["region_id"])))
-            saved = plan_write(*binding, expected_revision=0, unit={"title":"TLS", "purpose":"连接", "owned_files":[{"repo_id":"sample","path":"tls.c"}]})
+            saved = plan_write(*binding, expected_revision=0, unit={"title":"TLS", "purpose":"连接", "owned_files":[{"repo_id":"sample","path":"backend/tls.c"}]})
             work_finish(*binding, revision=saved["revision"])
             before = (run / "agent-results/source-first/planning.json").read_bytes()
             command = [sys.executable, "-m", "pangea_agent.cli.main", "runs", "resume", "--data-root", str(data), "--run-id", "lazy-run"]

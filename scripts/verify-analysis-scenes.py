@@ -18,7 +18,7 @@ from pangea_agent.methodology import freeze_enabled_methodologies
 
 
 def scene_flow_fixture():
-    evidence = ['sample:tls.c:1']
+    evidence = ['sample:src/tls.c:1']
     return {
         'format_version': 'behavior-flow-v1', 'flow_id': 'F1', 'title': '就绪状态返回',
         'role': 'main', 'attach_to': None,
@@ -51,7 +51,7 @@ def scene_flow_fixture():
             'format_version': 'call-graph-v1', 'title': '单函数就绪判断', 'status': 'ready',
             'root': 'connect_session',
             'functions': [{'id': 'connect_session', 'kind': 'function', 'label': 'connect_session',
-                           'signature': 'int connect_session(int ready)', 'file': 'tls.c', 'line': 1}],
+                           'signature': 'int connect_session(int ready)', 'file': 'src/tls.c', 'line': 1}],
             'calls': [],
             'variables': [{'function': 'connect_session', 'name': 'ready', 'reads': ['ready'],
                            'compute': '!ready', 'writes': '无写入', 'line': 1}],
@@ -64,10 +64,10 @@ def sequence_review_note(record_id, unit_id, version_set_id):
         'format_version': 'sequence-path-review-v1',
         'version_set_id': version_set_id, 'unit_id': unit_id,
         'record_id': record_id, 'checks': [
-            {'field': 'paths[0]', 'basis': 'sample:tls.c:1：ready 为真时越过提前返回，返回 0；对应 entry → check → accept，消息 invoke → check → accept。'},
-            {'field': 'paths[1]', 'basis': 'sample:tls.c:1：!ready 为真时提前返回 -1；对应 entry → check → reject，消息 invoke → check → reject。'},
-            {'field': 'sequence.fragments[0].operands[0]', 'basis': 'sample:tls.c:1：ready 分支在调用后返回 0，无网络连接操作。'},
-            {'field': 'sequence.fragments[0].operands[1]', 'basis': 'sample:tls.c:1：!ready 分支在调用后返回 -1，不再执行 return 0。'}]}}
+            {'field': 'paths[0]', 'basis': 'sample:src/tls.c:1：ready 为真时越过提前返回，返回 0；对应 entry → check → accept，消息 invoke → check → accept。'},
+            {'field': 'paths[1]', 'basis': 'sample:src/tls.c:1：!ready 为真时提前返回 -1；对应 entry → check → reject，消息 invoke → check → reject。'},
+            {'field': 'sequence.fragments[0].operands[0]', 'basis': 'sample:src/tls.c:1：ready 分支在调用后返回 0，无网络连接操作。'},
+            {'field': 'sequence.fragments[0].operands[1]', 'basis': 'sample:src/tls.c:1：!ready 分支在调用后返回 -1，不再执行 return 0。'}]}}
 
 
 class SceneAcceptance(unittest.TestCase):
@@ -98,16 +98,16 @@ class SceneAcceptance(unittest.TestCase):
     def fixture(self, directory, scene='branch-analysis', mode='speed', coverage=False, empty=False):
         root = Path(directory)
         data = root / 'data'
-        repo = data / 'repositories' / 'sample'
+        repo = data / 'repositories' / 'sample' / 'src'
         repo.mkdir(parents=True, exist_ok=True)
         (repo / 'tls.c').write_text('int connect_session(int ready) { if (!ready) return -1; return 0; }\n')
         contract = dict(data_root=str(data), run_id='scene-run', repository='sample', target='连接流程',
                         workflow_version='source-first-v1', analysis_profile='behavior-test-v2',
-                        analysis_settings={'scenario': scene, 'mode': mode}, source_scope=['.'], asset_ids=[])
+                        analysis_settings={'scenario': scene, 'mode': mode}, source_scope=['src'], asset_ids=[])
         if coverage:
             source = root / 'coverage.json'
             write_json(source, {'status': 'success', 'query_resolution': {'status': 'matched'},
-                'uncovered_functions': [] if empty else [{'source': 'test-build', 'file_path': 'tls.c', 'uncovered_functions': ['connect_session']}]})
+                'uncovered_functions': [] if empty else [{'source': 'test-build', 'file_path': 'src/tls.c', 'uncovered_functions': ['connect_session']}]})
             asset = import_asset(str(data), str(source), 'coverage')
             prepare_asset_extraction(str(data), asset.asset_id)
             detail = asset_detail(str(data), asset.asset_id)['asset']
@@ -132,7 +132,7 @@ class SceneAcceptance(unittest.TestCase):
                     plan_action = first['agent_actions'][0]
                     binding = (str(data), 'scene-run', plan_action['action_id'], 'planner-session')
                     bind_action(*binding)
-                    saved = plan_write(*binding, expected_revision=0, unit={'title': '连接', 'purpose': '负责对象主干流程', 'methodology_ids': ['tls-recovery'], 'owned_files': [{'repo_id': 'sample', 'path': 'tls.c'}]})
+                    saved = plan_write(*binding, expected_revision=0, unit={'title': '连接', 'purpose': '负责对象主干流程', 'methodology_ids': ['tls-recovery'], 'owned_files': [{'repo_id': 'sample', 'path': 'src/tls.c'}]})
                     work_finish(*binding, revision=saved['revision'])
                     advanced = settle_action(*binding[:3])
                     self.assertNotEqual(advanced.get('validation', {}).get('status'), 'invalid', advanced)
@@ -158,13 +158,13 @@ class SceneAcceptance(unittest.TestCase):
                     if scenario == 'risk-analysis':
                         self.assertEqual(json.loads(input_read(*binding, input_id='unit_risk_signals')['text'])['unit_id'], unit_id)
                     risk_check = {'format_version': 'behavior-check-v1', 'check_id': 'C1', 'lens': 'error_path',
-                        'object': 'connection readiness', 'sites': ['sample:tls.c:1'], 'hypothesis': 'not ready is rejected',
+                        'object': 'connection readiness', 'sites': ['sample:src/tls.c:1'], 'hypothesis': 'not ready is rejected',
                         'conclusion': 'confirmed', 'reasoning': 'synthetic protocol fixture; no semantic claim',
-                        'evidence_quotes': [{'ref': 'sample:tls.c:1', 'snippet': 'if (!ready) return -1;'}], 'risk_ids': ['R1']}
+                        'evidence_quotes': [{'ref': 'sample:src/tls.c:1', 'snippet': 'if (!ready) return -1;'}], 'risk_ids': ['R1']}
                     risk = {'format_version': 'behavior-risk-v2', 'risk_id': 'R1', 'title': '合成协议记录',
                         'trigger': 'fixture', 'system_result': 'fixture', 'external_observation': 'fixture',
-                        'exclusion_condition': 'fixture', 'source_evidence': ['sample:tls.c:1'],
-                        'evidence_quotes': [{'ref': 'sample:tls.c:1', 'snippet': 'if (!ready) return -1;'}]}
+                        'exclusion_condition': 'fixture', 'source_evidence': ['sample:src/tls.c:1'],
+                        'evidence_quotes': [{'ref': 'sample:src/tls.c:1', 'snippet': 'if (!ready) return -1;'}]}
                     saved = result_write(*binding, expected_revision=0, records=[
                         *([{'kind': 'check', 'body': risk_check}, {'kind': 'risk', 'body': risk}] if scenario == 'risk-analysis' else []),
                         {'kind': 'flow', 'body': scene_flow_fixture()},
@@ -308,7 +308,7 @@ class SceneAcceptance(unittest.TestCase):
                 action = first['agent_actions'][0]
                 binding = (str(data), 'scene-run', action['action_id'], 'planner')
                 bind_action(*binding)
-                saved = plan_write(*binding, expected_revision=0, unit={'title': '连接', 'purpose': '主干流程', 'owned_files': [{'repo_id': 'sample', 'path': 'tls.c'}]})
+                saved = plan_write(*binding, expected_revision=0, unit={'title': '连接', 'purpose': '主干流程', 'owned_files': [{'repo_id': 'sample', 'path': 'src/tls.c'}]})
                 work_finish(*binding, revision=saved['revision'])
                 settle_action(*binding[:3])
                 action = next(a for a in read_json(run / 'progress.json')['actions'].values() if a['role'] == 'analysis')
@@ -336,7 +336,7 @@ class SceneAcceptance(unittest.TestCase):
                 binding = (str(data), 'scene-run', action['action_id'], 'planner')
                 bind_action(*binding)
                 self.assertLess(len(json.dumps(task_open(*binding), ensure_ascii=False)), 12000)
-                saved = plan_write(*binding, expected_revision=0, unit={'title': '连接', 'purpose': '主干流程', 'owned_files': [{'repo_id': 'sample', 'path': 'tls.c'}], 'risk_lenses': ['error_path']})
+                saved = plan_write(*binding, expected_revision=0, unit={'title': '连接', 'purpose': '主干流程', 'owned_files': [{'repo_id': 'sample', 'path': 'src/tls.c'}], 'risk_lenses': ['error_path']})
                 work_finish(*binding, revision=saved['revision'])
                 settle_action(*binding[:3])
                 action = next(a for a in read_json(run / 'progress.json')['actions'].values() if a['role'] == 'analysis')

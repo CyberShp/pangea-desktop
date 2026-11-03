@@ -136,3 +136,18 @@ it.runIf(process.platform === 'win32')('native Windows job stops a child after i
   expect(await fence.quiesceForRecovery()).toMatchObject({ confirmed: true, processTreeStopped: true })
   expect(openHandles.size).toBe(0)
 })
+
+it('reports the exact failing startup PID and stage without claiming a vanished snapshot member is contained', async () => {
+  const { state, native } = fixture()
+  const open = native.open
+  native.open = pid => {
+    if (pid === 11) throw new Error('OpenProcess PID 11: process absent (Windows error 87)')
+    return open(pid)
+  }
+  const fence = createWindowsRecoveryFence(10, native)
+  expect(fence.supported).toBe(false)
+  expect(fence.reason).toContain('root PID 10, PID 11, stage open_member')
+  expect(fence.reason).toContain('process absent')
+  expect(await fence.quiesceForRecovery()).toMatchObject({ confirmed: false, processTreeStopped: false })
+  expect(state.terminated).toBe(0)
+})
