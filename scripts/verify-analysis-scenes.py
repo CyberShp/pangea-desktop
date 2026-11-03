@@ -17,6 +17,59 @@ from pangea_agent.models.contract import TaskContract
 from pangea_agent.methodology import freeze_enabled_methodologies
 
 
+def scene_flow_fixture():
+    evidence = ['sample:tls.c:1']
+    return {
+        'format_version': 'behavior-flow-v1', 'flow_id': 'F1', 'title': '就绪状态返回',
+        'role': 'main', 'attach_to': None,
+        'text': '入口→检查就绪；ready非零返回0，ready为0返回-1。',
+        'nodes': [{'id': i, 'kind': k, 'label': label} for i, k, label in [
+            ('entry', 'entry', 'connect_session(ready)'), ('check', 'branch', '检查!ready'),
+            ('accept', 'exit', '返回0'), ('reject', 'exit', '返回-1')]],
+        'edges': [{'source_step_key': a, 'target_step_key': b, 'condition': c} for a, b, c in [
+            ('entry', 'check', ''), ('check', 'accept', 'ready!=0'), ('check', 'reject', 'ready==0')]],
+        'paths': [
+            {'path_id': 'ready', 'node_ids': ['entry', 'check', 'accept']},
+            {'path_id': 'not-ready', 'node_ids': ['entry', 'check', 'reject']}],
+        'source_evidence': evidence,
+        'sequence': {
+            'format_version': 'sequence-v1', 'title': '就绪分支返回', 'status': 'ready',
+            'participants': [
+                {'id': 'caller', 'label': '函数调用边界', 'description': '仅表示函数入参与返回边界，不推定调用方实现'},
+                {'id': 'session', 'label': 'connect_session'}],
+            'messages': [{'id': i, 'from': a, 'to': b, 'label': label, 'kind': kind, 'source_evidence': evidence}
+                         for i, a, b, label, kind in [
+                ('invoke', 'caller', 'session', 'connect_session(ready)', 'call'),
+                ('check', 'session', 'session', '判断!ready', 'self'),
+                ('accept', 'session', 'caller', '返回0', 'return'),
+                ('reject', 'session', 'caller', '返回-1', 'return')]],
+            'fragments': [{'id': 'readiness', 'kind': 'alt', 'operands': [
+                {'condition': 'ready!=0', 'message_ids': ['accept']},
+                {'condition': 'ready==0', 'message_ids': ['reject']}]}],
+            'notes': ['静态合成函数，仅返回数值；不代表执行网络连接；互斥返回不串接。']},
+        'call_graph': {
+            'format_version': 'call-graph-v1', 'title': '单函数就绪判断', 'status': 'ready',
+            'root': 'connect_session',
+            'functions': [{'id': 'connect_session', 'kind': 'function', 'label': 'connect_session',
+                           'signature': 'int connect_session(int ready)', 'file': 'tls.c', 'line': 1}],
+            'calls': [],
+            'variables': [{'function': 'connect_session', 'name': 'ready', 'reads': ['ready'],
+                           'compute': '!ready', 'writes': '无写入', 'line': 1}],
+            'notes': ['函数体没有函数调用；不补造网络连接或调用方实现。']},
+    }
+
+
+def sequence_review_note(record_id, unit_id, version_set_id):
+    return {'kind': 'note', 'body': {
+        'format_version': 'sequence-path-review-v1',
+        'version_set_id': version_set_id, 'unit_id': unit_id,
+        'record_id': record_id, 'checks': [
+            {'field': 'paths[0]', 'basis': 'sample:tls.c:1：ready 为真时越过提前返回，返回 0；对应 entry → check → accept，消息 invoke → check → accept。'},
+            {'field': 'paths[1]', 'basis': 'sample:tls.c:1：!ready 为真时提前返回 -1；对应 entry → check → reject，消息 invoke → check → reject。'},
+            {'field': 'sequence.fragments[0].operands[0]', 'basis': 'sample:tls.c:1：ready 分支在调用后返回 0，无网络连接操作。'},
+            {'field': 'sequence.fragments[0].operands[1]', 'basis': 'sample:tls.c:1：!ready 分支在调用后返回 -1，不再执行 return 0。'}]}}
+
+
 class SceneAcceptance(unittest.TestCase):
     def test_frozen_methodology_bytes_survive_windows_writes_and_resume(self):
         original_open = Path.open
@@ -114,8 +167,9 @@ class SceneAcceptance(unittest.TestCase):
                         'evidence_quotes': [{'ref': 'sample:tls.c:1', 'snippet': 'if (!ready) return -1;'}]}
                     saved = result_write(*binding, expected_revision=0, records=[
                         *([{'kind': 'check', 'body': risk_check}, {'kind': 'risk', 'body': risk}] if scenario == 'risk-analysis' else []),
-                        {'kind': 'flow', 'body': {'format_version': 'module-flow-text-v1', 'flow_id': 'F1', 'title': '连接流程', 'text': '入口→检查就绪；未就绪拒绝，否则建立连接。'}},
+                        {'kind': 'flow', 'body': scene_flow_fixture()},
                         {'kind': 'summary', 'body': '合成样例：未确认产品风险，无新增补测。'}])
+                    self.assertEqual(saved['warnings'], [])
                     work_finish(*binding, revision=saved['revision'])
                     settle_action(*binding[:3])
                     first_result = first_result_path.read_bytes()
@@ -134,6 +188,26 @@ class SceneAcceptance(unittest.TestCase):
                         self.assertIn('确认再次连接可恢复', input_read(*binding, input_id='rubric_user_tls-recovery')['text'])
                         current = read_json(Path(task['result_path']))
                         if task.get('review_stage') == 'comparison_review':
+                            self.assertEqual(task['record_contracts']['sequence_review'], 'sequence-path-review-v1')
+                            if scenario == 'module-analysis' and mode == 'speed':
+                                # A pass without the frozen flow receipt must still be rejected.
+                                incomplete = review_decide(*binding, expected_revision=current['revision'], decision={
+                                    'disposition': 'pass', 'version_set_id': task['version_set_id'],
+                                    'correction_record_ids': [], 'summary': '缺少时序依据的负向协议样例'})
+                                work_finish(*binding, revision=incomplete['revision'])
+                                settle_action(*binding[:3])
+                                rejected = read_json(run / 'progress.json')
+                                self.assertEqual(rejected['lifecycle_status'], 'running')
+                                rejected_review = rejected['actions'][review['action_id']]
+                                self.assertEqual(rejected_review['status'], 'pending')
+                                self.assertIn('缺少时序对照依据', rejected_review['error'])
+                                bind_action(*binding)
+                                current = read_json(Path(task['result_path']))
+                            flow = next(r for r in read_json(first_result_path)['records'] if r['kind'] == 'flow')
+                            saved_review = result_write(*binding, expected_revision=current['revision'], records=[
+                                sequence_review_note(flow['record_id'], unit_id, task['version_set_id'])])
+                            self.assertEqual(saved_review['warnings'], [])
+                            current = read_json(Path(task['result_path']))
                             if scenario == 'risk-analysis':
                                 saved_review = result_write(*binding, expected_revision=current['revision'], records=[{'kind': 'note', 'body': {
                                     'format_version': 'behavior-review-check-v1', 'unit_id': unit_id, 'version_set_id': task['version_set_id'],
@@ -143,7 +217,7 @@ class SceneAcceptance(unittest.TestCase):
                                 self.assertEqual(saved_review['warnings'], [])
                                 current = read_json(Path(task['result_path']))
                             if exercise_closure:
-                                comparison_finding_write(*binding, expected_revision=current['revision'], unit_ids=[unit_id], finding={'summary': '补充拒绝后的恢复说明', 'body': '合成定向修正路由验收'})
+                                comparison_finding_write(*binding, expected_revision=current['revision'], unit_ids=[unit_id], finding={'summary': '补充函数调用边界说明', 'body': '合成定向修正路由验收'})
                                 current = read_json(Path(task['result_path']))
                             saved = review_decide(*binding, expected_revision=current['revision'], decision={'disposition': 'finding' if exercise_closure else 'pass', 'version_set_id': task['version_set_id'], 'correction_record_ids': [r['record_id'] for r in current['records'] if r['kind'] == 'finding'] if exercise_closure else [], 'summary': '合成路由验收，不代表模型质量验收'})
                         else:
@@ -163,15 +237,22 @@ class SceneAcceptance(unittest.TestCase):
                         self.assertIn('确认再次连接可恢复', input_read(*binding, input_id='rubric_user_tls-recovery')['text'])
                         current = read_json(Path(task['result_path']))
                         flow = next(r for r in current['records'] if r['kind'] == 'flow')
-                        saved = result_supersede(*binding, expected_revision=current['revision'], target_record_ids=[flow['record_id']], replacement={'kind': 'flow', 'body': {**flow['body'], 'text': flow['body']['text'] + ' 修正后可再次发起连接。'}})
+                        saved = result_supersede(*binding, expected_revision=current['revision'], target_record_ids=[flow['record_id']], replacement={'kind': 'flow', 'body': {**flow['body'], 'text': flow['body']['text'] + ' 返回值只表示本函数判断，不代表网络已建立。'}})
+                        replacement = next(r for r in read_json(Path(task['result_path']))['records']
+                                           if r['kind'] == 'flow' and r['record_id'] != flow['record_id'])
+                        saved = result_write(*binding, expected_revision=saved['revision'], records=[
+                            sequence_review_note(replacement['record_id'], unit_id, closure['action_id'])])
+                        self.assertEqual(saved['warnings'], [])
                         work_finish(*binding, revision=saved['revision'])
                         settle_action(*binding[:3])
                         self.assertEqual(first_result_path.read_bytes(), first_result)
                     progress = read_json(run / 'progress.json')
                     self.assertEqual(progress['lifecycle_status'], 'complete', progress)
                     report = (run / 'report.md').read_text(encoding='utf-8')
-                    self.assertIn('入口→检查就绪', report)
-                    self.assertNotIn('.svg', report)
+                    self.assertIn('检查!ready', report)
+                    self.assertIn('report-assets/', report)
+                    self.assertIn('时序交互', report)
+                    self.assertTrue(list((run / 'report-assets').glob('*.svg')))
                     if scenario == 'risk-analysis':
                         self.assertIn('风险检查账本', report)
                         self.assertIn('```c', report)
