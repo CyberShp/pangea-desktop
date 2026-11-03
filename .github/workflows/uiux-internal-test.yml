@@ -2,7 +2,7 @@ name: UIUX isolated Windows test build
 run-name: UIUX development build ${{ github.run_number }}
 on:
   push:
-    branches: [feat/uiux-workbench-20261021]
+    branches: [feat/drawers-timeline-test-20261103]
     paths:
       - pangea.components.json
       - .github/workflows/uiux-internal-test.yml
@@ -57,6 +57,19 @@ jobs:
           $IntegrationTest = Join-Path $env:PANGEA_TEST_APP_ROOT 'node_modules/dsh-pangea-companion/tests/cordis-launch.integration.mjs'
           & $PackagedNode --test $IntegrationTest
           if ($LASTEXITCODE -ne 0) { throw 'Packaged Cordis integration failed.' }
+      - name: Verify case drawers and execution timeline in Electron
+        shell: pwsh
+        run: |
+          $Electron = (Resolve-Path 'node_modules/electron/dist/electron.exe').Path
+          $Runner = (Resolve-Path '.pangea-build/plugins/dsh-pangea-companion/scripts/verify-drawers-electron.cjs').Path
+          $Node = (Resolve-Path 'node_modules/node/bin/node.exe').Path
+          $Profile = Join-Path $env:RUNNER_TEMP ('pangea-drawers-electron-' + [guid]::NewGuid().ToString('N'))
+          try {
+            & $Electron $Runner --desktop (Get-Location).Path --agent (Resolve-Path '.pangea-build/runtime/pangea-runtime').Path --node $Node --profile $Profile --output (Join-Path (Get-Location).Path '.pangea-build/drawers-timeline-ui') | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw 'Case drawer or execution timeline UI verification failed. See the build-evidence artifact.' }
+          } finally {
+            if (Test-Path -LiteralPath $Profile) { Remove-Item -LiteralPath $Profile -Recurse -Force -ErrorAction Stop }
+          }
       - name: Add isolated launch entry and review checklist
         shell: pwsh
         run: |
@@ -65,7 +78,7 @@ jobs:
           set "PANGEA_USER_DATA_DIR=%~dp0uiux-test-profile"
           start "PANGEA UIUX test" "%~dp0PANGEA Desktop Dev.exe"
           '@ | Set-Content -LiteralPath './dist-dev/win-unpacked/start-uiux-test.cmd' -Encoding ASCII
-          Copy-Item -LiteralPath 'feature-specs/2026-10-21-uiux-development.md' -Destination './dist-dev/win-unpacked/UIUX-REVIEW.md'
+          Copy-Item -LiteralPath 'feature-specs/2026-11-03-drawers-timeline-acceptance.md' -Destination './dist-dev/win-unpacked/UIUX-REVIEW.md'
       - uses: actions/upload-artifact@v4
         with:
           name: pangea-uiux-win-unpacked-${{ github.sha }}
@@ -80,5 +93,6 @@ jobs:
             .pangea-build/components.resolved.json
             .pangea-build/uiux-smoke.json
             .pangea-build/uiux-smoke-logs
+            .pangea-build/drawers-timeline-ui
           if-no-files-found: ignore
           retention-days: 14
