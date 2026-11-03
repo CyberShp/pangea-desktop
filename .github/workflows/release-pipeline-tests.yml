@@ -14,6 +14,11 @@ on:
       - build/apply-portable-update.ps1
       - scripts/*portable*.ps1
       - src/main/update/**
+      - src/preload/desktop-bridge.ts
+      - src/preload/index.ts
+      - src/preload/update-network-view.ts
+      - test/desktop-bridge.test.ts
+      - test/update-network*.test.ts
       - packages/dsh-pangea-product/update-admission.js
       - test/portable-*.test.ts
       - src/main/update/portable-update.ts
@@ -37,6 +42,11 @@ on:
       - build/apply-portable-update.ps1
       - scripts/*portable*.ps1
       - src/main/update/**
+      - src/preload/desktop-bridge.ts
+      - src/preload/index.ts
+      - src/preload/update-network-view.ts
+      - test/desktop-bridge.test.ts
+      - test/update-network*.test.ts
       - packages/dsh-pangea-product/update-admission.js
       - test/portable-*.test.ts
       - src/main/update/portable-update.ts
@@ -65,6 +75,8 @@ jobs:
         run: npm run test:release-tools
       - name: Verify online discovery, signed download and install handoff
         run: npx --no-install vitest run test/github-update.test.ts test/online-update-integration.test.ts test/update-state.test.ts test/update-ui.test.ts test/desktop-bridge.test.ts
+      - name: Verify proactive network settings entry and isolated dialog
+        run: npx --no-install vitest run test/update-network-entry.test.ts test/update-network-view.test.ts test/update-network.test.ts test/git-proxy-ipc.test.ts test/windows-titlebar.test.ts
       - name: Verify existing package and patch contracts
         run: npx --no-install vitest run test/release.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts test/portable-upgrade-policy.test.ts
   windows-updater:

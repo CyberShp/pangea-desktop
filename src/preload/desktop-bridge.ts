@@ -12,6 +12,7 @@ export interface DshDesktopBridge {
   restartHarness(): Promise<{ ok: boolean }>
   getUpdateStatus(): Promise<UpdateStatus>
   checkForUpdates(): Promise<UpdateStatus>
+  openUpdateNetworkSettings(): Promise<void>
   downloadUpdate(): Promise<UpdateStatus>
   importUpdatePackage(): Promise<UpdateStatus>
   installUpdate(): Promise<UpdateInstallResult>
@@ -19,7 +20,11 @@ export interface DshDesktopBridge {
   unsubscribeUpdateStatus(subscriptionId: number): void
 }
 
-export function createDesktopBridge(ipc: DesktopBridgeIpc): Readonly<DshDesktopBridge> {
+interface DesktopBridgeUi {
+  openUpdateNetworkSettings(): Promise<void>
+}
+
+export function createDesktopBridge(ipc: DesktopBridgeIpc, ui: DesktopBridgeUi): Readonly<DshDesktopBridge> {
   let subscriptionSequence = 0
   const subscriptions = new Map<number, (...args: unknown[]) => void>()
 
@@ -33,6 +38,9 @@ export function createDesktopBridge(ipc: DesktopBridgeIpc): Readonly<DshDesktopB
     getUpdateStatus: (): Promise<UpdateStatus> =>
       ipc.invoke('updates:status') as Promise<UpdateStatus>,
     checkForUpdates: (): Promise<UpdateStatus> => ipc.invoke('updates:check') as Promise<UpdateStatus>,
+    // Keep the dialog in the isolated preload world. The renderer gets only an
+    // opener, never raw IPC, proxy settings, or credential access.
+    openUpdateNetworkSettings: (): Promise<void> => ui.openUpdateNetworkSettings(),
     downloadUpdate: (): Promise<UpdateStatus> => ipc.invoke('updates:download') as Promise<UpdateStatus>,
     importUpdatePackage: (): Promise<UpdateStatus> =>
       ipc.invoke('updates:import') as Promise<UpdateStatus>,

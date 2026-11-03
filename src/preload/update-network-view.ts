@@ -6,6 +6,7 @@ export async function openUpdateNetworkSettings(): Promise<void> {
   if (panel) return
   const previousFocus = document.activeElement as HTMLElement | null
   const host = document.createElement('div')
+  host.id = 'dsh-desktop-update-network-root'
   panel = host
   host.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#0007;display:grid;place-items:center;font-family:system-ui,sans-serif'
   const root = host.attachShadow({ mode: 'closed' })

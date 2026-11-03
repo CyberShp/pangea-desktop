@@ -68,6 +68,7 @@ import {
   portableUpdateHealthMarker
 } from './update/portable-update-health'
 import { acquirePortableUpdateAdmission } from './update/portable-update-admission'
+import { createUpdateNetworkMenuItem } from './update/update-network-menu'
 import type { RuntimeSnapshot } from '../shared/contracts'
 import { resolveHarnessLocale } from './application-locale'
 import { installContextMenu } from './context-menu'
@@ -1252,10 +1253,7 @@ function installMenu(): void {
                 accelerator: 'CmdOrCtrl+Shift+U',
                 click: () => void checkForOnlineUpdate(true).catch(showUnexpectedError)
               },
-              {
-                label: isChinese ? '在线更新网络设置…' : 'Update Network Settings…',
-                click: () => mainWindow?.webContents.send('updates:network-open')
-              },
+              createUpdateNetworkMenuItem(isChinese, () => mainWindow),
               {
                 label: isChinese ? '导入升级包…' : 'Import Update Package…',
                 accelerator: 'CmdOrCtrl+U',

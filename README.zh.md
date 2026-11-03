@@ -31,6 +31,8 @@ dist\pangea-desktop-<version>-from-<base-version>-windows-x64.patch.zip.sha256
 
 ## DSH 内导包升级
 
+需要设置在线更新代理时，打开 **设置 → 版本与升级 → 更新网络设置**，或在 Desktop 窗口按 **Ctrl+Alt+N**。入口始终可用，无需先遇到网络错误；打开或取消不会修改网络，也不会检查或下载更新。只有选择“保存并检查（不下载）”才会保存并发起检查。
+
 完整 Portable ZIP 和增量 Patch ZIP 都可以作为升级包。把云端构建得到的包搬到内部共享位置；用户下载后，在 DSH 设置区域选择“导入升级包”，应用会自动识别包类型。补丁只接受指定基线版本，校验通过即可重启升级；不满足基线时请改用完整包。PANGEA Desktop 会校验包内置的 Ed25519 签名和逐文件清单。
 
 升级助手会保留上一版程序目录，只有新版本 Harness 成功进入 Ready 才确认升级，否则自动恢复。应用数据始终位于程序目录之外。发布密钥和内部交付步骤见 [`docs/release-runbook.md`](./docs/release-runbook.md)。

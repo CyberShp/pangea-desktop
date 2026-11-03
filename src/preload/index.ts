@@ -251,7 +251,7 @@ window.addEventListener('unhandledrejection', (event) => {
 
 contextBridge.exposeInMainWorld(
   'dshDesktop',
-  createDesktopBridge(ipcRenderer)
+  createDesktopBridge(ipcRenderer, { openUpdateNetworkSettings })
 )
 
 contextBridge.exposeInMainWorld(

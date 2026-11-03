@@ -90,7 +90,7 @@ describe('secure update card wiring', () => {
     expect(main).toContain("preload: join(import.meta.dirname, '../preload/index.cjs')")
     expect(main).toContain('nodeIntegration: false')
     expect(preload).toContain("ipcRenderer.on('updates:status-changed'")
-    expect(preload).toContain('createDesktopBridge(ipcRenderer)')
+    expect(preload).toContain('createDesktopBridge(ipcRenderer, { openUpdateNetworkSettings })')
     expect(bridge).toContain("ipc.invoke('updates:import')")
     expect(bridge).toContain("ipc.invoke('updates:install')")
     expect(bridge).toContain('getUpdateStatus: (): Promise<UpdateStatus>')

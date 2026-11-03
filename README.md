@@ -33,6 +33,8 @@ Extract the ZIP into a writable directory and run `PANGEA Desktop.exe`. Settings
 
 ## In-app ZIP updates
 
+To configure the online update proxy, open **Settings → Version & updates → Update network settings**, or press **Ctrl+Alt+N** in the Desktop window. This entry is available before any network error. Opening or canceling the dialog does not change the network, check for updates, or download anything. Only **Save and check (no download)** saves the settings and starts a check.
+
 The complete portable ZIP and an incremental patch ZIP are both accepted by the in-app update flow. Move the cloud-built package to the internal shared location. Users download it, choose **Import update package** beside DSH settings, and restart after verification. PANGEA Desktop detects the package type and validates the embedded Ed25519 signatures and file manifests. A patch is accepted only from its declared base version.
 
 The update helper keeps the previous program directory and restores it unless the new Harness reaches Ready. Settings and session/task records remain in the user-data directory. See [`docs/release-runbook.md`](./docs/release-runbook.md) for release-key and internal handoff instructions.
