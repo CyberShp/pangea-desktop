@@ -8,7 +8,7 @@
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
     "branch": "feat/drawers-timeline-20261103",
-    "commit": "b537e4f4bd637f06d287561a4f9a6aadaa6c0591"
+    "commit": "21827cb461cbbe548d65bc2372b1be34f5d6c062"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
