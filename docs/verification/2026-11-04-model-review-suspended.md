@@ -36,4 +36,12 @@ Focused upgrade tests: 30 passed. Release tooling: 163 passed, 9 environment-dep
 
 ## Published component sources
 
-The Desktop lock pins Agent `87d7161ee30fe6a12c23be3e6208fbabfdea1595` and DSH `3652f5a406addd49c4c2b9e23587c0c68329ec19` on their `langgraph` branches. Their remote trees exactly match the locally tested trees (`f80572c83490d6f6f831e8ed5567f9aa7dbe8ce8` and `a226660163de6750e12831ebf5df260466c3be49`). Source publication does not create a release or update an installed application.
+The Desktop lock pins Agent `2c302d5657cd15abf7a89ff5f07ec59cb79f7fd2` and DSH `3652f5a406addd49c4c2b9e23587c0c68329ec19` on their `langgraph` branches. Their remote trees exactly match the locally tested trees (`d2d52cf28b8045490f0639acbad3a346569c6d9b` and `a226660163de6750e12831ebf5df260466c3be49`). Source publication does not create a release or update an installed application.
+
+## Build-acceptance follow-up
+
+The manually dispatched 2.1.16 build on Desktop `31cde3756616b2dc725591b2602e3f807d060451` stopped before packaging or release because the scene acceptance script still expected pending review actions. The script now explicitly verifies review-disabled completion, no review/closure dispatch, saved-analysis recovery, unchanged frozen/results bytes, and truthful Markdown/HTML reports. Historical review acceptance code is retained separately. The report mode header also now respects the disabled review policy.
+
+After this correction, all 13 Python commands invoked by the build script passed locally against the pinned Agent source: 78 unittest cases, report-delivery smoke checks and the capabilities command. The Agent verification suite passed 167 tests. An independent review reran the scene, no-review and report-label checks. This does not establish that a subsequent Windows package build has passed; no replacement release build was triggered by this task.
+
+On the earlier published source, Linux release-tooling CI passed. Actual Windows PowerShell transaction recovery and the new source-version boundaries passed. Two Windows regressions still failed: the progress UI fixture uses an invalid plan location, and the IO timeout test can still observe a child PID after the helper reports termination. Both failures were also present in the November 3 runs (`41573344305` and `41573344269`). The latter has not established continuing disk writes, but remains an unresolved process-stop verification risk. These failures must not be described as a fully passing Windows upgrade suite.

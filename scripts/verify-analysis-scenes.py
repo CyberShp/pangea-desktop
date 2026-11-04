@@ -10,7 +10,8 @@ from unittest.mock import patch
 from pangea_agent.agent_io import read_json, write_json
 from pangea_agent.analysis_scenarios import SCENES, scene_spec
 from pangea_agent.assets import import_asset, prepare_asset_extraction, asset_detail, analysis_asset_inputs
-from pangea_agent.cli.adapter_api import bind_action, settle_action
+from pangea_agent.cli.adapter_api import bind_action, next_actions, settle_action
+from pangea_agent.cli.public_api import resume_run
 from pangea_agent.cli.run_module_analysis import run_module_analysis, resume_module_analysis
 from pangea_agent.cli.source_first_api import plan_write, result_write, work_finish, review_decide, task_open, input_read, comparison_finding_write, result_supersede
 from pangea_agent.models.contract import TaskContract
@@ -71,6 +72,21 @@ def sequence_review_note(record_id, unit_id, version_set_id):
 
 
 class SceneAcceptance(unittest.TestCase):
+    def assert_review_disabled(self, data, run, *, complete=False):
+        progress = read_json(run / 'progress.json')
+        self.assertEqual(progress['review_policy'], 'disabled')
+        # Check all persisted and dispatchable roles, not just pending reviews.
+        self.assertTrue(all(a['role'] in {'planning', 'analysis'}
+                            for a in progress['actions'].values()), progress)
+        actions = next_actions(str(data), 'scene-run')['actions']
+        self.assertTrue(all(a['role'] in {'planning', 'analysis'} for a in actions), actions)
+        if complete:
+            self.assertEqual(progress['lifecycle_status'], 'complete', progress)
+            self.assertEqual({a['role'] for a in progress['actions'].values()}, {'planning', 'analysis'})
+            self.assertEqual(progress['quality_status'], 'UNRESOLVED')
+            self.assertEqual(actions, [])
+        return progress
+
     def test_frozen_methodology_bytes_survive_windows_writes_and_resume(self):
         original_open = Path.open
 
@@ -125,9 +141,13 @@ class SceneAcceptance(unittest.TestCase):
     def test_four_scenes_both_modes_complete_and_resume_frozen_rules(self):
         for scenario in SCENES:
             for mode in ['depth', 'speed']:
-                with self.subTest(scenario=scenario, mode=mode), tempfile.TemporaryDirectory() as temp:
+                with self.subTest(scenario=scenario, mode=mode), tempfile.TemporaryDirectory() as temp, patch(
+                    'pangea_agent.graph.nodes.source_first._prepare_review',
+                    side_effect=AssertionError('disabled reviews must never be prepared')):
                     data, run, request = self.fixture(temp, scenario, mode, scenario == 'coverage-analysis')
                     first = run_module_analysis(str(request))
+                    self.assert_review_disabled(data, run)
+                    self.assertEqual({a['role'] for a in first['agent_actions']}, {'planning'})
                     frozen = (run / 'inputs/analysis-scene.json').read_bytes()
                     plan_action = first['agent_actions'][0]
                     binding = (str(data), 'scene-run', plan_action['action_id'], 'planner-session')
@@ -136,7 +156,8 @@ class SceneAcceptance(unittest.TestCase):
                     work_finish(*binding, revision=saved['revision'])
                     advanced = settle_action(*binding[:3])
                     self.assertNotEqual(advanced.get('validation', {}).get('status'), 'invalid', advanced)
-                    progress = read_json(run / 'progress.json')
+                    progress = self.assert_review_disabled(data, run)
+                    self.assertEqual({a['role'] for a in advanced['agent_actions']}, {'analysis'})
                     analysis = next(a for a in progress['actions'].values() if a['role'] == 'analysis')
                     task = read_json(Path(analysis['task_path']))
                     self.assertEqual(task['scenario'], scenario)
@@ -170,85 +191,117 @@ class SceneAcceptance(unittest.TestCase):
                         {'kind': 'flow', 'body': scene_flow_fixture()},
                         {'kind': 'summary', 'body': '合成样例：未确认产品风险，无新增补测。'}])
                     self.assertEqual(saved['warnings'], [])
+                    # Simulate a stopped host: recovery reuses the bound analysis and records.
+                    result_before_resume = first_result_path.read_bytes()
+                    resumed = resume_run(str(data), 'scene-run', host_quiescent=True)
+                    self.assertEqual([(a['action_id'], a['task_id'], a['role'])
+                                      for a in resumed['agent_actions']],
+                                     [(analysis['action_id'], 'analysis-session', 'analysis')])
+                    self.assertEqual(first_result_path.read_bytes(), result_before_resume)
+                    self.assert_review_disabled(data, run)
+                    bind_action(*binding)
                     work_finish(*binding, revision=saved['revision'])
                     settle_action(*binding[:3])
                     first_result = first_result_path.read_bytes()
-                    for _ in range(2 if mode == 'depth' else 1):
-                        progress = read_json(run / 'progress.json')
-                        review = next(a for a in progress['actions'].values() if a['role'] == 'review' and a['status'] == 'pending')
-                        task = read_json(Path(review['task_path']))
-                        self.assertEqual(task['scenario'], scenario)
-                        self.assertIn('scene_common_review.md', ' '.join(task['rubric_paths']))
-                        if scenario == 'risk-analysis':
-                            self.assertIn('scene_risk_review.md', ' '.join(task['rubric_paths']))
-                            self.assertIn('c_cpp_risk_methods.md', ' '.join(task['rubric_paths']))
-                        binding = (str(data), 'scene-run', review['action_id'], 'reviewer-session')
-                        if review.get('task_id'): self.assertEqual(review['task_id'], binding[-1])
-                        bind_action(*binding)
-                        self.assertIn('确认再次连接可恢复', input_read(*binding, input_id='rubric_user_tls-recovery')['text'])
-                        current = read_json(Path(task['result_path']))
-                        if task.get('review_stage') == 'comparison_review':
-                            self.assertEqual(task['record_contracts']['sequence_review'], 'sequence-path-review-v1')
-                            if scenario == 'module-analysis' and mode == 'speed':
-                                # A pass without the frozen flow receipt must still be rejected.
-                                incomplete = review_decide(*binding, expected_revision=current['revision'], decision={
-                                    'disposition': 'pass', 'version_set_id': task['version_set_id'],
-                                    'correction_record_ids': [], 'summary': '缺少时序依据的负向协议样例'})
-                                work_finish(*binding, revision=incomplete['revision'])
-                                settle_action(*binding[:3])
-                                rejected = read_json(run / 'progress.json')
-                                self.assertEqual(rejected['lifecycle_status'], 'running')
-                                rejected_review = rejected['actions'][review['action_id']]
-                                self.assertEqual(rejected_review['status'], 'pending')
-                                self.assertIn('缺少时序对照依据', rejected_review['error'])
-                                bind_action(*binding)
-                                current = read_json(Path(task['result_path']))
-                            flow = next(r for r in read_json(first_result_path)['records'] if r['kind'] == 'flow')
-                            saved_review = result_write(*binding, expected_revision=current['revision'], records=[
-                                sequence_review_note(flow['record_id'], unit_id, task['version_set_id'])])
-                            self.assertEqual(saved_review['warnings'], [])
-                            current = read_json(Path(task['result_path']))
+                    progress = self.assert_review_disabled(data, run, complete=True)
+                    if progress['review_policy'] == 'disabled':
+                        self.assertEqual(progress['actions'][analysis['action_id']]['status'], 'accepted')
+                        self.assertEqual(progress['accepted_revisions'][analysis['action_id']], json.loads(first_result)['revision'])
+                        self.assertEqual(json.loads(first_result)['records'], json.loads(result_before_resume)['records'])
+                    else:
+                        # Historical review protocol fixture retained for future explicit
+                        # re-enablement. The assertions above require today's disabled policy.
+                        for _ in range(2 if mode == 'depth' else 1):
+                            progress = read_json(run / 'progress.json')
+                            review = next(a for a in progress['actions'].values() if a['role'] == 'review' and a['status'] == 'pending')
+                            task = read_json(Path(review['task_path']))
+                            self.assertEqual(task['scenario'], scenario)
+                            self.assertIn('scene_common_review.md', ' '.join(task['rubric_paths']))
                             if scenario == 'risk-analysis':
-                                saved_review = result_write(*binding, expected_revision=current['revision'], records=[{'kind': 'note', 'body': {
-                                    'format_version': 'behavior-review-check-v1', 'unit_id': unit_id, 'version_set_id': task['version_set_id'],
-                                    'risk_verdicts': [{'record_id': 'rec-000002', 'risk_id': 'R1', 'verdict': 'uncertain', 'basis': '合成协议验证', 'finding_record_ids': []}],
-                                    'recall_items': ([] if mode == 'speed' else [{'probe_check_id': 'P1', 'status': 'covered', 'analysis_record_ids': ['rec-000001'], 'finding_record_ids': [], 'basis': '合成协议验证'}]),
-                                    'ledger_spot_checks': [{'record_id': 'rec-000001', 'check_id': 'C1', 'verdict': 'agree', 'basis': '合成协议验证'}], 'summary': '合成协议验证'}}])
+                                self.assertIn('scene_risk_review.md', ' '.join(task['rubric_paths']))
+                                self.assertIn('c_cpp_risk_methods.md', ' '.join(task['rubric_paths']))
+                            binding = (str(data), 'scene-run', review['action_id'], 'reviewer-session')
+                            if review.get('task_id'): self.assertEqual(review['task_id'], binding[-1])
+                            bind_action(*binding)
+                            self.assertIn('确认再次连接可恢复', input_read(*binding, input_id='rubric_user_tls-recovery')['text'])
+                            current = read_json(Path(task['result_path']))
+                            if task.get('review_stage') == 'comparison_review':
+                                self.assertEqual(task['record_contracts']['sequence_review'], 'sequence-path-review-v1')
+                                if scenario == 'module-analysis' and mode == 'speed':
+                                    # A pass without the frozen flow receipt must still be rejected.
+                                    incomplete = review_decide(*binding, expected_revision=current['revision'], decision={
+                                        'disposition': 'pass', 'version_set_id': task['version_set_id'],
+                                        'correction_record_ids': [], 'summary': '缺少时序依据的负向协议样例'})
+                                    work_finish(*binding, revision=incomplete['revision'])
+                                    settle_action(*binding[:3])
+                                    rejected = read_json(run / 'progress.json')
+                                    self.assertEqual(rejected['lifecycle_status'], 'running')
+                                    rejected_review = rejected['actions'][review['action_id']]
+                                    self.assertEqual(rejected_review['status'], 'pending')
+                                    self.assertIn('缺少时序对照依据', rejected_review['error'])
+                                    bind_action(*binding)
+                                    current = read_json(Path(task['result_path']))
+                                flow = next(r for r in read_json(first_result_path)['records'] if r['kind'] == 'flow')
+                                saved_review = result_write(*binding, expected_revision=current['revision'], records=[
+                                    sequence_review_note(flow['record_id'], unit_id, task['version_set_id'])])
                                 self.assertEqual(saved_review['warnings'], [])
                                 current = read_json(Path(task['result_path']))
-                            if exercise_closure:
-                                comparison_finding_write(*binding, expected_revision=current['revision'], unit_ids=[unit_id], finding={'summary': '补充函数调用边界说明', 'body': '合成定向修正路由验收'})
-                                current = read_json(Path(task['result_path']))
-                            saved = review_decide(*binding, expected_revision=current['revision'], decision={'disposition': 'finding' if exercise_closure else 'pass', 'version_set_id': task['version_set_id'], 'correction_record_ids': [r['record_id'] for r in current['records'] if r['kind'] == 'finding'] if exercise_closure else [], 'summary': '合成路由验收，不代表模型质量验收'})
-                        else:
-                            saved = result_write(*binding, expected_revision=current['revision'], records=[
-                                *([{'kind': 'check', 'body': {**risk_check, 'check_id': 'P1', 'unit_id': unit_id}}] if scenario == 'risk-analysis' else []),
-                                {'kind': 'summary', 'body': '独立核实连接主干'}])
-                        work_finish(*binding, revision=saved['revision'])
-                        settle_action(*binding[:3])
-                    if exercise_closure:
-                        progress = read_json(run / 'progress.json')
-                        closure = next(a for a in progress['actions'].values() if a['role'] == 'closure')
-                        self.assertEqual(closure['task_id'], 'analysis-session')
-                        task = read_json(Path(closure['task_path']))
-                        self.assertEqual(task['scenario'], scenario)
-                        binding = (str(data), 'scene-run', closure['action_id'], 'analysis-session')
-                        bind_action(*binding)
-                        self.assertIn('确认再次连接可恢复', input_read(*binding, input_id='rubric_user_tls-recovery')['text'])
-                        current = read_json(Path(task['result_path']))
-                        flow = next(r for r in current['records'] if r['kind'] == 'flow')
-                        saved = result_supersede(*binding, expected_revision=current['revision'], target_record_ids=[flow['record_id']], replacement={'kind': 'flow', 'body': {**flow['body'], 'text': flow['body']['text'] + ' 返回值只表示本函数判断，不代表网络已建立。'}})
-                        replacement = next(r for r in read_json(Path(task['result_path']))['records']
-                                           if r['kind'] == 'flow' and r['record_id'] != flow['record_id'])
-                        saved = result_write(*binding, expected_revision=saved['revision'], records=[
-                            sequence_review_note(replacement['record_id'], unit_id, closure['action_id'])])
-                        self.assertEqual(saved['warnings'], [])
-                        work_finish(*binding, revision=saved['revision'])
-                        settle_action(*binding[:3])
-                        self.assertEqual(first_result_path.read_bytes(), first_result)
+                                if scenario == 'risk-analysis':
+                                    saved_review = result_write(*binding, expected_revision=current['revision'], records=[{'kind': 'note', 'body': {
+                                        'format_version': 'behavior-review-check-v1', 'unit_id': unit_id, 'version_set_id': task['version_set_id'],
+                                        'risk_verdicts': [{'record_id': 'rec-000002', 'risk_id': 'R1', 'verdict': 'uncertain', 'basis': '合成协议验证', 'finding_record_ids': []}],
+                                        'recall_items': ([] if mode == 'speed' else [{'probe_check_id': 'P1', 'status': 'covered', 'analysis_record_ids': ['rec-000001'], 'finding_record_ids': [], 'basis': '合成协议验证'}]),
+                                        'ledger_spot_checks': [{'record_id': 'rec-000001', 'check_id': 'C1', 'verdict': 'agree', 'basis': '合成协议验证'}], 'summary': '合成协议验证'}}])
+                                    self.assertEqual(saved_review['warnings'], [])
+                                    current = read_json(Path(task['result_path']))
+                                if exercise_closure:
+                                    comparison_finding_write(*binding, expected_revision=current['revision'], unit_ids=[unit_id], finding={'summary': '补充函数调用边界说明', 'body': '合成定向修正路由验收'})
+                                    current = read_json(Path(task['result_path']))
+                                saved = review_decide(*binding, expected_revision=current['revision'], decision={'disposition': 'finding' if exercise_closure else 'pass', 'version_set_id': task['version_set_id'], 'correction_record_ids': [r['record_id'] for r in current['records'] if r['kind'] == 'finding'] if exercise_closure else [], 'summary': '合成路由验收，不代表模型质量验收'})
+                            else:
+                                saved = result_write(*binding, expected_revision=current['revision'], records=[
+                                    *([{'kind': 'check', 'body': {**risk_check, 'check_id': 'P1', 'unit_id': unit_id}}] if scenario == 'risk-analysis' else []),
+                                    {'kind': 'summary', 'body': '独立核实连接主干'}])
+                            work_finish(*binding, revision=saved['revision'])
+                            settle_action(*binding[:3])
+                        if exercise_closure:
+                            progress = read_json(run / 'progress.json')
+                            closure = next(a for a in progress['actions'].values() if a['role'] == 'closure')
+                            self.assertEqual(closure['task_id'], 'analysis-session')
+                            task = read_json(Path(closure['task_path']))
+                            self.assertEqual(task['scenario'], scenario)
+                            binding = (str(data), 'scene-run', closure['action_id'], 'analysis-session')
+                            bind_action(*binding)
+                            self.assertIn('确认再次连接可恢复', input_read(*binding, input_id='rubric_user_tls-recovery')['text'])
+                            current = read_json(Path(task['result_path']))
+                            flow = next(r for r in current['records'] if r['kind'] == 'flow')
+                            saved = result_supersede(*binding, expected_revision=current['revision'], target_record_ids=[flow['record_id']], replacement={'kind': 'flow', 'body': {**flow['body'], 'text': flow['body']['text'] + ' 返回值只表示本函数判断，不代表网络已建立。'}})
+                            replacement = next(r for r in read_json(Path(task['result_path']))['records']
+                                               if r['kind'] == 'flow' and r['record_id'] != flow['record_id'])
+                            saved = result_write(*binding, expected_revision=saved['revision'], records=[
+                                sequence_review_note(replacement['record_id'], unit_id, closure['action_id'])])
+                            self.assertEqual(saved['warnings'], [])
+                            work_finish(*binding, revision=saved['revision'])
+                            settle_action(*binding[:3])
+                            self.assertEqual(first_result_path.read_bytes(), first_result)
                     progress = read_json(run / 'progress.json')
                     self.assertEqual(progress['lifecycle_status'], 'complete', progress)
                     report = (run / 'report.md').read_text(encoding='utf-8')
+                    completion = read_json(run / 'report-complete.json')
+                    for field in ('run_id', 'lifecycle_status', 'quality_status', 'review_policy', 'accepted_revisions'):
+                        self.assertEqual(completion[field], progress[field])
+                    self.assertEqual(completion['review_mode'], mode)
+                    self.assertIn('report.md', completion['files'])
+                    self.assertIn('report.html', completion['files'])
+                    for filename in completion['files']:
+                        self.assertTrue((run / filename).is_file(), filename)
+                    html = (run / 'report.html').read_text(encoding='utf-8')
+                    self.assertIn('未执行模型审核', html)
+                    self.assertNotIn('直接审核首轮结果', html)
+                    self.assertNotIn('独立盲审后对照复核', html)
+                    self.assertIn('未执行模型审核', report)
+                    self.assertNotIn('直接审核首轮结果', report)
+                    self.assertNotIn('独立盲审后对照复核', report)
                     self.assertIn('检查!ready', report)
                     self.assertIn('report-assets/', report)
                     self.assertIn('时序交互', report)
@@ -262,7 +315,11 @@ class SceneAcceptance(unittest.TestCase):
                         self.assertNotIn('## 风险依据', report)
                         self.assertIn('本次未开展风险分析', report)
                     with patch('pangea_agent.analysis_scenarios.scene_spec', side_effect=AssertionError('must use frozen rules')), patch('pangea_agent.methodology.SPECIALIZED_METHODOLOGIES', {}):
-                        resume_module_analysis('scene-run', str(data))
+                        resumed = resume_module_analysis('scene-run', str(data))
+                    self.assertFalse(resumed.get('agent_actions'))
+                    self.assert_review_disabled(data, run, complete=True)
+                    self.assertEqual(first_result_path.read_bytes(), first_result)
+                    self.assertEqual((run / 'report.md').read_text(encoding='utf-8'), report)
                     self.assertEqual((run / 'inputs/analysis-scene.json').read_bytes(), frozen)
                     if scenario == 'risk-analysis':
                         self.assertEqual({p: p.read_bytes() for p in signals_before}, signals_before)
