@@ -30,6 +30,19 @@ if ($PackageChannel -notin @('stable', 'test')) {
   throw "Unsupported package channel: $PackageChannel"
 }
 
+# The source floor is independent of the requested product/release version.
+$UpgradePolicy = Get-Content (Join-Path $ProjectRoot 'build/portable-update-policy.json') -Raw | ConvertFrom-Json
+$MinimumUpgradeSource = [string]$UpgradePolicy.minimum_source_version
+if ($MinimumUpgradeSource -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+  throw "Invalid minimum upgrade source version: $MinimumUpgradeSource"
+}
+$UpdaterSource = Get-Content (Join-Path $ProjectRoot 'build/apply-portable-update.ps1') -Raw
+$HelperMinimum = [regex]::Match($UpdaterSource, '\$MinimumSourceVersion\s*=\s*''([^'']+)''')
+if (-not $HelperMinimum.Success -or $HelperMinimum.Groups[1].Value -ne $MinimumUpgradeSource) {
+  throw 'Portable updater minimum source version does not match the shared upgrade policy.'
+}
+Write-Host "Minimum supported upgrade source: $MinimumUpgradeSource"
+
 $UpdaterTokens = $null
 $UpdaterErrors = $null
 [void][System.Management.Automation.Language.Parser]::ParseFile(

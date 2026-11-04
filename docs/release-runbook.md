@@ -21,9 +21,9 @@ Start `Build Windows package` (`release.yml`) on the approved source branch with
 | `channel` | `release` for stable, or `test` | Channel of the existing target release |
 | `version` | Base SemVer, such as `2.1.9` | Exact existing target version, such as `2.1.9` or `2.1.9-test.42.abcdef0` |
 
-The minimum supported patch baseline is **2.1.8** (including test builds with a base SemVer of 2.1.8 or newer). **2.1.7 and older upgrade paths are retired.** They are excluded before asset lookup, download, trust checks, or patch generation. Historical Releases and installers are retained; this policy does not delete them. Direct patch generation, new-release publication, and backfill publication also reject sources older than 2.1.8. The shared policy is `build/portable-update-policy.json`; the standalone PowerShell helper independently enforces the same minimum. Release publication uses the validated report whitelist, not a ZIP wildcard.
+The minimum supported patch baseline is **2.1.15** (including test builds with a base SemVer of 2.1.15 or newer). **2.1.14 and older upgrade paths are retired.** They are excluded before asset lookup, download, trust checks, or patch generation. Historical Releases and installers are retained; this policy does not delete them. Direct patch generation, new-release publication, and backfill publication also reject sources older than 2.1.15. The shared policy is `build/portable-update-policy.json`; the standalone PowerShell helper independently enforces the same minimum. Release publication uses the validated report whitelist, not a ZIP wildcard.
 
-The workflow default target is **2.1.9**. This is independent of the **2.1.8** minimum installed source version: changing the release target does not lower the supported source boundary.
+The workflow default target is **2.1.9**. This is independent of the **2.1.15** minimum installed source version: changing the release target does not lower the supported source boundary. The unchanged historical default cannot be an upgrade target for supported sources; choose an explicitly authorized newer target when releasing. Version numbers below in command examples are historical, not current upgrade paths.
 
 There is no manual `patch_from_version` input. Both modes discover release history automatically and produce a direct patch from each compatible historical base to the target. No intermediate release needs to be installed when a verified patch exists for the user's exact installed version.
 
@@ -81,7 +81,7 @@ Run retries in a clean output directory (GitHub-hosted jobs provide a fresh work
 
 ## Historical coverage and verification
 
-The release tooling paginates through the entire GitHub Release history and its assets. It considers canonical `v<version>` tags, older target-compatible versions at or above 2.1.8 in the same channel, with the expected Windows x64 portable ZIP and checksum. Bases are processed serially and their temporary directories are cleaned up between versions; there is no arbitrary “last N releases” limit.
+The release tooling paginates through the entire GitHub Release history and its assets. It considers canonical `v<version>` tags, older target-compatible versions at or above 2.1.15 in the same channel, with the expected Windows x64 portable ZIP and checksum. Bases are processed serially and their temporary directories are cleaned up between versions; there is no arbitrary “last N releases” limit.
 
 Patch generation and offline/manual import remain separate: this workflow does not add automatic client update discovery or selection.
 
@@ -117,7 +117,7 @@ pangea-desktop-<version>-patch-report-<content-hash>.json
 
 The complete ZIP contains the application and its signed file manifest. Each patch contains only changed files plus the target manifest. Every imported package must have a version greater than the currently running application. Test and stable channels never cross. A patch must match the exact installed base version, but it may advance directly over multiple intermediate versions.
 
-No version older than 2.1.8 supports in-app upgrade, including full-package imports. Users of retired versions must install a current complete package separately; this workflow does not validate migration from their old installation. For supported versions at or above 2.1.8, the complete ZIP remains the fallback when no verified patch matches the installed version or when reinstalling manually.
+No version older than 2.1.15 supports in-app upgrade, including full-package imports. Users of retired versions must install a current complete package separately; this workflow does not validate migration from their old installation. For supported versions at or above 2.1.15, the complete ZIP remains the fallback when no verified patch matches the installed version or when reinstalling manually.
 
 1. Find the installed version in the application and open the target GitHub Release's patch report.
 2. Download the matching exact-base patch and its `.sha256`. If no verified entry matches, download the complete ZIP and its `.sha256`. For a short-lived test build, use the workflow artifact from the completed GitHub Actions run.

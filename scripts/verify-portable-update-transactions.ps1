@@ -28,6 +28,7 @@ function New-Fixture {
   $Install=Join-Path $Root 'installed [中文]'; $Workspace=Join-Path $Root 'p-up-1'; $Data=Join-Path $Root 'profile'
   [IO.Directory]::CreateDirectory((Join-Path $Data 'updates/run-1')) | Out-Null
   [IO.Directory]::CreateDirectory($Workspace) | Out-Null
+  # Recovery must still restore interrupted transactions from retired source versions.
   Write-FixtureVersion $Install '2.1.8' 'original user work'
   Write-FixtureVersion (Join-Path $Workspace 'new') '2.1.9' 'candidate user work'
   return [pscustomobject]@{ Root=$Root; Install=$Install; Workspace=$Workspace; Data=$Data; Plan=(Join-Path $Data 'updates/run-1/plan.json') }
@@ -189,7 +190,7 @@ try {
 
   $Policy=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../build/portable-update-policy.json') -Raw | ConvertFrom-Json
   $Fixture=New-Fixture (Join-Path $TestRoot 'source-policy')
-  foreach ($Version in @('2.1.7','2.1.7-test.17.abcdef','2.1.8','2.1.8-test.17.abcdef','2.1.9')) {
+  foreach ($Version in @('2.1.14','2.1.14-test.17.abcdef','2.1.15','2.1.15-test.17.abcdef','2.1.16','2.1.16-test.17.abcdef')) {
     Write-FixtureVersion $Fixture.Install $Version 'original work'
     $Accepted=$true
     try { Assert-PortableUpgradeSourceVersion $Fixture.Install 'patch' $Version | Out-Null } catch { $Accepted=$false }
@@ -197,7 +198,7 @@ try {
     if ($Accepted -ne ($Numeric -ge [version]$Policy.minimum_source_version)) { throw "Signed helper source policy differs from shared policy: $Version" }
   }
   $Rejected=$false
-  try { Assert-PortableUpgradeSourceVersion $Fixture.Install 'patch' '2.1.8' | Out-Null } catch { $Rejected=$true }
+  try { Assert-PortableUpgradeSourceVersion $Fixture.Install 'patch' '2.1.15' | Out-Null } catch { $Rejected=$true }
   if (-not $Rejected) { throw 'Mismatched patch base was accepted.' }
   Write-Output 'PASS: stable/test source-version boundaries match shared policy and patch base is independently checked'
   if ((Get-PortableStartupHealthTimeout ([pscustomobject]@{})) -ne 300) { throw 'Legacy plans must use the 300-second health deadline.' }
