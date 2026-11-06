@@ -392,7 +392,14 @@ class SceneAcceptance(unittest.TestCase):
                 action = first['agent_actions'][0]
                 binding = (str(data), 'scene-run', action['action_id'], 'planner')
                 bind_action(*binding)
-                self.assertLess(len(json.dumps(task_open(*binding), ensure_ascii=False)), 12000)
+                opened = task_open(*binding)
+                # Startup rule pages have their own explicit transport budget;
+                # they are not an expansion of the compact task metadata.
+                metadata = {key: value for key, value in opened.items() if key != 'planning_startup'}
+                self.assertLess(len(json.dumps(metadata, ensure_ascii=False)), 12000)
+                startup = opened['planning_startup']
+                self.assertEqual(startup['max_chars'], 18000)
+                self.assertLessEqual(len(json.dumps(startup, ensure_ascii=False, indent=2)), 18000)
                 saved = plan_write(*binding, expected_revision=0, unit={'title': '连接', 'purpose': '主干流程', 'owned_files': [{'repo_id': 'sample', 'path': 'src/tls.c'}], 'risk_lenses': ['error_path']})
                 work_finish(*binding, revision=saved['revision'])
                 settle_action(*binding[:3])

@@ -129,7 +129,13 @@ class OnDemandPlanningAcceptance(unittest.TestCase):
             bind_action(*binding)
             opened = task_open(*binding)
             self.assertNotIn("allowed_paths", opened["task"])
-            self.assertLess(len(json.dumps(opened)), 12000)
+            # planning-io-v1 includes literal startup pages under a separate
+            # 18,000-character transport budget; keep task metadata bounded too.
+            metadata = {key: value for key, value in opened.items() if key != "planning_startup"}
+            self.assertLess(len(json.dumps(metadata, ensure_ascii=False)), 12000)
+            startup = opened["planning_startup"]
+            self.assertEqual(startup["max_chars"], 18000)
+            self.assertLessEqual(len(json.dumps(startup, ensure_ascii=False, indent=2)), 18000)
             self.assertEqual(opened["write_contract"]["revision"], 0)
             page = source_index(*binding, repo_id="sample", path="backend", page_size=4)
             self.assertEqual(len(page["files"]), 4)
