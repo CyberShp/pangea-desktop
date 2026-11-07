@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
-import { IntranetUpdateClient, parseUpdateSource } from '../src/main/update/intranet-update'
+import { IntranetUpdateClient, intranetIndexUrl } from '../src/main/update/intranet-update'
 
 const keys = generateKeyPairSync('ed25519')
 const pem = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString()
@@ -68,5 +68,16 @@ it('rejects off-origin URLs and redirects without contacting GitHub', async () =
 it('rejects duplicate baselines and invalid source settings', async () => {
   const f = fixture(); f.index.patches.push(f.index.patches[0]!)
   await expect(f.client.check('2.1.17', pem)).rejects.toThrow('重复')
-  for (const indexUrl of ['', 'http://host/index', 'https://user:pass@host/index', 'https://host/index#x']) expect(() => parseUpdateSource({ updateSource: 'intranet', indexUrl })).toThrow()
+  for (const indexUrl of ['', 'http://host/index', 'https://user:pass@host/index', 'https://host/index#x']) expect(() => new IntranetUpdateClient(vi.fn(), new AbortController().signal, indexUrl)).toThrow()
+})
+
+it('maps stable and test versions to separate built-in indexes', () => {
+  expect(new URL(intranetIndexUrl('2.1.19')).searchParams.get('path')).toBe('stable/windows/x64/latest.json')
+  expect(new URL(intranetIndexUrl('2.1.20-test.1.abcdef0')).searchParams.get('path')).toBe('beta/windows/x64/latest.json')
+})
+
+it('does not offer the installed or an older version', async () => {
+  const f = fixture()
+  expect(await f.client.check('2.1.18', pem)).toBeUndefined()
+  expect(await f.client.check('2.1.19', pem)).toBeUndefined()
 })

@@ -90,7 +90,7 @@ describe('secure update card wiring', () => {
     expect(main).toContain("preload: join(import.meta.dirname, '../preload/index.cjs')")
     expect(main).toContain('nodeIntegration: false')
     expect(preload).toContain("ipcRenderer.on('updates:status-changed'")
-    expect(preload).toContain('createDesktopBridge(ipcRenderer, { openUpdateNetworkSettings })')
+    expect(preload).toContain('createDesktopBridge(ipcRenderer)')
     expect(bridge).toContain("ipc.invoke('updates:import')")
     expect(bridge).toContain("ipc.invoke('updates:install')")
     expect(bridge).toContain('getUpdateStatus: (): Promise<UpdateStatus>')
@@ -118,16 +118,16 @@ describe('portable package selection', () => {
 
 describe('online update feedback', () => {
   it('shows automatic check failures and available versions without pretending they are installed', () => {
-    expect(shouldShowUpdate({ phase: 'error', source: 'github', currentVersion: '2.1.7', manual: false })).toBe(true)
-    const available: UpdateStatus = { phase: 'available', source: 'github', currentVersion: '2.1.7', availableVersion: '2.1.8', manual: false }
+    expect(shouldShowUpdate({ phase: 'error', source: 'intranet', currentVersion: '2.1.7', manual: false })).toBe(true)
+    const available: UpdateStatus = { phase: 'available', source: 'intranet', currentVersion: '2.1.7', availableVersion: '2.1.8', manual: false }
     expect(shouldShowUpdate(available)).toBe(true)
     expect(updateMessage(available, 'zh')).toContain('等待下载')
   })
 
   it('separates download, verification and no-update states', () => {
-    expect(updateMessage({ ...downloading, source: 'github', activity: 'download' }, 'zh')).toBe('正在下载升级包 42%')
-    expect(updateMessage({ ...downloading, source: 'github', activity: 'verify' }, 'zh')).toBe('正在校验升级包 42%')
-    const latest: UpdateStatus = { phase: 'up-to-date', currentVersion: '2.1.7', manual: true, source: 'github' }
+    expect(updateMessage({ ...downloading, source: 'intranet', activity: 'download' }, 'zh')).toBe('正在下载升级包 42%')
+    expect(updateMessage({ ...downloading, source: 'intranet', activity: 'verify' }, 'zh')).toBe('正在校验升级包 42%')
+    const latest: UpdateStatus = { phase: 'up-to-date', currentVersion: '2.1.7', manual: true, source: 'intranet' }
     expect(shouldShowUpdate(latest)).toBe(true)
     expect(shouldShowUpdate({ ...latest, manual: false })).toBe(false)
     expect(updateMessage(latest, 'zh')).toBe('已是最新版本')

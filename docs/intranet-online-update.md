@@ -1,18 +1,18 @@
 # 内网 HTTP 更新源（Windows x64）
 
 复用现有存储服务的 HTTPS 下载接口，不部署 Nginx，也不挂载 NFS。
-需要先通过 GitHub 或离线导入升级到包含本功能的 Desktop。
+旧版用户需先通过离线导入升级到包含本功能的 Desktop。
 
-## 客户端配置
+## 客户端使用
 
-打开“在线更新网络设置”，更新源选择“内网”，填写 `latest.json` 的完整 HTTPS 下载 URL。
-保存后仅检查；下载和重启安装仍分别由用户触发。源配置跨重启保留。
-切换源或修改索引地址会清除已暂存的升级包，需要重新检查和下载。
+Windows x64 客户端固定使用内置内网源，无需填写地址。正式版读取
+`stable/windows/x64/latest.json`，测试版读取 `beta/windows/x64/latest.json`。
+设置页、菜单和错误提示均不再提供更新网络配置入口；旧 `update-network.json` 不再读取。
+启动自动检查，下载和重启安装仍分别由用户触发；保留离线升级包导入。
 
-内网源与 GitHub 源互斥，内网失败不会回退访问 GitHub。所有制品 URL 及每次重定向必须与
-配置的索引同源（协议、主机、端口一致），支持 HTTPS 自定义端口和 `?path=...` 参数。
-沿用更新专用 Electron 网络会话及系统代理/PAC；企业 CA 由正常证书验证链处理。
-浏览器能访问不等于 Desktop 实机验证已经通过。
+客户端没有 GitHub 更新或回退路径。所有制品 URL 及重定向必须与内置索引同源。
+支持 `?path=...` 查询相对地址。使用独立 Electron 会话和系统网络/PAC，
+证书正常验证；企业 CA 由系统信任链处理。
 
 ## 构建自动产物
 
@@ -52,7 +52,7 @@ node scripts/create-intranet-update-index.mjs --directory D:/release-upload --pu
 `--download-url` 填不含 `path` 参数的下载端点；其他必要查询参数会保留。
 如果下载接口的 `path` 相对于工具根，`--root` 留空。若接口要求带存储根前缀，
 通过 `--root` 传入该前缀。脚本通过 URLSearchParams 编码完整路径，不把查询式 URL 当目录拼接。
-真实域名、工具 ID、公钥路径和生成的内网索引不应提交到公开仓库。
+构建生成的相对索引不含部署域名，客户端内置部署端点。
 
 脚本验证清单签名、完整包大小和 SHA-256、补丁清单签名与目标版本，生成：
 
@@ -68,8 +68,7 @@ node scripts/create-intranet-update-index.mjs --directory D:/release-upload --pu
 1. 按 `upload_first` 上传该版本的完整包、补丁、清单和签名。
 2. 从下载接口回读，核对文件大小及 SHA-256。版本目录发布后保持不变。
 3. 全部验证成功后，才把 `latest.json` 上传覆盖到 `publish_last.path`。
-4. 在 Desktop 中配置入口完整下载地址后检查、下载并安装；若 `publish_last.url` 是相对地址，
-   将其接在下载接口路径后面。
+4. 在 Desktop 中检查、下载并安装，无需配置入口。
 
 同名覆盖能力不等于原子覆盖；入口覆盖期间若读到不完整 JSON，客户端报错并等待重试，
 不会开始安装。请求携带 Cache-Control: no-cache，发布后还需核对服务实际返回的索引版本。
@@ -105,7 +104,7 @@ node scripts/create-intranet-update-index.mjs --directory D:/release-upload --pu
 ## 验证范围
 
 自动测试覆盖查询参数 URL、自定义端口、同源限制、重定向拒绝、最低版本、通道隔离、
-匹配补丁、无匹配时全包、篡改数据及篡改哈希后的签名拒绝、源配置持久化和切源清理。
+匹配补丁、无匹配时全包、篡改数据及篡改哈希后的签名拒绝、旧配置忽略及设置入口删除。
 集成测试使用真实签名全包/补丁及索引生成 CLI，网络和 Windows 安装器启动为模拟。
 
 实机验收仍需内网 Windows：企业 CA、真实大包上传与回读、完整包升级、精确基线补丁升级、

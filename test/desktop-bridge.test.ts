@@ -36,7 +36,7 @@ function fakeIpc() {
 describe('PANGEA Desktop renderer bridge', () => {
   it('routes settings actions to the portable update handlers', async () => {
     const ipc = fakeIpc()
-    const bridge = createDesktopBridge(ipc, { openUpdateNetworkSettings: vi.fn() })
+    const bridge = createDesktopBridge(ipc)
 
     await expect(bridge.getUpdateStatus()).resolves.toMatchObject({ currentVersion: '0.1.9' })
     await expect(bridge.importUpdatePackage()).resolves.toMatchObject({
@@ -53,7 +53,7 @@ describe('PANGEA Desktop renderer bridge', () => {
 
   it('delivers update progress and removes the exact subscription', () => {
     const ipc = fakeIpc()
-    const bridge = createDesktopBridge(ipc, { openUpdateNetworkSettings: vi.fn() })
+    const bridge = createDesktopBridge(ipc)
     const listener = vi.fn()
     const subscriptionId = bridge.subscribeUpdateStatus(listener)
     const progress: UpdateStatus = {
@@ -69,24 +69,9 @@ describe('PANGEA Desktop renderer bridge', () => {
     expect(ipc.removeListener).toHaveBeenCalledOnce()
   })
 
-  it('opens settings through the isolated UI handler without invoking update operations', async () => {
-    const ipc = fakeIpc()
-    const openUpdateNetworkSettings = vi.fn(async () => {})
-    const bridge = createDesktopBridge(ipc, { openUpdateNetworkSettings })
-
-    await expect(bridge.openUpdateNetworkSettings()).resolves.toBeUndefined()
-    expect(openUpdateNetworkSettings).toHaveBeenCalledExactlyOnceWith()
-    expect(ipc.invoke).not.toHaveBeenCalled()
+  it('does not expose removed network configuration', () => {
+    const bridge = createDesktopBridge(fakeIpc())
+    expect(bridge).not.toHaveProperty('openUpdateNetworkSettings')
     expect(Object.isFrozen(bridge)).toBe(true)
-    expect(bridge).not.toHaveProperty('invoke')
-  })
-
-  it('propagates an opener failure instead of reporting success', async () => {
-    const ipc = fakeIpc()
-    const bridge = createDesktopBridge(ipc, {
-      openUpdateNetworkSettings: async () => { throw new Error('dialog unavailable') }
-    })
-    await expect(bridge.openUpdateNetworkSettings()).rejects.toThrow('dialog unavailable')
-    expect(ipc.invoke).not.toHaveBeenCalled()
   })
 })

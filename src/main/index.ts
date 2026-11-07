@@ -68,7 +68,6 @@ import {
   portableUpdateHealthMarker
 } from './update/portable-update-health'
 import { acquirePortableUpdateAdmission } from './update/portable-update-admission'
-import { createUpdateNetworkMenuItem } from './update/update-network-menu'
 import type { RuntimeSnapshot } from '../shared/contracts'
 import { resolveHarnessLocale } from './application-locale'
 import { installContextMenu } from './context-menu'
@@ -1253,7 +1252,6 @@ function installMenu(): void {
                 accelerator: 'CmdOrCtrl+Shift+U',
                 click: () => void checkForOnlineUpdate(true).catch(showUnexpectedError)
               },
-              createUpdateNetworkMenuItem(isChinese, () => mainWindow),
               {
                 label: isChinese ? '导入升级包…' : 'Import Update Package…',
                 accelerator: 'CmdOrCtrl+U',
@@ -1383,16 +1381,7 @@ async function bootstrap(): Promise<void> {
   launchDirectory = await ensureLaunchRoot(app.getPath('userData'))
   await configurePangeaProduct()
   process.env.PANGEA_DESKTOP_PROVENANCE = JSON.stringify(desktopRuntimeIdentity(app.getAppPath(), app.getVersion()))
-  registerUpdateHandlers({ authorizeGitProxy: event => {
-    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false
-    const url = runtime.snapshot().url
-    if (!url) return false
-    try {
-      const expected = new URL(desktopHarnessUrl(url, process.platform))
-      return expected.origin !== 'null' && new URL(event.senderFrame!.url).origin === expected.origin
-    }
-    catch { return false }
-  } })
+  registerUpdateHandlers()
   nativeTheme.themeSource = harnessThemePreference()
   createWindow()
   const writeUpdateHealth = createPortableHealthReporter(updateHealthMarker, app.getVersion())

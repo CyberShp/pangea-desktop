@@ -20,14 +20,14 @@ vi.mock('../src/main/update/launch-portable-helper', () => ({ launchPortableHelp
 let root: string
 let resourcesDescriptor: PropertyDescriptor | undefined
 let manager: typeof import('../src/main/update/update-manager')
-let release: any
+let activeIndex: any
 let intranetIndex: any
 let intranetUrl: string
 const intranetResponses = new Map<string, Buffer>()
 const responses = new Map<string, Buffer>()
 const version = '2.1.18'
 const name = `pangea-desktop-${version}-windows-x64-portable.zip`
-const prefix = `https://github.com/CyberShp/pangea-desktop/releases/download/v${version}/`
+const prefix = 'fixture:'
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), 'online-integration-'))
@@ -63,9 +63,9 @@ beforeAll(async () => {
     '--public-key', join(resources, 'update', 'pangea-update-public-key.pem'), '--full-remote-name', 'pangea-desktop.zip'])
   intranetIndex = JSON.parse(await readFile(join(root, 'dist', 'latest.json'), 'utf8'))
   const uploadList = JSON.parse(await readFile(join(root, 'dist', 'intranet-upload-list.json'), 'utf8'))
-  expect(new URL(intranetIndex.full_url, 'https://updates.example/api/tools/tool/files/download').searchParams.get('path')).toBe(`stable/windows/x64/${version}/pangea-desktop.zip`)
+  expect(new URL(intranetIndex.full_url, 'https://pangea.rnd.huawei.com/api/tools/27/files/download').searchParams.get('path')).toBe(`stable/windows/x64/${version}/pangea-desktop.zip`)
   expect(uploadList.upload_first.find((file: any) => file.local === name).path).toBe(`stable/windows/x64/${version}/pangea-desktop.zip`)
-  intranetUrl = new URL(uploadList.publish_last.url, 'https://updates.example/api/tools/tool/files/download').href
+  intranetUrl = new URL(uploadList.publish_last.url, 'https://pangea.rnd.huawei.com/api/tools/27/files/download').href
   expect(intranetIndex.full_url.startsWith('?path=')).toBe(true)
   expect(JSON.stringify(intranetIndex)).not.toContain('https://')
   for (const file of uploadList.upload_first) intranetResponses.set(new URL(file.verify_download, intranetUrl).href, await readFile(join(root, 'dist', file.local)))
@@ -76,10 +76,7 @@ beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); mocks.messages.length = 0
   mocks.getPath.mockReturnValue(join(root, 'profile'))
   await rm(join(root, 'profile', 'update-network.json'), { force: true })
-  release = { id: 42, tag_name: `v${version}`, draft: false, prerelease: false,
-    assets: [...responses].map(([url, data]) => ({ name: url.slice(prefix.length), size: data.length, state: 'uploaded', browser_download_url: url })) }
-  mocks.fetch.mockImplementation(async (url: string) => url.startsWith('https://api.github.com/')
-    ? Response.json([release]) : new Response(new Uint8Array(responses.get(url)!)))
+  await enableIntranet({ ...intranetIndex, patches: [] })
   manager = await import('../src/main/update/update-manager')
   mocks.admission.mockResolvedValue(undefined)
   manager.startUpdateManager({ prepareToInstall: mocks.admission })
@@ -91,27 +88,27 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-describe('online update production pipeline with simulated GitHub and Windows launcher', () => {
+describe('online update production pipeline with simulated intranet and Windows launcher', () => {
   it.each([false, true])('checks metadata without downloading or installing (manual=%s)', async manual => {
     expect(await manager.checkForOnlineUpdate(manual)).toMatchObject({ phase: 'available', availableVersion: version, manual })
-    expect(mocks.fetch.mock.calls.map(([url]) => url)).not.toContain(prefix + name)
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).not.toContain(new URL(intranetIndex.full_url, intranetUrl).href)
     expect(mocks.admission).not.toHaveBeenCalled()
     expect(mocks.launch).not.toHaveBeenCalled()
     expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
     await manager.downloadOnlineUpdate()
-    expect(mocks.fetch.mock.calls.map(([url]) => url)).toContain(prefix + name)
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).toContain(new URL(intranetIndex.full_url, intranetUrl).href)
     expect(manager.getUpdateStatus().phase).toBe('downloaded')
     expect(mocks.launch).not.toHaveBeenCalled()
   })
   it('revalidates a changed release before an explicit download', async () => {
     await manager.checkForOnlineUpdate(false)
-    release.tag_name = 'v2.1.17'
-    expect((await manager.downloadOnlineUpdate()).phase).toBe('up-to-date')
-    expect(mocks.fetch.mock.calls.map(([url]) => url)).not.toContain(prefix + name)
+    mocks.fetch.mockRejectedValueOnce(new Error('index changed'))
+    expect((await manager.downloadOnlineUpdate()).phase).toBe('error')
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).not.toContain(new URL(intranetIndex.full_url, intranetUrl).href)
   })
 
   it('signs release metadata, downloads, verifies real ZIP, stages signed helper and hands off health plan', async () => {
-    expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'downloaded', availableVersion: version, source: 'github', packageType: 'full' })
+    expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'downloaded', availableVersion: version, source: 'intranet', packageType: 'full' })
     expect(mocks.messages.some(s => s.activity === 'download')).toBe(true)
     expect(mocks.messages.some(s => s.activity === 'verify')).toBe(true)
     mocks.launch.mockImplementation(async (helper: string, planPath: string) => {
@@ -160,7 +157,7 @@ describe('online update production pipeline with simulated GitHub and Windows la
   it('excludes overlapping checks and imports and reopens ready result without downloading again', async () => {
     let resolveCheck!: () => void
     const wait = new Promise<void>(r => { resolveCheck = r })
-    mocks.fetch.mockImplementationOnce(async () => { await wait; return Response.json([release]) })
+    mocks.fetch.mockImplementationOnce(async () => { await wait; return Response.json(activeIndex) })
     const first = manager.downloadOnlineUpdate()
     expect((await manager.downloadOnlineUpdate()).phase).toBe('checking')
     expect((await manager.importPortableUpdatePackage()).phase).toBe('checking')
@@ -170,20 +167,19 @@ describe('online update production pipeline with simulated GitHub and Windows la
     expect((await manager.downloadOnlineUpdate()).phase).toBe('downloaded')
     expect(mocks.fetch).toHaveBeenCalledTimes(count)
   })
-  it('reports no-update and network failures without invoking installation', async () => {
-    release.tag_name = 'v2.1.17'
-    expect((await manager.downloadOnlineUpdate()).phase).toBe('up-to-date')
+  it('reports index and network failures without invoking installation', async () => {
+    mocks.fetch.mockRejectedValueOnce(new Error('index changed'))
+    expect((await manager.downloadOnlineUpdate()).phase).toBe('error')
     mocks.fetch.mockResolvedValueOnce(new Response('', { status: 403 }))
-    expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'error', source: 'github', manual: true })
+    expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'error', source: 'intranet', manual: true })
     expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
     expect(mocks.launch).not.toHaveBeenCalled()
   })
 })
 
 async function enableIntranet(index = intranetIndex) {
-  await mkdir(join(root, 'profile'), { recursive: true })
-  await writeFile(join(root, 'profile', 'update-network.json'), JSON.stringify({ updateSource: 'intranet', indexUrl: intranetUrl, proxyUrl: '', username: '' }))
-  mocks.fetch.mockImplementation(async (url: string) => url === intranetUrl ? Response.json(index) : new Response(new Uint8Array(intranetResponses.get(url)!)))
+  activeIndex = index
+  mocks.fetch.mockImplementation(async (url: string) => url === intranetUrl || url === intranetUrl.replaceAll('%2F', '/') ? Response.json(activeIndex) : intranetResponses.has(url) ? new Response(new Uint8Array(intranetResponses.get(url)!)) : new Response('', { status: 404 }))
 }
 it('generates query URLs and uses a real signed patch through the online install handoff', async () => {
   expect(intranetIndex.patches).toHaveLength(1)
@@ -191,7 +187,7 @@ it('generates query URLs and uses a real signed patch through the online install
   expect(await manager.checkForOnlineUpdate()).toMatchObject({ phase: 'available', source: 'intranet' })
   expect(mocks.fetch).toHaveBeenCalledTimes(3)
   expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'downloaded', source: 'intranet', packageType: 'patch', baseVersion: '2.1.17', availableVersion: version })
-  expect(mocks.fetch.mock.calls.every(([url]) => url.startsWith('https://updates.example/'))).toBe(true)
+  expect(mocks.fetch.mock.calls.every(([url]) => url.startsWith('https://pangea.rnd.huawei.com/'))).toBe(true)
   mocks.launch.mockImplementation(async (_: string, planPath: string) => {
     expect(JSON.parse(await readFile(planPath, 'utf8'))).toMatchObject({ package_type: 'patch', expected_version: version, expected_base_version: '2.1.17' })
   })
@@ -241,15 +237,12 @@ it('rejects a broken internal signature even when the unsigned index hash is rec
     expect(mocks.launch).not.toHaveBeenCalled()
   } finally { intranetResponses.set(patchUrl, original) }
 })
-it('clears a staged GitHub package when switching to the intranet source', async () => {
-  expect((await manager.downloadOnlineUpdate()).phase).toBe('downloaded')
+it('ignores legacy GitHub configuration and registers no settings handlers', async () => {
+  await mkdir(join(root, 'profile'), { recursive: true })
+  await writeFile(join(root, 'profile', 'update-network.json'), JSON.stringify({ updateSource: 'github', proxyUrl: 'http://obsolete.invalid' }))
+  expect(await manager.checkForOnlineUpdate()).toMatchObject({ phase: 'available', source: 'intranet' })
+  expect(mocks.fetch.mock.calls.every(([url]) => new URL(url).origin === 'https://pangea.rnd.huawei.com')).toBe(true)
   manager.registerUpdateHandlers()
   const { ipcMain } = await import('electron')
-  const handler = vi.mocked(ipcMain.handle).mock.calls.find(([name]) => name === 'updates:network-save')![1]
-  const frame = {}
-  await handler({ sender: { mainFrame: frame }, senderFrame: frame } as any, { updateSource: 'intranet', indexUrl: intranetUrl, proxyUrl: '', username: '', password: '', skipCertificateCheck: false })
-  expect(manager.getUpdateStatus().phase).toBe('idle')
-  expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
-  await enableIntranet()
-  expect(await manager.checkForOnlineUpdate()).toMatchObject({ source: 'intranet', phase: 'available' })
+  expect(vi.mocked(ipcMain.handle).mock.calls.map(([name]) => name)).not.toContain('updates:network-save')
 })

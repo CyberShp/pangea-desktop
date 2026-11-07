@@ -1,4 +1,3 @@
-import { openUpdateNetworkSettings } from './update-network-view'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { UpdateInstallResult, UpdateStatus } from '../shared/contracts'
 import {
@@ -251,7 +250,7 @@ window.addEventListener('unhandledrejection', (event) => {
 
 contextBridge.exposeInMainWorld(
   'dshDesktop',
-  createDesktopBridge(ipcRenderer, { openUpdateNetworkSettings })
+  createDesktopBridge(ipcRenderer)
 )
 
 contextBridge.exposeInMainWorld(
@@ -377,7 +376,7 @@ function render(): void {
     body.appendChild(network)
   }
 
-  if (status.phase === 'available' || (status.phase === 'error' && (status.source === 'github' || status.source === 'intranet'))) {
+  if (status.phase === 'available' || (status.phase === 'error' && (status.source === 'intranet'))) {
     const action = button(status.phase === 'available'
       ? (updateLocale === 'zh' ? '下载安装包' : 'Download update')
       : (updateLocale === 'zh' ? '重试检查' : 'Retry check'), 'primary')
@@ -387,12 +386,6 @@ function render(): void {
         .catch(() => { action.disabled = false })
     })
     body.appendChild(action)
-  }
-
-  if (status.phase === 'error' && (status.source === 'github' || status.source === 'intranet')) {
-    const settings = button('在线更新网络设置', 'secondary')
-    settings.addEventListener('click', () => { void openUpdateNetworkSettings() })
-    body.appendChild(settings)
   }
 
   if (status.phase === 'downloaded') {
@@ -624,7 +617,6 @@ const mobileButtonStyles = `
   #${MOBILE_BUTTON_ID}.is-connected > span { opacity:1; }
 `
 
-ipcRenderer.on('updates:network-open', () => { void openUpdateNetworkSettings() })
 
 ipcRenderer.on('updates:status-changed', (_event, status: UpdateStatus) => {
   receivedStatusEvent = true

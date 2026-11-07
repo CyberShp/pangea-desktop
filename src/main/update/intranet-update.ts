@@ -1,29 +1,24 @@
 import { createPublicKey, verify } from 'node:crypto'
-import { GitHubUpdateClient, type OnlineUpdate, type UpdateFetch } from './github-update'
+import { OnlineUpdateDownloader, type OnlineUpdate, type UpdateFetch } from './online-update'
 import { isNewerPortableVersion, portableUpdateChannelForVersion } from './portable-update'
 
-export function parseUpdateSource(input: { updateSource?: unknown; indexUrl?: unknown }): { updateSource: 'github' | 'intranet'; indexUrl: string } {
-  if (!['github', 'intranet'].includes(String(input.updateSource))) throw new Error('更新源类型无效。')
-  const indexUrl = typeof input.indexUrl === 'string' ? input.indexUrl.trim() : ''
-  if (input.updateSource === 'intranet' || indexUrl) {
-    try {
-      const url = new URL(indexUrl)
-      if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error()
-    } catch { throw new Error('内网更新源需填写完整 HTTPS 索引地址，不能包含账号密码或片段。') }
-  }
-  return { updateSource: input.updateSource as 'github' | 'intranet', indexUrl }
+export const INTRANET_UPDATE_ORIGIN = 'https://pangea.rnd.huawei.com'
+export function intranetIndexUrl(version: string): string {
+  const directory = portableUpdateChannelForVersion(version) === 'test' ? 'beta' : 'stable'
+  return `${INTRANET_UPDATE_ORIGIN}/api/tools/27/files/download?path=${directory}/windows/x64/latest.json`
 }
 
 /** The unsigned index locates immutable release files. Trust stays in signed metadata and ZIPs. */
-export class IntranetUpdateClient extends GitHubUpdateClient {
+export class IntranetUpdateClient extends OnlineUpdateDownloader {
   private readonly indexUrl: string
   constructor(fetcher: UpdateFetch, signal: AbortSignal, indexUrl: string) {
-    const parsed = parseUpdateSource({ updateSource: 'intranet', indexUrl })
-    super(fetcher, signal, new URL(parsed.indexUrl).origin)
-    this.indexUrl = parsed.indexUrl
+    const url = new URL(indexUrl)
+    if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error('内网索引地址无效。')
+    super(fetcher, signal, url.origin)
+    this.indexUrl = url.href
   }
 
-  override async check(currentVersion: string, publicKeyPem: string): Promise<OnlineUpdate | undefined> {
+  async check(currentVersion: string, publicKeyPem: string): Promise<OnlineUpdate | undefined> {
     const index = JSON.parse((await this.bytes(this.indexUrl, '查询内网版本')).toString())
     const channel = portableUpdateChannelForVersion(currentVersion)
     if (!index || index.schema_version !== 1 || index.product !== 'PANGEA Desktop' || index.channel !== channel || index.platform !== 'win32' || index.arch !== 'x64') {

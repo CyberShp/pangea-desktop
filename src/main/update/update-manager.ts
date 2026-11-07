@@ -5,10 +5,8 @@ import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'ele
 import type { UpdateInstallResult, UpdateStatus } from '../../shared/contracts'
 import { stagePortablePackage, type StagedPortablePackage } from './portable-package-validator'
 import { isPortablePatchArchive, PortablePatchBaseVersionMismatch, stagePortablePatch, type StagedPortablePatch } from './portable-patch-validator'
-import { createUpdateTransport, UpdateNetworkStore } from './update-network'
-import { configureGlobalGitProxy } from './git-proxy'
-import { IntranetUpdateClient } from './intranet-update'
-import { GitHubUpdateClient } from './github-update'
+import { createUpdateTransport } from './update-network'
+import { IntranetUpdateClient, intranetIndexUrl } from './intranet-update'
 import { assertSupportedPortableUpgradeSource } from './portable-update'
 import type { PortableUpdateConfig } from './portable-update'
 import { initialUpdateStatus, reduceUpdateStatus, type UpdateStateEvent } from './update-state'
@@ -43,11 +41,6 @@ let installing = false
 let loadedConfig: LoadedUpdateConfig | undefined
 type StagedImport = StagedPortablePackage | StagedPortablePatch
 
-let networkStore: UpdateNetworkStore | undefined
-function getNetworkStore(): UpdateNetworkStore {
-  return networkStore ??= new UpdateNetworkStore(join(app.getPath('userData'), 'update-network.json'))
-}
-
 let stagedPackage: StagedImport | undefined
 let stagedRoot: string | undefined
 
@@ -55,50 +48,9 @@ export function getUpdateStatus(): UpdateStatus {
   return { ...status }
 }
 
-export function registerUpdateHandlers(options: { authorizeGitProxy?: (event: Electron.IpcMainInvokeEvent) => boolean } = {}): void {
+export function registerUpdateHandlers(): void {
   if (handlersRegistered) return
   handlersRegistered = true
-  const authorizeNetworkSettings = (event: Electron.IpcMainInvokeEvent) => {
-    if (!BrowserWindow.fromWebContents(event.sender) || event.senderFrame !== event.sender.mainFrame) {
-      throw new Error('不允许从此窗口修改更新网络设置。')
-    }
-  }
-  ipcMain.handle('updates:network-get', event => { authorizeNetworkSettings(event); return getNetworkStore().view() })
-  ipcMain.handle('updates:network-save', async (event, input: unknown) => {
-    authorizeNetworkSettings(event)
-    if (importing || installing) throw new Error('请等待当前更新操作结束后再修改网络设置。')
-    importing = true
-    try {
-      const previous = await getNetworkStore().get()
-      const saved = await getNetworkStore().save(input)
-      if ((previous.updateSource ?? 'github') !== (saved.updateSource ?? 'github') || previous.indexUrl !== saved.indexUrl) {
-        await clearStagedPackage()
-        transition({ type: 'reset' })
-      }
-      return saved
-    } finally { importing = false }
-  })
-  const authorizeGitProxy = (event: Electron.IpcMainInvokeEvent) => {
-    authorizeNetworkSettings(event)
-    if (event.sender.isDestroyed() || !options.authorizeGitProxy?.(event)) throw new Error('不允许从此页面配置 Git 代理。')
-  }
-  let configuringGit = false
-  ipcMain.handle('updates:git-proxy', async (event, username: unknown) => {
-    authorizeGitProxy(event)
-    if (configuringGit) throw new Error('Git 代理配置正在进行，请稍候。')
-    configuringGit = true
-    try {
-      return await configureGlobalGitProxy(username, async ({ proxyUrl, hasExistingProxy }) => {
-        const result = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender)!, {
-          type: 'warning', title: '配置 Git 全局代理', buttons: ['取消', '确认配置'], defaultId: 0, cancelId: 0,
-          message: '此操作会修改当前用户的 Git 全局代理，影响所有仓库。',
-          detail: `${hasExistingProxy ? '已有全局代理，将被替换。\n' : ''}新代理：${proxyUrl}\n不会写入密码。密码需由现有凭据管理器获取；此操作不验证 Git 网络连接。`
-        })
-        authorizeGitProxy(event)
-        return result.response === 1
-      })
-    } finally { configuringGit = false }
-  })
   ipcMain.handle('updates:status', () => getUpdateStatus())
   ipcMain.handle('updates:check', () => checkForOnlineUpdate(true))
   ipcMain.handle('updates:download', () => downloadOnlineUpdate())
@@ -150,18 +102,14 @@ async function runOnlineUpdate(manual: boolean, download: boolean): Promise<Upda
   importing = true
   const controller = new AbortController()
   onlineController = controller
-  transition({ type: 'check', manual, source: 'github' })
+  transition({ type: 'check', manual, source: 'intranet' })
   let transport: Awaited<ReturnType<typeof createUpdateTransport>> | undefined
   try {
     assertSupportedPortableUpgradeSource(app.getVersion())
-    const settings = await getNetworkStore().get()
-    transition({ type: 'check', manual, source: settings.updateSource ?? 'github' })
-    transport = await createUpdateTransport(settings, summary => {
+    transport = await createUpdateTransport(summary => {
       transition({ type: 'network', summary })
     })
-    const client = settings.updateSource === 'intranet'
-      ? new IntranetUpdateClient(transport.fetch, controller.signal, settings.indexUrl!)
-      : new GitHubUpdateClient(transport.fetch, controller.signal)
+    const client = new IntranetUpdateClient(transport.fetch, controller.signal, intranetIndexUrl(app.getVersion()))
     const update = await client.check(app.getVersion(), config.publicKeyPem)
     if (!update) {
       transition({ type: 'up-to-date' })

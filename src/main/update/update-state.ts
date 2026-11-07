@@ -1,7 +1,7 @@
 import type { UpdateStatus } from '../../shared/contracts'
 
 export type UpdateStateEvent =
-  | { type: 'check'; manual: boolean; packageName?: string; source?: 'github' | 'intranet' }
+  | { type: 'check'; manual: boolean; packageName?: string; source?: 'intranet' }
   | { type: 'up-to-date' }
   | { type: 'available'; version: string; packageSize: number }
   | { type: 'network'; summary: string }

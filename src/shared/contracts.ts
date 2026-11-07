@@ -27,7 +27,7 @@ export type UpdatePhase =
 export interface UpdateStatus {
   phase: UpdatePhase
   currentVersion: string
-  source?: 'github' | 'intranet'
+  source?: 'intranet'
   activity?: 'download' | 'verify'
   availableVersion?: string
   packageType?: 'full' | 'patch'
