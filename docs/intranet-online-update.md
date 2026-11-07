@@ -14,7 +14,20 @@
 沿用更新专用 Electron 网络会话及系统代理/PAC；企业 CA 由正常证书验证链处理。
 浏览器能访问不等于 Desktop 实机验证已经通过。
 
-## 上传准备
+## 构建自动产物
+
+新版本 `build` 模式在历史补丁校验完成后自动生成 `latest.json` 和 `intranet-upload-list.json`，
+同时附加到 workflow artifact 和 GitHub Release。大包的服务端名称固定为 `pangea-desktop.zip`，
+补丁保留原名。无需在 CI 配置内网域名，也不会访问内网。
+
+构建生成的 URL 使用 `?path=stable%2Fwindows%2Fx64%2F...` 查询相对地址，Desktop 沿用
+用户配置的索引 URL 的 HTTPS 域名、端口和下载接口路径。用户仍填写完整的索引下载 URL。
+默认 `path` 相对于工具根，没有额外根前缀。索引内的相对 URL 不能单独当作浏览器完整地址。
+
+旧构建不会追加这些文件；需用包含此改动的提交重新构建。`backfill` 只补发历史补丁，
+不覆盖已发布索引；需要使用下面的脚本从完整制品集合重新生成内网索引。
+
+## 手动生成／上传准备
 
 将一个目标版本的以下原始 Release 附件下载到独立目录：
 
@@ -33,6 +46,8 @@ node scripts/create-intranet-update-index.mjs --directory D:/release-upload --pu
 `--full-remote-name pangea-desktop.zip` 指定服务器完整包文件名。省略时沿用原始文件名。
 本地待校验 ZIP 保留 GitHub 原名，脚本不会改写 ZIP 或签名清单；上传清单会将本地原名映射到服务器新名。
 若本地也已改名，请先恢复为签名清单中的原名再生成索引。
+
+省略 `--download-url` 时生成上述查询相对地址；提供该参数时仍可生成完整绝对地址。
 
 `--download-url` 填不含 `path` 参数的下载端点；其他必要查询参数会保留。
 如果下载接口的 `path` 相对于工具根，`--root` 留空。若接口要求带存储根前缀，
@@ -53,7 +68,8 @@ node scripts/create-intranet-update-index.mjs --directory D:/release-upload --pu
 1. 按 `upload_first` 上传该版本的完整包、补丁、清单和签名。
 2. 从下载接口回读，核对文件大小及 SHA-256。版本目录发布后保持不变。
 3. 全部验证成功后，才把 `latest.json` 上传覆盖到 `publish_last.path`。
-4. 在 Desktop 中使用 `publish_last.url` 检查、下载并安装。
+4. 在 Desktop 中配置入口完整下载地址后检查、下载并安装；若 `publish_last.url` 是相对地址，
+   将其接在下载接口路径后面。
 
 同名覆盖能力不等于原子覆盖；入口覆盖期间若读到不完整 JSON，客户端报错并等待重试，
 不会开始安装。请求携带 Cache-Control: no-cache，发布后还需核对服务实际返回的索引版本。

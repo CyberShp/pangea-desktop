@@ -60,13 +60,15 @@ beforeAll(async () => {
   execFileSync(process.execPath, ['scripts/create-signed-portable-patch.mjs', '--base-dir', base, '--target-dir', app,
     '--private-key', join(root, 'private.pem'), '--output', join(root, 'dist', 'patch.zip'), '--from-version', '2.1.17', '--to-version', version, '--channel', 'stable'])
   execFileSync(process.execPath, ['scripts/create-intranet-update-index.mjs', '--directory', join(root, 'dist'),
-    '--public-key', join(resources, 'update', 'pangea-update-public-key.pem'), '--download-url', 'https://updates.example/api/tools/tool/files/download', '--root', 'tool root', '--full-remote-name', 'pangea-desktop.zip'])
+    '--public-key', join(resources, 'update', 'pangea-update-public-key.pem'), '--full-remote-name', 'pangea-desktop.zip'])
   intranetIndex = JSON.parse(await readFile(join(root, 'dist', 'latest.json'), 'utf8'))
   const uploadList = JSON.parse(await readFile(join(root, 'dist', 'intranet-upload-list.json'), 'utf8'))
-  expect(new URL(intranetIndex.full_url).searchParams.get('path')).toBe(`tool root/stable/windows/x64/${version}/pangea-desktop.zip`)
-  expect(uploadList.upload_first.find((file: any) => file.local === name).path).toBe(`tool root/stable/windows/x64/${version}/pangea-desktop.zip`)
-  intranetUrl = uploadList.publish_last.url
-  for (const file of uploadList.upload_first) intranetResponses.set(file.verify_download, await readFile(join(root, 'dist', file.local)))
+  expect(new URL(intranetIndex.full_url, 'https://updates.example/api/tools/tool/files/download').searchParams.get('path')).toBe(`stable/windows/x64/${version}/pangea-desktop.zip`)
+  expect(uploadList.upload_first.find((file: any) => file.local === name).path).toBe(`stable/windows/x64/${version}/pangea-desktop.zip`)
+  intranetUrl = new URL(uploadList.publish_last.url, 'https://updates.example/api/tools/tool/files/download').href
+  expect(intranetIndex.full_url.startsWith('?path=')).toBe(true)
+  expect(JSON.stringify(intranetIndex)).not.toContain('https://')
+  for (const file of uploadList.upload_first) intranetResponses.set(new URL(file.verify_download, intranetUrl).href, await readFile(join(root, 'dist', file.local)))
   resourcesDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath')
   Object.defineProperty(process, 'resourcesPath', { value: resources, configurable: true })
 })
@@ -204,7 +206,7 @@ it('uses full package when the mirror has no patch for this baseline', async () 
 })
 it('rejects modified mirrored patch bytes before installation', async () => {
   await enableIntranet()
-  const patchUrl = intranetIndex.patches[0].url
+  const patchUrl = new URL(intranetIndex.patches[0].url, intranetUrl).href
   const original = intranetResponses.get(patchUrl)!
   intranetResponses.set(patchUrl, Buffer.alloc(original.length))
   try {
@@ -215,7 +217,7 @@ it('rejects modified mirrored patch bytes before installation', async () => {
 })
 
 it('rejects a broken internal signature even when the unsigned index hash is recomputed', async () => {
-  const patchUrl = intranetIndex.patches[0].url
+  const patchUrl = new URL(intranetIndex.patches[0].url, intranetUrl).href
   const original = intranetResponses.get(patchUrl)!
   const directory = await unzipper.Open.buffer(original)
   const archive = new ZipArchive({ zlib: { level: 9 } })

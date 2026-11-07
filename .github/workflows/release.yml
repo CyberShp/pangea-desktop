@@ -216,12 +216,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Generate intranet update index
+        if: steps.release_meta.outputs.mode == 'build'
+        shell: pwsh
+        run: |
+          node scripts/create-intranet-update-index.mjs `
+            --directory ./dist `
+            --public-key ./dist/win-unpacked/resources/update/pangea-update-public-key.pem `
+            --full-remote-name pangea-desktop.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Intranet index generation failed; no release will be published.' }
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: pangea-desktop-${{ steps.release_meta.outputs.version }}-windows-x64-portable
           path: |
             dist/pangea-desktop-*
+            dist/latest.json
+            dist/intranet-upload-list.json
           if-no-files-found: error
           retention-days: 14
 
@@ -241,7 +253,9 @@ jobs:
           $HashPath = (Resolve-Path "dist/$PackageName.sha256").Path
           $OnlineManifest = (Resolve-Path 'dist/pangea-desktop-update.json').Path
           $OnlineSignature = (Resolve-Path 'dist/pangea-desktop-update.json.sig').Path
-          $ReleaseAssets = @($PackagePath, $HashPath, $OnlineManifest, $OnlineSignature)
+          $IntranetIndex = (Resolve-Path 'dist/latest.json').Path
+          $IntranetUploadList = (Resolve-Path 'dist/intranet-upload-list.json').Path
+          $ReleaseAssets = @($PackagePath, $HashPath, $OnlineManifest, $OnlineSignature, $IntranetIndex, $IntranetUploadList)
           $PatchAssets = @(node scripts/list-release-patch-assets.mjs --version $env:RELEASE_VERSION --directory ./dist)
           if ($LASTEXITCODE -ne 0) { throw 'Historical patch publication validation failed.' }
           $ReleaseAssets += $PatchAssets

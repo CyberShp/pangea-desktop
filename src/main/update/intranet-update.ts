@@ -32,10 +32,10 @@ export class IntranetUpdateClient extends GitHubUpdateClient {
     const url = (value: unknown): string => {
       try {
         if (typeof value !== 'string') throw new Error()
-        const target = new URL(value)
+        const target = value.startsWith('?') ? new URL(value, this.indexUrl) : new URL(value)
         if (target.origin !== new URL(this.indexUrl).origin || target.username || target.password || target.hash) throw new Error()
         return target.href
-      } catch { throw new Error('内网制品必须使用与索引同源的完整 HTTPS 地址。') }
+      } catch { throw new Error('内网制品必须使用与索引同源的 HTTPS 地址或 ?path= 相对地址。') }
     }
     const bytes = await this.bytes(url(index.manifest_url), '下载内网更新清单')
     const signature = await this.bytes(url(index.signature_url), '下载内网清单签名', 1024)

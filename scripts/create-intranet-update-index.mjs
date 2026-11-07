@@ -7,7 +7,7 @@ import { sha256 } from './release-package-trust.mjs'
 
 // No private signing key is needed on the upload workstation.
 export async function createIntranetIndex({ directory, downloadUrl, publicKeyFile, root = '', fullRemoteName }) {
-  const base = new URL(downloadUrl)
+  const base = new URL(downloadUrl ?? 'https://intranet.invalid/download')
   if (base.protocol !== 'https:' || base.username || base.password || base.hash) throw new Error('download-url must be an HTTPS download endpoint without credentials')
   if (base.searchParams.has('path')) throw new Error('download-url must omit path; use --root for the storage prefix')
   if (root.split('/').some(part => part === '..' || part === '.') || root.includes('\\')) throw new Error('Invalid storage root')
@@ -28,7 +28,7 @@ export async function createIntranetIndex({ directory, downloadUrl, publicKeyFil
   const channelDirectory = manifest.channel === 'test' ? 'beta' : 'stable'
   const prefix = [root.replace(/^\/+|\/+$/g, ''), channelDirectory, 'windows', 'x64'].filter(Boolean).join('/')
   const versionPath = `${prefix}/${manifest.version}`
-  const url = relative => { const target = new URL(base); target.searchParams.set('path', relative); return target.href }
+  const url = relative => { const target = new URL(base); target.searchParams.set('path', relative); return downloadUrl === undefined ? target.search : target.href }
   const patches = []
   const uploads = [full.name, manifestName, manifestName + '.sig']
   for (const name of (await readdir(directory)).sort()) {
