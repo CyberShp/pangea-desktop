@@ -4,7 +4,7 @@ export type UpdateLocale = 'en' | 'zh'
 
 export function shouldShowUpdate(status: UpdateStatus): boolean {
   if (['available', 'downloading', 'downloaded'].includes(status.phase)) return true
-  if (status.phase === 'error' && status.source === 'github') return true
+  if (status.phase === 'error' && (status.source === 'github' || status.source === 'intranet')) return true
   return status.manual && ['checking', 'up-to-date', 'install-error', 'error', 'unsupported'].includes(status.phase)
 }
 
@@ -38,7 +38,7 @@ export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): Upda
       return { title: zh ? '已是最新版本' : 'Up to date', description: `PANGEA Desktop v${status.currentVersion}` }
     case 'checking':
       return {
-        title: status.source === 'github' ? (zh ? '正在检查在线更新' : 'Checking for updates') : (zh ? '正在读取升级包' : 'Reading update package'),
+        title: (status.source === 'github' || status.source === 'intranet') ? (zh ? '正在检查在线更新' : 'Checking for updates') : (zh ? '正在读取升级包' : 'Reading update package'),
         description: zh ? `当前版本 v${status.currentVersion}` : `Current version v${status.currentVersion}`
       }
     case 'downloading':
@@ -78,8 +78,8 @@ export function updateHeadline(status: UpdateStatus, locale: UpdateLocale): Upda
       }
     case 'error':
       return {
-        title: status.source === 'github' ? (zh ? '在线更新失败' : 'Online update failed') : (zh ? '升级包校验失败' : 'Update package verification failed'),
-        description: status.source === 'github' ? (zh ? '可通过菜单重新检查更新，或导入离线升级包。' : 'Retry from the menu or import an offline package.') : zh ? '请选择由 PANGEA Desktop 构建生成的完整包或补丁包。' : 'Choose a full or patch package produced by the PANGEA Desktop build.'
+        title: (status.source === 'github' || status.source === 'intranet') ? (zh ? '在线更新失败' : 'Online update failed') : (zh ? '升级包校验失败' : 'Update package verification failed'),
+        description: (status.source === 'github' || status.source === 'intranet') ? (zh ? '可通过菜单重新检查更新，或导入离线升级包。' : 'Retry from the menu or import an offline package.') : zh ? '请选择由 PANGEA Desktop 构建生成的完整包或补丁包。' : 'Choose a full or patch package produced by the PANGEA Desktop build.'
       }
     case 'idle':
       return { title: '', description: '' }
@@ -94,7 +94,7 @@ export function updateMessage(status: UpdateStatus, locale: UpdateLocale): strin
     case 'up-to-date':
       return zh ? '已是最新版本' : 'Up to date'
     case 'checking':
-      if (status.source === 'github') return zh ? '正在检查在线更新…' : 'Checking for updates…'
+      if ((status.source === 'github' || status.source === 'intranet')) return zh ? '正在检查在线更新…' : 'Checking for updates…'
       return zh ? '正在读取升级包…' : 'Reading update package…'
     case 'downloading': {
       const percent = Math.round(status.percent ?? 0)
@@ -114,7 +114,7 @@ export function updateMessage(status: UpdateStatus, locale: UpdateLocale): strin
     case 'unsupported':
       return zh ? '当前版本无法导入升级包' : 'Package import is unavailable in this build'
     case 'error':
-      if (status.source === 'github') return zh ? '在线更新失败' : 'Online update failed'
+      if ((status.source === 'github' || status.source === 'intranet')) return zh ? '在线更新失败' : 'Online update failed'
       return zh ? '升级包校验失败' : 'Update package verification failed'
     case 'idle':
       return ''

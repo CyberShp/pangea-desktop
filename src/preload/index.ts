@@ -377,7 +377,7 @@ function render(): void {
     body.appendChild(network)
   }
 
-  if (status.phase === 'available' || (status.phase === 'error' && status.source === 'github')) {
+  if (status.phase === 'available' || (status.phase === 'error' && (status.source === 'github' || status.source === 'intranet'))) {
     const action = button(status.phase === 'available'
       ? (updateLocale === 'zh' ? '下载安装包' : 'Download update')
       : (updateLocale === 'zh' ? '重试检查' : 'Retry check'), 'primary')
@@ -389,7 +389,7 @@ function render(): void {
     body.appendChild(action)
   }
 
-  if (status.phase === 'error' && status.source === 'github') {
+  if (status.phase === 'error' && (status.source === 'github' || status.source === 'intranet')) {
     const settings = button('在线更新网络设置', 'secondary')
     settings.addEventListener('click', () => { void openUpdateNetworkSettings() })
     body.appendChild(settings)

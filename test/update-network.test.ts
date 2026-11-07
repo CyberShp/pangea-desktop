@@ -179,3 +179,17 @@ describe('company proxy preset', () => {
     expect(matchesProxy({ isProxy: true, host: 'proxy.example', port: 8080 }, company)).toBe(false)
   })
 })
+it('persists the chosen intranet source across restart and restricts transport to its origin', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'intranet-network-')); roots.push(root)
+  const path = join(root, 'network.json')
+  const intranet = { ...settings, updateSource: 'intranet' as const, indexUrl: 'https://updates.example:8443/download?path=latest.json' }
+  await new UpdateNetworkStore(path).save(intranet)
+  expect(await new UpdateNetworkStore(path).get()).toMatchObject({ updateSource: 'intranet', indexUrl: intranet.indexUrl, password: '' })
+  const transport = await createUpdateTransport(intranet)
+  for (const url of ['https://github.com/asset', 'https://updates.example/download', 'http://updates.example:8443/download']) await expect(transport.fetch(url, {})).rejects.toThrow('允许列表')
+  expect(mocks.request).not.toHaveBeenCalled()
+  const pending = transport.fetch(intranet.indexUrl, {})
+  request.emit('redirect', 302, 'GET', 'https://updates.example:8443/next')
+  expect((await pending).status).toBe(302)
+  await transport.close()
+})

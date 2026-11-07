@@ -7,6 +7,7 @@ import { stagePortablePackage, type StagedPortablePackage } from './portable-pac
 import { isPortablePatchArchive, PortablePatchBaseVersionMismatch, stagePortablePatch, type StagedPortablePatch } from './portable-patch-validator'
 import { createUpdateTransport, UpdateNetworkStore } from './update-network'
 import { configureGlobalGitProxy } from './git-proxy'
+import { IntranetUpdateClient } from './intranet-update'
 import { GitHubUpdateClient } from './github-update'
 import { assertSupportedPortableUpgradeSource } from './portable-update'
 import type { PortableUpdateConfig } from './portable-update'
@@ -66,7 +67,16 @@ export function registerUpdateHandlers(options: { authorizeGitProxy?: (event: El
   ipcMain.handle('updates:network-save', async (event, input: unknown) => {
     authorizeNetworkSettings(event)
     if (importing || installing) throw new Error('请等待当前更新操作结束后再修改网络设置。')
-    return getNetworkStore().save(input)
+    importing = true
+    try {
+      const previous = await getNetworkStore().get()
+      const saved = await getNetworkStore().save(input)
+      if ((previous.updateSource ?? 'github') !== (saved.updateSource ?? 'github') || previous.indexUrl !== saved.indexUrl) {
+        await clearStagedPackage()
+        transition({ type: 'reset' })
+      }
+      return saved
+    } finally { importing = false }
   })
   const authorizeGitProxy = (event: Electron.IpcMainInvokeEvent) => {
     authorizeNetworkSettings(event)
@@ -124,7 +134,7 @@ async function runOnlineUpdate(manual: boolean, download: boolean): Promise<Upda
   if (status.phase === 'downloaded' && stagedPackage) {
     // Explicit checking also reopens a previously dismissed ready card.
     const ready = getUpdateStatus()
-    transition({ type: 'check', manual, source: 'github' })
+    transition({ type: 'check', manual, source: ready.source })
     transition({ type: 'downloaded', version: ready.availableVersion!, packageType: ready.packageType, baseVersion: ready.baseVersion })
     return getUpdateStatus()
   }
@@ -144,10 +154,14 @@ async function runOnlineUpdate(manual: boolean, download: boolean): Promise<Upda
   let transport: Awaited<ReturnType<typeof createUpdateTransport>> | undefined
   try {
     assertSupportedPortableUpgradeSource(app.getVersion())
-    transport = await createUpdateTransport(await getNetworkStore().get(), summary => {
+    const settings = await getNetworkStore().get()
+    transition({ type: 'check', manual, source: settings.updateSource ?? 'github' })
+    transport = await createUpdateTransport(settings, summary => {
       transition({ type: 'network', summary })
     })
-    const client = new GitHubUpdateClient(transport.fetch, controller.signal)
+    const client = settings.updateSource === 'intranet'
+      ? new IntranetUpdateClient(transport.fetch, controller.signal, settings.indexUrl!)
+      : new GitHubUpdateClient(transport.fetch, controller.signal)
     const update = await client.check(app.getVersion(), config.publicKeyPem)
     if (!update) {
       transition({ type: 'up-to-date' })
@@ -166,17 +180,18 @@ async function runOnlineUpdate(manual: boolean, download: boolean): Promise<Upda
     transition({ type: 'online-download', version: update.version, packageName: update.asset.name })
     await client.download(update, sourcePath, percent => transition({ type: 'progress', percent }))
     transition({ type: 'verify' })
-    const staged = await stagePortablePackage({
+    const staged = await (update.packageType === 'patch' ? stagePortablePatch : stagePortablePackage)({
       sourcePath, destinationPath: join(root, 'pangea-desktop.zip'),
       publicKeyPem: config.publicKeyPem, currentVersion: app.getVersion(),
       onProgress: percent => transition({ type: 'progress', percent })
     })
-    if (staged.manifest.version !== update.version || staged.packageSha256 !== update.sha256 || staged.packageSize !== update.asset.size) {
-      throw new Error('已验证的升级包与锁定的 Release 不一致。')
+    const version = staged.kind === 'patch' ? staged.manifest.to_version : staged.manifest.version
+    if (version !== update.version || (staged.kind === 'patch' && staged.manifest.from_version !== update.baseVersion) || staged.packageSha256 !== update.sha256 || staged.packageSize !== update.asset.size) {
+      throw new Error('已验证的升级包与选定更新版本不一致。')
     }
     await rm(sourcePath, { force: true })
     stagedPackage = staged
-    transition({ type: 'downloaded', version: staged.manifest.version, packageType: 'full' })
+    transition({ type: 'downloaded', version, packageType: staged.kind === 'patch' ? 'patch' : 'full', baseVersion: update.baseVersion })
   } catch (error) {
     try { await clearStagedPackage() }
     catch (cleanupError) { console.warn('[portable-updater] staging cleanup failed', cleanupError) }

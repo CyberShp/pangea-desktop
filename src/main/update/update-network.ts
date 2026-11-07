@@ -2,11 +2,14 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Readable } from 'node:stream'
 import { net, session } from 'electron'
+import { parseUpdateSource } from './intranet-update'
 import type { UpdateFetch } from './github-update'
 
 export const COMPANY_PROXY_URL = 'http://proxy.huawei.com:8080'
 
 export interface UpdateNetworkSettings {
+  updateSource?: 'github' | 'intranet'
+  indexUrl?: string
   proxyUrl: string
   username: string
   password: string
@@ -20,7 +23,8 @@ export function parseUpdateNetwork(input: unknown): UpdateNetworkSettings {
   if (!value || typeof value.proxyUrl !== 'string' || typeof value.username !== 'string' || typeof value.password !== 'string' || typeof value.skipCertificateCheck !== 'boolean') {
     throw new Error('在线更新网络配置无效。')
   }
-  const result = { proxyUrl: '', username: value.username, password: value.password, skipCertificateCheck: value.skipCertificateCheck }
+  const updateSource = source?.updateSource === undefined ? {} : parseUpdateSource(source)
+  const result = { ...updateSource, proxyUrl: '', username: value.username, password: value.password, skipCertificateCheck: value.skipCertificateCheck }
   if (!value.proxyUrl.trim()) return { ...result, username: '', password: '' }
   try {
     const url = new URL(value.proxyUrl.trim())
@@ -42,22 +46,27 @@ export class UpdateNetworkStore {
   constructor(private readonly path: string) {}
   async get(): Promise<UpdateNetworkSettings> {
     if (!this.loaded) {
+      let saved: any
       try {
-        const saved = JSON.parse(await readFile(this.path, 'utf8'))
-        this.settings = parseUpdateNetwork({ proxyUrl: saved.proxyUrl, username: saved.username, password: '', skipCertificateCheck: false })
-      } catch { /* First run or invalid configuration: use system proxy. */ }
+        saved = JSON.parse(await readFile(this.path, 'utf8'))
+        this.settings = parseUpdateNetwork({ updateSource: saved.updateSource, indexUrl: saved.indexUrl, proxyUrl: saved.proxyUrl, username: saved.username, password: '', skipCertificateCheck: false })
+      } catch (error) {
+        // An explicitly configured source must never silently revert to GitHub.
+        if (saved?.updateSource !== undefined) throw error
+        // First run or legacy invalid proxy configuration: use system networking.
+      }
       this.loaded = true
     }
     return { ...this.settings }
   }
   async view() {
     const value = await this.get()
-    return { proxyUrl: value.proxyUrl, username: value.username, hasPassword: !!value.password, skipCertificateCheck: value.skipCertificateCheck }
+    return { updateSource: value.updateSource, indexUrl: value.indexUrl, proxyUrl: value.proxyUrl, username: value.username, hasPassword: !!value.password, skipCertificateCheck: value.skipCertificateCheck }
   }
   async save(input: unknown) {
     const value = parseUpdateNetwork(input)
     await mkdir(dirname(this.path), { recursive: true })
-    await writeFile(this.path, JSON.stringify({ proxyUrl: value.proxyUrl, username: value.username }), { mode: 0o600 })
+    await writeFile(this.path, JSON.stringify({ updateSource: value.updateSource, indexUrl: value.indexUrl, proxyUrl: value.proxyUrl, username: value.username }), { mode: 0o600 })
     this.settings = value
     this.loaded = true
     return this.view()
@@ -84,20 +93,21 @@ export function updateRouteSummary(proxyUrl: string, hostname: string, route?: s
 
 /** Dedicated ephemeral session: no changes to renderer/Agent networking or trust. */
 export async function createUpdateTransport(settings: UpdateNetworkSettings, onDiagnostic: (summary: string) => void = () => {}): Promise<{ fetch: UpdateFetch; close: () => Promise<void> }> {
+  const origin = settings.updateSource === 'intranet' ? new URL(parseUpdateSource(settings).indexUrl).origin : undefined
   // Keep diagnostic certificate decisions out of the normal session's verifier cache.
   const network = session.fromPartition(settings.skipCertificateCheck ? 'pangea-online-update-diagnostic' : 'pangea-online-update', { cache: false })
   await network.closeAllConnections()
   await network.clearAuthCache()
   await network.setProxy(settings.proxyUrl ? { mode: 'fixed_servers', proxyRules: settings.proxyUrl } : { mode: 'system' })
   network.setCertificateVerifyProc(settings.skipCertificateCheck
-    ? (request, callback) => callback(UPDATE_HOSTS.includes(request.hostname) ? 0 : -3)
+    ? (request, callback) => callback((origin ? request.hostname === new URL(origin).hostname : UPDATE_HOSTS.includes(request.hostname)) ? 0 : -3)
     : null)
   onDiagnostic(settings.proxyUrl ? '网络模式：手动代理' : '网络模式：系统网络（无需预先填写代理账号密码）')
   const active = new Set<Electron.ClientRequest>()
   const fetch: UpdateFetch = (url, init) => new Promise((resolve, reject) => {
     const target = new URL(url)
-    if (target.protocol !== 'https:' || target.username || target.password || target.port || !UPDATE_HOSTS.includes(target.hostname)) {
-      reject(new Error('更新下载地址不在 GitHub 允许列表中。')); return
+    if (target.protocol !== 'https:' || target.username || target.password || target.hash || (origin ? target.origin !== origin : !!target.port || !UPDATE_HOSTS.includes(target.hostname))) {
+      reject(new Error('更新下载地址不在当前更新源允许列表中。')); return
     }
     if (init.signal?.aborted) { reject(new Error('更新请求已取消。')); return }
     const request = net.request({ url, session: network, redirect: 'manual' })

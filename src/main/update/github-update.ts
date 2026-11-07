@@ -9,6 +9,8 @@ export type UpdateFetch = (url: string, init: RequestInit) => Promise<Response>
 interface Asset { name: string; size: number; browser_download_url: string; state: string }
 interface Release { id: number; tag_name: string; draft: boolean; prerelease: boolean; assets: Asset[] }
 export interface OnlineUpdate {
+  packageType?: 'full' | 'patch'
+  baseVersion?: string
   releaseId: number
   version: string
   asset: Asset
@@ -17,7 +19,7 @@ export interface OnlineUpdate {
 
 /** Uses the Electron network session (including system proxy) in production. */
 export class GitHubUpdateClient {
-  constructor(private readonly fetcher: UpdateFetch, private readonly signal: AbortSignal) {}
+  constructor(private readonly fetcher: UpdateFetch, private readonly signal: AbortSignal, private readonly allowedOrigin?: string) {}
 
   private async consume(url: string, limit: number, stage: string, consume: (chunk: Uint8Array) => Promise<void>): Promise<number> {
     const controller = new AbortController()
@@ -31,12 +33,12 @@ export class GitHubUpdateClient {
       let response: Response | undefined
       for (let redirects = 0; redirects <= 5; redirects++) {
         const target = new URL(url)
-        if (target.protocol !== 'https:' || target.username || target.password || target.port ||
-          !['api.github.com', 'github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(target.hostname)) {
-          throw new Error('更新下载地址不在 GitHub 允许列表中。')
+        if (target.protocol !== 'https:' || target.username || target.password || target.hash ||
+          (this.allowedOrigin ? target.origin !== this.allowedOrigin : !!target.port || !['api.github.com', 'github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(target.hostname))) {
+          throw new Error('更新下载地址不在当前更新源允许列表中。')
         }
         response = await this.fetcher(url, { redirect: 'manual', signal: controller.signal,
-          headers: { 'User-Agent': 'PANGEA-Desktop-Updater', Accept: target.hostname === 'api.github.com' ? 'application/vnd.github+json' : 'application/octet-stream' } })
+          headers: { 'User-Agent': 'PANGEA-Desktop-Updater', 'Cache-Control': 'no-cache', Accept: target.hostname === 'api.github.com' ? 'application/vnd.github+json' : 'application/octet-stream' } })
         if (![301, 302, 303, 307, 308].includes(response.status)) break
         const location = response.headers.get('location')
         await response.body?.cancel()
@@ -79,7 +81,7 @@ export class GitHubUpdateClient {
     }
   }
 
-  private async bytes(url: string, stage: string, limit = 2 * 1024 * 1024): Promise<Buffer> {
+  protected async bytes(url: string, stage: string, limit = 2 * 1024 * 1024): Promise<Buffer> {
     const chunks: Buffer[] = []
     await this.consume(url, limit, stage, async chunk => { chunks.push(Buffer.from(chunk)) })
     return Buffer.concat(chunks)

@@ -15,6 +15,9 @@ export async function openUpdateNetworkSettings(): Promise<void> {
     h2{margin:0 0 12px;font-size:20px}p{font-size:13px;line-height:1.6;opacity:.8}label{display:block;margin:14px 0;font-size:14px}input:not([type=checkbox]),select{display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #8887;border-radius:7px;background:Field;color:FieldText}button{padding:9px 15px;border:1px solid #8887;border-radius:8px;cursor:pointer}button[type=submit]{background:#2563eb;color:white;border-color:transparent}.actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}.error{color:#dc4545;white-space:pre-wrap}input:focus-visible,button:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
   </style><form role="dialog" aria-modal="true" aria-labelledby="network-title">
     <h2 id="network-title">在线更新网络设置</h2>
+    <label>更新源<select name="updateSource"><option value="github">GitHub</option><option value="intranet">内网</option></select></label>
+    <label id="index-label" hidden>内网索引地址<input name="indexUrl" type="url" placeholder="https://更新服务/api/tools/工具ID/files/download?path=stable/windows/x64/latest.json" autocomplete="off"></label>
+    <p id="source-note">选择内网后，版本检查和制品下载均使用内网服务。</p>
     <p>华为代理只需填写工号和密码，地址由程序配置。也可保留系统网络或已有自定义代理。</p>
     <label>网络模式<select name="mode"><option value="system">系统网络</option><option value="company">华为代理</option><option value="custom" hidden>保留已有自定义代理</option></select></label>
     <p id="proxy-summary"></p>
@@ -55,8 +58,18 @@ export async function openUpdateNetworkSettings(): Promise<void> {
     field('username').disabled = system; field('password').disabled = system
     gitButton.disabled = !loaded || busy || mode.value !== 'company'
     mode.disabled = !loaded || busy
+    renderSource()
     root.querySelector('#proxy-summary')!.textContent = mode.value === 'company' ? `代理：${COMPANY_PROXY_URL}` : mode.value === 'custom' ? `保留已有代理：${savedProxyUrl}` : '沿用系统代理/PAC；不修改系统设置。'
   }
+  const source = form.elements.namedItem('updateSource') as HTMLSelectElement
+  const renderSource = () => {
+    const intranet = source.value === 'intranet'
+    root.querySelector<HTMLElement>('#index-label')!.hidden = !intranet
+    field('indexUrl').required = intranet
+    source.disabled = !loaded || busy
+    field('indexUrl').disabled = !loaded || busy || !intranet
+  }
+  source.addEventListener('change', renderSource)
   mode.addEventListener('change', renderMode)
   gitButton.disabled = true
   gitButton.addEventListener('click', async () => {
@@ -77,6 +90,8 @@ export async function openUpdateNetworkSettings(): Promise<void> {
     const value = await ipcRenderer.invoke('updates:network-get')
     if (panel !== host) return
     loaded = true
+    source.value = value.updateSource ?? 'github'
+    field('indexUrl').value = value.indexUrl ?? ''
     savedProxyUrl = value.proxyUrl
     mode.value = !savedProxyUrl ? 'system' : savedProxyUrl === COMPANY_PROXY_URL ? 'company' : 'custom'
     if (mode.value === 'custom') mode.querySelector<HTMLOptionElement>('[value=custom]')!.hidden = false
@@ -92,15 +107,16 @@ export async function openUpdateNetworkSettings(): Promise<void> {
     busy = true; save.disabled = true; renderMode(); error.textContent = ''
     try {
       await ipcRenderer.invoke('updates:network-save', {
+        updateSource: source.value, indexUrl: field('indexUrl').value,
         mode: mode.value, proxyUrl: mode.value === 'custom' ? savedProxyUrl : '', username: field('username').value,
         password: field('password').value, skipCertificateCheck: field('skipCertificateCheck').checked
       })
       field('password').value = ''
       close()
       await ipcRenderer.invoke('updates:check')
-    } catch {
+    } catch (cause) {
       busy = false
-      if (panel === host) { renderMode(); error.textContent = '保存失败：请检查工号，并等待当前更新操作结束后再试。'; save.disabled = false }
+      if (panel === host) { renderMode(); error.textContent = cause instanceof Error ? cause.message : '保存失败：请检查更新源、工号，并等待当前更新操作结束后再试。'; save.disabled = false }
     }
   })
 }

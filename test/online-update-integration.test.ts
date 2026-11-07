@@ -1,6 +1,8 @@
-import { generateKeyPairSync } from 'node:crypto'
+import { ZipArchive } from 'archiver'
+import unzipper from 'unzipper'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,7 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), getPath: vi.fn(), launch: vi.fn(), quit: vi.fn(), admission: vi.fn(), messages: [] as any[] }))
 vi.mock('electron', () => ({
   app: { getVersion: () => '2.1.15', getPath: mocks.getPath, isPackaged: true, quit: mocks.quit },
-  BrowserWindow: { getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: (_: string, status: unknown) => mocks.messages.push(status) } }] },
+  BrowserWindow: { fromWebContents: () => ({}), getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: (_: string, status: unknown) => mocks.messages.push(status) } }] },
   dialog: {}, ipcMain: { handle: vi.fn() }, net: { fetch: mocks.fetch }
 }))
 vi.mock('../src/main/update/update-network', async importOriginal => ({ ...(await importOriginal<any>()), createUpdateTransport: async () => ({ fetch: mocks.fetch, close: async () => {} }) }))
@@ -19,6 +21,9 @@ let root: string
 let resourcesDescriptor: PropertyDescriptor | undefined
 let manager: typeof import('../src/main/update/update-manager')
 let release: any
+let intranetIndex: any
+let intranetUrl: string
+const intranetResponses = new Map<string, Buffer>()
 const responses = new Map<string, Buffer>()
 const version = '2.1.16'
 const name = `pangea-desktop-${version}-windows-x64-portable.zip`
@@ -44,12 +49,31 @@ beforeAll(async () => {
   for (const file of [name, 'pangea-desktop-update.json', 'pangea-desktop-update.json.sig']) {
     responses.set(prefix + file, await readFile(join(root, 'dist', file)))
   }
+  // Generate a real signed baseline/patch, then exercise the upload-index CLI.
+  const base = join(root, 'base')
+  await cp(app, base, { recursive: true })
+  await writeFile(join(base, 'PANGEA Desktop.exe'), 'baseline executable')
+  await writeFile(join(base, 'resources', 'pangea-manifest.json'), JSON.stringify({ product: { version: '2.1.15' }, components: { agent: { commit: 'a'.repeat(40) } } }))
+  await mkdir(join(root, 'base-dist'))
+  execFileSync(process.execPath, ['scripts/create-signed-portable-package.mjs', '--app-dir', base,
+    '--private-key', join(root, 'private.pem'), '--output', join(root, 'base-dist', 'pangea-desktop-2.1.15-windows-x64-portable.zip'), '--version', '2.1.15'])
+  execFileSync(process.execPath, ['scripts/create-signed-portable-patch.mjs', '--base-dir', base, '--target-dir', app,
+    '--private-key', join(root, 'private.pem'), '--output', join(root, 'dist', 'patch.zip'), '--from-version', '2.1.15', '--to-version', version, '--channel', 'stable'])
+  execFileSync(process.execPath, ['scripts/create-intranet-update-index.mjs', '--directory', join(root, 'dist'),
+    '--public-key', join(resources, 'update', 'pangea-update-public-key.pem'), '--download-url', 'https://updates.example/api/tools/tool/files/download', '--root', 'tool root', '--full-remote-name', 'pangea-desktop.zip'])
+  intranetIndex = JSON.parse(await readFile(join(root, 'dist', 'latest.json'), 'utf8'))
+  const uploadList = JSON.parse(await readFile(join(root, 'dist', 'intranet-upload-list.json'), 'utf8'))
+  expect(new URL(intranetIndex.full_url).searchParams.get('path')).toBe(`tool root/stable/windows/x64/${version}/pangea-desktop.zip`)
+  expect(uploadList.upload_first.find((file: any) => file.local === name).path).toBe(`tool root/stable/windows/x64/${version}/pangea-desktop.zip`)
+  intranetUrl = uploadList.publish_last.url
+  for (const file of uploadList.upload_first) intranetResponses.set(file.verify_download, await readFile(join(root, 'dist', file.local)))
   resourcesDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath')
   Object.defineProperty(process, 'resourcesPath', { value: resources, configurable: true })
 })
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); mocks.messages.length = 0
   mocks.getPath.mockReturnValue(join(root, 'profile'))
+  await rm(join(root, 'profile', 'update-network.json'), { force: true })
   release = { id: 42, tag_name: `v${version}`, draft: false, prerelease: false,
     assets: [...responses].map(([url, data]) => ({ name: url.slice(prefix.length), size: data.length, state: 'uploaded', browser_download_url: url })) }
   mocks.fetch.mockImplementation(async (url: string) => url.startsWith('https://api.github.com/')
@@ -152,4 +176,78 @@ describe('online update production pipeline with simulated GitHub and Windows la
     expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
     expect(mocks.launch).not.toHaveBeenCalled()
   })
+})
+
+async function enableIntranet(index = intranetIndex) {
+  await mkdir(join(root, 'profile'), { recursive: true })
+  await writeFile(join(root, 'profile', 'update-network.json'), JSON.stringify({ updateSource: 'intranet', indexUrl: intranetUrl, proxyUrl: '', username: '' }))
+  mocks.fetch.mockImplementation(async (url: string) => url === intranetUrl ? Response.json(index) : new Response(new Uint8Array(intranetResponses.get(url)!)))
+}
+it('generates query URLs and uses a real signed patch through the online install handoff', async () => {
+  expect(intranetIndex.patches).toHaveLength(1)
+  await enableIntranet()
+  expect(await manager.checkForOnlineUpdate()).toMatchObject({ phase: 'available', source: 'intranet' })
+  expect(mocks.fetch).toHaveBeenCalledTimes(3)
+  expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'downloaded', source: 'intranet', packageType: 'patch', baseVersion: '2.1.15', availableVersion: version })
+  expect(mocks.fetch.mock.calls.every(([url]) => url.startsWith('https://updates.example/'))).toBe(true)
+  mocks.launch.mockImplementation(async (_: string, planPath: string) => {
+    expect(JSON.parse(await readFile(planPath, 'utf8'))).toMatchObject({ package_type: 'patch', expected_version: version, expected_base_version: '2.1.15' })
+  })
+  vi.useFakeTimers()
+  expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: true })
+  expect(mocks.launch).toHaveBeenCalledOnce()
+  await vi.advanceTimersByTimeAsync(1000)
+})
+it('uses full package when the mirror has no patch for this baseline', async () => {
+  await enableIntranet({ ...intranetIndex, patches: [] })
+  expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'downloaded', source: 'intranet', packageType: 'full', availableVersion: version })
+})
+it('rejects modified mirrored patch bytes before installation', async () => {
+  await enableIntranet()
+  const patchUrl = intranetIndex.patches[0].url
+  const original = intranetResponses.get(patchUrl)!
+  intranetResponses.set(patchUrl, Buffer.alloc(original.length))
+  try {
+    expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'error', source: 'intranet' })
+    expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
+    expect(mocks.launch).not.toHaveBeenCalled()
+  } finally { intranetResponses.set(patchUrl, original) }
+})
+
+it('rejects a broken internal signature even when the unsigned index hash is recomputed', async () => {
+  const patchUrl = intranetIndex.patches[0].url
+  const original = intranetResponses.get(patchUrl)!
+  const directory = await unzipper.Open.buffer(original)
+  const archive = new ZipArchive({ zlib: { level: 9 } })
+  const chunks: Buffer[] = []
+  const completed = new Promise<Buffer>((resolve, reject) => {
+    archive.on('data', chunk => chunks.push(Buffer.from(chunk)))
+    archive.on('end', () => resolve(Buffer.concat(chunks)))
+    archive.on('error', reject)
+  })
+  for (const entry of directory.files) archive.append(entry.path === 'pangea-patch-manifest.json.sig' ? Buffer.alloc(64).toString('base64') : await entry.buffer(), { name: entry.path })
+  await archive.finalize()
+  const tampered = await completed
+  const index = structuredClone(intranetIndex)
+  index.patches[0].size = tampered.length
+  index.patches[0].sha256 = createHash('sha256').update(tampered).digest('hex')
+  intranetResponses.set(patchUrl, tampered)
+  try {
+    await enableIntranet(index)
+    expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'error', source: 'intranet', message: expect.stringMatching(/signature verification failed/) })
+    expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
+    expect(mocks.launch).not.toHaveBeenCalled()
+  } finally { intranetResponses.set(patchUrl, original) }
+})
+it('clears a staged GitHub package when switching to the intranet source', async () => {
+  expect((await manager.downloadOnlineUpdate()).phase).toBe('downloaded')
+  manager.registerUpdateHandlers()
+  const { ipcMain } = await import('electron')
+  const handler = vi.mocked(ipcMain.handle).mock.calls.find(([name]) => name === 'updates:network-save')![1]
+  const frame = {}
+  await handler({ sender: { mainFrame: frame }, senderFrame: frame } as any, { updateSource: 'intranet', indexUrl: intranetUrl, proxyUrl: '', username: '', password: '', skipCertificateCheck: false })
+  expect(manager.getUpdateStatus().phase).toBe('idle')
+  expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: false })
+  await enableIntranet()
+  expect(await manager.checkForOnlineUpdate()).toMatchObject({ source: 'intranet', phase: 'available' })
 })

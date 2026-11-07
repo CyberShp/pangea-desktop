@@ -20,7 +20,7 @@ it('has no URL input; sends raw special-character credentials and company mode',
   await open(); expect(root.querySelector('[name=proxyUrl]')).toBeNull()
   mode('company'); field('username').value = 'a@corp'; field('password').value = 's:@%#'
   await submit()
-  expect(mocks.invoke).toHaveBeenCalledWith('updates:network-save', { mode: 'company', proxyUrl: '', username: 'a@corp', password: 's:@%#', skipCertificateCheck: false })
+  expect(mocks.invoke).toHaveBeenCalledWith('updates:network-save', { updateSource: 'github', indexUrl: '', mode: 'company', proxyUrl: '', username: 'a@corp', password: 's:@%#', skipCertificateCheck: false })
 })
 it('preserves old custom proxy until explicitly selecting company', async () => {
   mocks.invoke.mockResolvedValueOnce({ proxyUrl: 'http://old.example:8080', username: 'old', skipCertificateCheck: false })
@@ -67,4 +67,13 @@ it('ignores Git completion after closing and reopening the panel', async () => {
   await open(); resolve({ configured: true }); await new Promise(done => setTimeout(done, 0))
   expect(root.querySelector('#git-result')!.textContent).toBe('')
   expect(field('mode').value).toBe('system')
+})
+it('saves an intranet query URL and checks without downloading', async () => {
+  await open()
+  field('updateSource').value = 'intranet'; field('updateSource').dispatchEvent(new Event('change'))
+  expect(root.querySelector<HTMLElement>('#index-label')!.hidden).toBe(false)
+  field('indexUrl').value = 'https://updates.example/download?path=stable%2Fwindows%2Fx64%2Flatest.json'
+  await submit()
+  expect(mocks.invoke).toHaveBeenCalledWith('updates:network-save', expect.objectContaining({ updateSource: 'intranet', indexUrl: field('indexUrl').value }))
+  expect(mocks.invoke.mock.calls.some(([channel]) => channel === 'updates:download')).toBe(false)
 })
