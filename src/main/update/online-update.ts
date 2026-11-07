@@ -1,3 +1,4 @@
+import type { UpdateReleaseNotes } from '../../shared/contracts'
 import { createHash } from 'node:crypto'
 import { open, rm } from 'node:fs/promises'
 
@@ -5,6 +6,8 @@ export const UPDATE_MANIFEST_NAME = 'pangea-desktop-update.json'
 export type UpdateFetch = (url: string, init: RequestInit) => Promise<Response>
 interface Asset { name: string; size: number; browser_download_url: string; state: string }
 export interface OnlineUpdate {
+  releaseNotes?: UpdateReleaseNotes
+  publishedAt?: string
   packageType?: 'full' | 'patch'
   baseVersion?: string
   releaseId: number

@@ -3,7 +3,8 @@ import type { UpdateStatus } from '../../shared/contracts'
 export type UpdateStateEvent =
   | { type: 'check'; manual: boolean; packageName?: string; source?: 'intranet' }
   | { type: 'up-to-date' }
-  | { type: 'available'; version: string; packageSize: number }
+  | { type: 'available'; version: string; packageSize: number; releaseNotes?: UpdateStatus['releaseNotes']; publishedAt?: string }
+  | { type: 'release-info'; releaseNotes?: UpdateStatus['releaseNotes']; publishedAt?: string }
   | { type: 'network'; summary: string }
   | { type: 'online-download'; version: string; packageName: string }
   | { type: 'verify' }
@@ -28,10 +29,12 @@ export function reduceUpdateStatus(
   switch (event.type) {
     case 'check':
       return { ...base, phase: 'checking', manual: event.manual, source: event.source, networkSummary: undefined, ...(event.packageName ? { packageName: event.packageName } : {}) }
+    case 'release-info':
+      return { ...current, releaseNotes: event.releaseNotes, publishedAt: event.publishedAt }
     case 'network':
       return { ...current, networkSummary: event.summary }
     case 'available':
-      return { ...base, phase: 'available', availableVersion: event.version, packageSize: event.packageSize }
+      return { ...base, phase: 'available', availableVersion: event.version, packageSize: event.packageSize, releaseNotes: event.releaseNotes, publishedAt: event.publishedAt }
     case 'up-to-date':
       return { ...base, phase: 'up-to-date' }
     case 'online-download':
@@ -44,6 +47,7 @@ export function reduceUpdateStatus(
       return {
         ...base,
         phase: 'downloaded',
+        releaseNotes: current.releaseNotes, publishedAt: current.publishedAt,
         ...(current.packageName ? { packageName: current.packageName } : {}),
         availableVersion: event.version,
         ...(event.packageType ? { packageType: event.packageType } : {}),

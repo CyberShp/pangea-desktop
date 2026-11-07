@@ -59,8 +59,9 @@ beforeAll(async () => {
     '--private-key', join(root, 'private.pem'), '--output', join(root, 'base-dist', 'pangea-desktop-2.1.17-windows-x64-portable.zip'), '--version', '2.1.17'])
   execFileSync(process.execPath, ['scripts/create-signed-portable-patch.mjs', '--base-dir', base, '--target-dir', app,
     '--private-key', join(root, 'private.pem'), '--output', join(root, 'dist', 'patch.zip'), '--from-version', '2.1.17', '--to-version', version, '--channel', 'stable'])
+  await writeFile(join(root, 'notes.json'), JSON.stringify({ [version]: { features: ['更方便地查看更新说明'], fixes: [], notices: [] } }))
   execFileSync(process.execPath, ['scripts/create-intranet-update-index.mjs', '--directory', join(root, 'dist'),
-    '--public-key', join(resources, 'update', 'pangea-update-public-key.pem'), '--full-remote-name', 'pangea-desktop.zip'])
+    '--public-key', join(resources, 'update', 'pangea-update-public-key.pem'), '--full-remote-name', 'pangea-desktop.zip', '--release-notes', join(root, 'notes.json')])
   intranetIndex = JSON.parse(await readFile(join(root, 'dist', 'latest.json'), 'utf8'))
   const uploadList = JSON.parse(await readFile(join(root, 'dist', 'intranet-upload-list.json'), 'utf8'))
   expect(new URL(intranetIndex.full_url, 'https://pangea.rnd.huawei.com/api/tools/27/files/download').searchParams.get('path')).toBe(`stable/windows/x64/${version}/pangea-desktop.zip`)
@@ -245,4 +246,31 @@ it('ignores legacy GitHub configuration and registers no settings handlers', asy
   manager.registerUpdateHandlers()
   const { ipcMain } = await import('electron')
   expect(vi.mocked(ipcMain.handle).mock.calls.map(([name]) => name)).not.toContain('updates:network-save')
+})
+
+it('carries curated notes from the generated index through check and download', async () => {
+  const checked = await manager.checkForOnlineUpdate()
+  expect(checked.releaseNotes?.features).toEqual(['更方便地查看更新说明'])
+  expect(Number.isFinite(Date.parse(checked.publishedAt!))).toBe(true)
+  expect((await manager.downloadOnlineUpdate()).releaseNotes).toEqual(checked.releaseNotes)
+})
+it('persists one automatic reminder per version while allowing manual viewing', async () => {
+  await rm(join(root, 'profile', 'update-notice.json'), { force: true })
+  manager.registerUpdateHandlers()
+  await manager.checkForOnlineUpdate(false)
+  const { ipcMain } = await import('electron')
+  const handler = vi.mocked(ipcMain.handle).mock.calls.find(([name]) => name === 'updates:claim-notice')![1]
+  expect(handler({} as any, 'wrong')).toBe(false)
+  expect(handler({} as any, version)).toBe(true)
+  expect(handler({} as any, version)).toBe(false)
+  manager.stopUpdateManager()
+  vi.resetModules()
+  manager = await import('../src/main/update/update-manager')
+  manager.startUpdateManager({ prepareToInstall: mocks.admission })
+  manager.registerUpdateHandlers()
+  await manager.checkForOnlineUpdate(false)
+  const { ipcMain: restartedIpc } = await import('electron')
+  const restarted = vi.mocked(restartedIpc.handle).mock.calls.filter(([name]) => name === 'updates:claim-notice').at(-1)![1]
+  expect(restarted({} as any, version)).toBe(false)
+  expect(await manager.checkForOnlineUpdate(true)).toMatchObject({ phase: 'available', manual: true, releaseNotes: { features: ['更方便地查看更新说明'] } })
 })

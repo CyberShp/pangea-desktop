@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
@@ -34,6 +34,7 @@ let status = initialUpdateStatus(app.getVersion())
 type ReleaseUpdateAdmission = () => Promise<void>
 let prepareToInstall: ((force?: boolean) => Promise<void | ReleaseUpdateAdmission>) | undefined
 let handlersRegistered = false
+let lastNotifiedVersion: string | undefined
 let onlineController: AbortController | undefined
 let startupTimer: ReturnType<typeof setTimeout> | undefined
 let importing = false
@@ -51,6 +52,15 @@ export function getUpdateStatus(): UpdateStatus {
 export function registerUpdateHandlers(): void {
   if (handlersRegistered) return
   handlersRegistered = true
+  ipcMain.handle('updates:claim-notice', (_event, version: unknown) => {
+    if (status.phase !== 'available' || status.manual || version !== status.availableVersion || typeof version !== 'string') return false
+    const path = join(app.getPath('userData'), 'update-notice.json')
+    if (lastNotifiedVersion === version) return false
+    try { if (JSON.parse(readFileSync(path, 'utf8')).version === version) return false } catch { /* first notification */ }
+    lastNotifiedVersion = version
+    try { mkdirSync(app.getPath('userData'), { recursive: true }); writeFileSync(path, JSON.stringify({ version })) } catch { /* retain session deduplication */ }
+    return true
+  })
   ipcMain.handle('updates:status', () => getUpdateStatus())
   ipcMain.handle('updates:check', () => checkForOnlineUpdate(true))
   ipcMain.handle('updates:download', () => downloadOnlineUpdate())
@@ -87,6 +97,7 @@ async function runOnlineUpdate(manual: boolean, download: boolean): Promise<Upda
     // Explicit checking also reopens a previously dismissed ready card.
     const ready = getUpdateStatus()
     transition({ type: 'check', manual, source: ready.source })
+    transition({ type: 'release-info', releaseNotes: ready.releaseNotes, publishedAt: ready.publishedAt })
     transition({ type: 'downloaded', version: ready.availableVersion!, packageType: ready.packageType, baseVersion: ready.baseVersion })
     return getUpdateStatus()
   }
@@ -115,8 +126,9 @@ async function runOnlineUpdate(manual: boolean, download: boolean): Promise<Upda
       transition({ type: 'up-to-date' })
       return getUpdateStatus()
     }
+    transition({ type: 'release-info', releaseNotes: update.releaseNotes, publishedAt: update.publishedAt })
     if (!download) {
-      transition({ type: 'available', version: update.version, packageSize: update.asset.size })
+      transition({ type: 'available', version: update.version, packageSize: update.asset.size, releaseNotes: update.releaseNotes, publishedAt: update.publishedAt })
       return getUpdateStatus()
     }
     await clearStagedPackage()

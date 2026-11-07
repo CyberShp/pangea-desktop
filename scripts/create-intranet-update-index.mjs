@@ -6,7 +6,7 @@ import unzipper from 'unzipper'
 import { sha256 } from './release-package-trust.mjs'
 
 // No private signing key is needed on the upload workstation.
-export async function createIntranetIndex({ directory, downloadUrl, publicKeyFile, root = '', fullRemoteName }) {
+export async function createIntranetIndex({ directory, downloadUrl, publicKeyFile, root = '', fullRemoteName, releaseNotesFile }) {
   const base = new URL(downloadUrl ?? 'https://intranet.invalid/download')
   if (base.protocol !== 'https:' || base.username || base.password || base.hash) throw new Error('download-url must be an HTTPS download endpoint without credentials')
   if (base.searchParams.has('path')) throw new Error('download-url must omit path; use --root for the storage prefix')
@@ -49,7 +49,11 @@ export async function createIntranetIndex({ directory, downloadUrl, publicKeyFil
     patches.push({ name, from_version: patch.from_version, to_version: patch.to_version, size: (await stat(path.join(directory, name))).size, sha256: await sha256(path.join(directory, name)), url: url(`${versionPath}/${name}`) })
     uploads.push(name)
   }
-  const index = { schema_version: 1, product: 'PANGEA Desktop', channel: manifest.channel, platform: 'win32', arch: 'x64', version: manifest.version,
+  // A version-keyed editorial file prevents stale notes from appearing on a new release.
+  const catalog = releaseNotesFile ? JSON.parse(await readFile(releaseNotesFile, 'utf8')) : {}
+  const notes = catalog[manifest.version] ?? catalog[manifest.version.split('-')[0]]
+  if (notes !== undefined && (!notes || typeof notes !== 'object' || Array.isArray(notes) || Object.keys(notes).some(key => !['features', 'fixes', 'notices'].includes(key)) || Object.values(notes).some(items => !Array.isArray(items) || items.length > 30 || items.some(item => typeof item !== 'string' || !item.trim() || item.length > 1000)))) throw new Error('Release notes must contain curated features/fixes/notices text lists')
+  const index = { published_at: new Date().toISOString(), ...(notes ? { release_notes: notes } : {}), schema_version: 1, product: 'PANGEA Desktop', channel: manifest.channel, platform: 'win32', arch: 'x64', version: manifest.version,
     manifest_url: url(`${versionPath}/${manifestName}`), signature_url: url(`${versionPath}/${manifestName}.sig`), full_url: url(`${versionPath}/${remoteName}`), patches }
   await writeFile(path.join(directory, 'latest.json'), JSON.stringify(index, null, 2) + '\n')
   const uploadList = { upload_first: uploads.map(name => {
@@ -63,6 +67,6 @@ export async function createIntranetIndex({ directory, downloadUrl, publicKeyFil
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const args = Object.fromEntries(Array.from({ length: (process.argv.length - 2) / 2 }, (_, i) => [process.argv[2 + i * 2].replace(/^--/, ''), process.argv[3 + i * 2]]))
-  await createIntranetIndex({ directory: path.resolve(args.directory ?? 'dist'), downloadUrl: args['download-url'], publicKeyFile: args['public-key'], root: args.root ?? '', fullRemoteName: args['full-remote-name'] })
+  await createIntranetIndex({ directory: path.resolve(args.directory ?? 'dist'), downloadUrl: args['download-url'], publicKeyFile: args['public-key'], root: args.root ?? '', fullRemoteName: args['full-remote-name'], releaseNotesFile: args['release-notes'] })
   console.log('Created latest.json and intranet-upload-list.json. Upload and verify version files first; publish latest.json last.')
 }

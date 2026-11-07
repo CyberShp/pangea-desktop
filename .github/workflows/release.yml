@@ -223,7 +223,8 @@ jobs:
           node scripts/create-intranet-update-index.mjs `
             --directory ./dist `
             --public-key ./dist/win-unpacked/resources/update/pangea-update-public-key.pem `
-            --full-remote-name pangea-desktop.zip
+            --full-remote-name pangea-desktop.zip `
+            --release-notes ./build/release-notes.json
           if ($LASTEXITCODE -ne 0) { throw 'Intranet index generation failed; no release will be published.' }
 
       - name: Upload workflow artifact

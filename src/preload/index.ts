@@ -1,3 +1,4 @@
+import { createUpdateReleaseView } from './update-release-view'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { UpdateInstallResult, UpdateStatus } from '../shared/contracts'
 import {
@@ -22,6 +23,11 @@ const locale: UpdateLocale = navigator.language.toLowerCase().startsWith('zh') ?
 
 let host: HTMLDivElement | undefined
 let content: HTMLDivElement | undefined
+const releaseView = createUpdateReleaseView({
+  claim: version => ipcRenderer.invoke('updates:claim-notice', version),
+  download: () => ipcRenderer.invoke('updates:download')
+})
+
 let currentStatus: UpdateStatus | undefined
 let dismissedVersion: string | null = null
 let dismissedTransientPhase: UpdateStatus['phase'] | null = null
@@ -221,6 +227,7 @@ function initializeUi(): void {
     mountWindowsTheme({ document, ipcRenderer })
   }
   mount()
+  if (currentStatus) void releaseView.update(currentStatus).catch(() => {})
   mountMobileButton()
   checkBootFailureInDom()
   domObserver.observe(document.documentElement, {
@@ -250,7 +257,7 @@ window.addEventListener('unhandledrejection', (event) => {
 
 contextBridge.exposeInMainWorld(
   'dshDesktop',
-  createDesktopBridge(ipcRenderer)
+  createDesktopBridge(ipcRenderer, async () => releaseView.open(await ipcRenderer.invoke('updates:status')))
 )
 
 contextBridge.exposeInMainWorld(
@@ -298,6 +305,7 @@ function applyStatus(status: UpdateStatus): void {
     dismissedTransientPhase = null
   }
   currentStatus = status
+  if (document.readyState !== 'loading') void releaseView.update(status).catch(() => {})
   if (host) {
     host.dataset.updatePhase = status.phase
     host.dataset.updateManual = String(status.manual)
@@ -310,6 +318,7 @@ function render(): void {
   if (!host || !content || !currentStatus) return
 
   if (
+    currentStatus.phase === 'available' ||
     !shouldShowUpdate(currentStatus) ||
     isUpdateDismissed(currentStatus, dismissedVersion, dismissedTransientPhase)
   ) {

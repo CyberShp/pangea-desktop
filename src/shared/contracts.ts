@@ -24,7 +24,15 @@ export type UpdatePhase =
   | 'error'
   | 'unsupported'
 
+export interface UpdateReleaseNotes {
+  features: string[]
+  fixes: string[]
+  notices: string[]
+}
+
 export interface UpdateStatus {
+  releaseNotes?: UpdateReleaseNotes
+  publishedAt?: string
   phase: UpdatePhase
   currentVersion: string
   source?: 'intranet'

@@ -1,3 +1,4 @@
+import { readReleaseNotes } from '../../shared/update-release-notes'
 import { createPublicKey, verify } from 'node:crypto'
 import { OnlineUpdateDownloader, type OnlineUpdate, type UpdateFetch } from './online-update'
 import { isNewerPortableVersion, portableUpdateChannelForVersion } from './portable-update'
@@ -56,6 +57,8 @@ export class IntranetUpdateClient extends OnlineUpdateDownloader {
     const item = selected ?? manifest.package
     return {
       releaseId: 0, version, sha256: item.sha256,
+      releaseNotes: readReleaseNotes(index.release_notes),
+      publishedAt: typeof index.published_at === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(index.published_at) && Number.isFinite(Date.parse(index.published_at)) ? index.published_at : undefined,
       packageType: selected ? 'patch' : 'full', baseVersion: selected?.from_version,
       asset: { name: item.name, size: item.size, state: 'uploaded', browser_download_url: selected ? url(selected.url) : fullUrl }
     }

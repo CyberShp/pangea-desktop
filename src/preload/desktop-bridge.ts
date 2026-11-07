@@ -12,6 +12,7 @@ export interface DshDesktopBridge {
   restartHarness(): Promise<{ ok: boolean }>
   getUpdateStatus(): Promise<UpdateStatus>
   checkForUpdates(): Promise<UpdateStatus>
+  showUpdateNotes(): Promise<void>
   downloadUpdate(): Promise<UpdateStatus>
   importUpdatePackage(): Promise<UpdateStatus>
   installUpdate(): Promise<UpdateInstallResult>
@@ -19,7 +20,7 @@ export interface DshDesktopBridge {
   unsubscribeUpdateStatus(subscriptionId: number): void
 }
 
-export function createDesktopBridge(ipc: DesktopBridgeIpc): Readonly<DshDesktopBridge> {
+export function createDesktopBridge(ipc: DesktopBridgeIpc, showUpdateNotes: () => Promise<void> = async () => {}): Readonly<DshDesktopBridge> {
   let subscriptionSequence = 0
   const subscriptions = new Map<number, (...args: unknown[]) => void>()
 
@@ -33,6 +34,7 @@ export function createDesktopBridge(ipc: DesktopBridgeIpc): Readonly<DshDesktopB
     getUpdateStatus: (): Promise<UpdateStatus> =>
       ipc.invoke('updates:status') as Promise<UpdateStatus>,
     checkForUpdates: (): Promise<UpdateStatus> => ipc.invoke('updates:check') as Promise<UpdateStatus>,
+    showUpdateNotes,
     downloadUpdate: (): Promise<UpdateStatus> => ipc.invoke('updates:download') as Promise<UpdateStatus>,
     importUpdatePackage: (): Promise<UpdateStatus> =>
       ipc.invoke('updates:import') as Promise<UpdateStatus>,
