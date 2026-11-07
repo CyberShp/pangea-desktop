@@ -9,7 +9,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), getPath: vi.fn(), launch: vi.fn(), quit: vi.fn(), admission: vi.fn(), messages: [] as any[] }))
 vi.mock('electron', () => ({
-  app: { getVersion: () => '2.1.15', getPath: mocks.getPath, isPackaged: true, quit: mocks.quit },
+  app: { getVersion: () => '2.1.17', getPath: mocks.getPath, isPackaged: true, quit: mocks.quit },
   BrowserWindow: { fromWebContents: () => ({}), getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: (_: string, status: unknown) => mocks.messages.push(status) } }] },
   dialog: {}, ipcMain: { handle: vi.fn() }, net: { fetch: mocks.fetch }
 }))
@@ -25,7 +25,7 @@ let intranetIndex: any
 let intranetUrl: string
 const intranetResponses = new Map<string, Buffer>()
 const responses = new Map<string, Buffer>()
-const version = '2.1.16'
+const version = '2.1.18'
 const name = `pangea-desktop-${version}-windows-x64-portable.zip`
 const prefix = `https://github.com/CyberShp/pangea-desktop/releases/download/v${version}/`
 
@@ -53,12 +53,12 @@ beforeAll(async () => {
   const base = join(root, 'base')
   await cp(app, base, { recursive: true })
   await writeFile(join(base, 'PANGEA Desktop.exe'), 'baseline executable')
-  await writeFile(join(base, 'resources', 'pangea-manifest.json'), JSON.stringify({ product: { version: '2.1.15' }, components: { agent: { commit: 'a'.repeat(40) } } }))
+  await writeFile(join(base, 'resources', 'pangea-manifest.json'), JSON.stringify({ product: { version: '2.1.17' }, components: { agent: { commit: 'a'.repeat(40) } } }))
   await mkdir(join(root, 'base-dist'))
   execFileSync(process.execPath, ['scripts/create-signed-portable-package.mjs', '--app-dir', base,
-    '--private-key', join(root, 'private.pem'), '--output', join(root, 'base-dist', 'pangea-desktop-2.1.15-windows-x64-portable.zip'), '--version', '2.1.15'])
+    '--private-key', join(root, 'private.pem'), '--output', join(root, 'base-dist', 'pangea-desktop-2.1.17-windows-x64-portable.zip'), '--version', '2.1.17'])
   execFileSync(process.execPath, ['scripts/create-signed-portable-patch.mjs', '--base-dir', base, '--target-dir', app,
-    '--private-key', join(root, 'private.pem'), '--output', join(root, 'dist', 'patch.zip'), '--from-version', '2.1.15', '--to-version', version, '--channel', 'stable'])
+    '--private-key', join(root, 'private.pem'), '--output', join(root, 'dist', 'patch.zip'), '--from-version', '2.1.17', '--to-version', version, '--channel', 'stable'])
   execFileSync(process.execPath, ['scripts/create-intranet-update-index.mjs', '--directory', join(root, 'dist'),
     '--public-key', join(resources, 'update', 'pangea-update-public-key.pem'), '--download-url', 'https://updates.example/api/tools/tool/files/download', '--root', 'tool root', '--full-remote-name', 'pangea-desktop.zip'])
   intranetIndex = JSON.parse(await readFile(join(root, 'dist', 'latest.json'), 'utf8'))
@@ -103,7 +103,7 @@ describe('online update production pipeline with simulated GitHub and Windows la
   })
   it('revalidates a changed release before an explicit download', async () => {
     await manager.checkForOnlineUpdate(false)
-    release.tag_name = 'v2.1.15'
+    release.tag_name = 'v2.1.17'
     expect((await manager.downloadOnlineUpdate()).phase).toBe('up-to-date')
     expect(mocks.fetch.mock.calls.map(([url]) => url)).not.toContain(prefix + name)
   })
@@ -169,7 +169,7 @@ describe('online update production pipeline with simulated GitHub and Windows la
     expect(mocks.fetch).toHaveBeenCalledTimes(count)
   })
   it('reports no-update and network failures without invoking installation', async () => {
-    release.tag_name = 'v2.1.15'
+    release.tag_name = 'v2.1.17'
     expect((await manager.downloadOnlineUpdate()).phase).toBe('up-to-date')
     mocks.fetch.mockResolvedValueOnce(new Response('', { status: 403 }))
     expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'error', source: 'github', manual: true })
@@ -188,10 +188,10 @@ it('generates query URLs and uses a real signed patch through the online install
   await enableIntranet()
   expect(await manager.checkForOnlineUpdate()).toMatchObject({ phase: 'available', source: 'intranet' })
   expect(mocks.fetch).toHaveBeenCalledTimes(3)
-  expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'downloaded', source: 'intranet', packageType: 'patch', baseVersion: '2.1.15', availableVersion: version })
+  expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'downloaded', source: 'intranet', packageType: 'patch', baseVersion: '2.1.17', availableVersion: version })
   expect(mocks.fetch.mock.calls.every(([url]) => url.startsWith('https://updates.example/'))).toBe(true)
   mocks.launch.mockImplementation(async (_: string, planPath: string) => {
-    expect(JSON.parse(await readFile(planPath, 'utf8'))).toMatchObject({ package_type: 'patch', expected_version: version, expected_base_version: '2.1.15' })
+    expect(JSON.parse(await readFile(planPath, 'utf8'))).toMatchObject({ package_type: 'patch', expected_version: version, expected_base_version: '2.1.17' })
   })
   vi.useFakeTimers()
   expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: true })

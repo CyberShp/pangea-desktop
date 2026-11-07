@@ -69,7 +69,7 @@ $script:UpdateForm=$null
 $script:PortableIOWorker=$false
 $script:UnsafeIOWorker=$false
 $Plan=@{package_channel='stable'}
-$ExpectedVersion='2.1.16'; $ExpectedBaseVersion='2.1.15'
+$ExpectedVersion='2.1.18'; $ExpectedBaseVersion='2.1.17'
 $Quote={param($Value) "'"+$Value.Replace("'","''")+"'"}
 $Shell="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 try {

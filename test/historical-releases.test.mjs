@@ -21,8 +21,8 @@ test('exact supported channel and numeric version ordering', () => {
   for (const invalid of ['2.0.01','v2.0.1','2.0.1-beta.1','../../x']) assert.equal(parseVersion(invalid), null)
 })
 test('every release receives explicit compatibility classification', () => {
-  assert.equal(classifyRelease({tag_name:'v2.1.17'}, '2.1.18', 'stable').status, 'pending')
-  for (const release of [{tag_name:'v2.1.18'}, {tag_name:'v2.2.0'}, {tag_name:'v2.1.17',draft:true}, {tag_name:'bad'}, {tag_name:'2.1.17'}, {tag_name:'v2.1.17-test.1.abcdef0'}]) assert.equal(classifyRelease(release,'2.1.18','stable').status,'unsupported')
+  assert.equal(classifyRelease({tag_name:'v2.1.19'}, '2.1.20', 'stable').status, 'pending')
+  for (const release of [{tag_name:'v2.1.20'}, {tag_name:'v2.2.0'}, {tag_name:'v2.1.19',draft:true}, {tag_name:'bad'}, {tag_name:'2.1.19'}, {tag_name:'v2.1.19-test.1.abcdef0'}]) assert.equal(classifyRelease(release,'2.1.20','stable').status,'unsupported')
 })
 test('requires exact platform architecture ZIP and checksum pair', () => {
   assert.equal(assetPair([{name:'full.zip'}], 'full.zip'), false)
@@ -34,12 +34,12 @@ test('strict CLI inputs', () => {
   assert.throws(() => args(['--mode','build','--mode','backfill']), /Duplicate/)
 })
 test('publication only allows verified exact-name patches and explicit fallback exclusions', () => {
-  const row={version:'2.1.17',status:'verified',patch:patchName('2.1.18','2.1.17'),patch_sha256:'a'.repeat(64)}
-  const report={target:'2.1.18', discovery_complete:true, bases:[row,{status:'missing'}]}
-  assert.equal(publicationNames('2.1.18',report).length,2)
-  for(const status of ['pending','failed','unknown']) assert.throws(()=>publicationNames('2.1.18',{...report,bases:[{...row,status}]}),/unverified/)
-  assert.throws(()=>publicationNames('2.1.18',{...report,bases:[{...row,patch:'../x'}]}),/Invalid/)
-  assert.throws(()=>publicationNames('2.1.19',report),/Invalid/)
+  const row={version:'2.1.19',status:'verified',patch:patchName('2.1.20','2.1.19'),patch_sha256:'a'.repeat(64)}
+  const report={target:'2.1.20', discovery_complete:true, bases:[row,{status:'missing'}]}
+  assert.equal(publicationNames('2.1.20',report).length,2)
+  for(const status of ['pending','failed','unknown']) assert.throws(()=>publicationNames('2.1.20',{...report,bases:[{...row,status}]}),/unverified/)
+  assert.throws(()=>publicationNames('2.1.20',{...report,bases:[{...row,patch:'../x'}]}),/Invalid/)
+  assert.throws(()=>publicationNames('2.1.21',report),/Invalid/)
 })
 
 test('sidecars bind the exact artifact name and complete SHA-256', async () => {
@@ -69,26 +69,26 @@ test('concurrent pagination duplicates do not build a baseline twice and ambigui
   assert.throws(() => uniqueReleases([{ tag_name: 'v1.0.0' }]), /Invalid/)
 })
 
-test('retires every pre-2.1.15 baseline before download eligibility, in both channels', () => {
-  for (const version of ['0.1.6', '1.0.3', '1.99.99', '1.99.99-test.999.abcdef0', '2.0.0', '2.0.1', '2.0.6', '2.0.6-test.999.abcdef0', '2.0.7', '2.1.14', '2.1.14-test.999.abcdef0']) {
+test('retires every pre-2.1.17 baseline before download eligibility, in both channels', () => {
+  for (const version of ['0.1.6', '1.0.3', '1.99.99', '1.99.99-test.999.abcdef0', '2.0.0', '2.0.1', '2.0.6', '2.0.6-test.999.abcdef0', '2.0.7', '2.1.15', '2.1.15-test.1.abcdef0', '2.1.16', '2.1.16-test.999.abcdef0']) {
     assert.equal(isSupportedPatchBase(version), false)
     const channel = parseVersion(version).channel
-    const target = channel === 'stable' ? '2.1.16' : '2.1.16-test.1.abcdef0'
+    const target = channel === 'stable' ? '2.1.18' : '2.1.18-test.1.abcdef0'
     const row = classifyRelease({ tag_name: `v${version}` }, target, channel)
     assert.equal(row.status, 'unsupported')
-    assert.match(row.reason, /minimum supported patch baseline 2.1.15/)
+    assert.match(row.reason, /minimum supported patch baseline 2.1.17/)
   }
-  assert.equal(isSupportedPatchBase('2.1.15'), true)
-  assert.equal(isSupportedPatchBase('2.1.15-test.1.abcdef0'), true)
-  assert.equal(classifyRelease({tag_name:'v2.1.15'}, '2.1.16', 'stable').status, 'pending')
-  assert.equal(classifyRelease({tag_name:'v2.1.15-test.1.abcdef0'}, '2.1.16-test.1.abcdef0', 'test').status, 'pending')
+  assert.equal(isSupportedPatchBase('2.1.17'), true)
+  assert.equal(isSupportedPatchBase('2.1.17-test.1.abcdef0'), true)
+  assert.equal(classifyRelease({tag_name:'v2.1.17'}, '2.1.18', 'stable').status, 'pending')
+  assert.equal(classifyRelease({tag_name:'v2.1.17-test.1.abcdef0'}, '2.1.18-test.1.abcdef0', 'test').status, 'pending')
 })
 
 test('publisher rejects stale reports advertising retired sources despite a verified status', () => {
-  for (const version of ['1.0.9', '2.0.0', '2.0.6', '2.0.6-test.99.abcdef0', '2.1.14', '2.1.14-test.99.abcdef0']) {
-    assert.throws(() => publicationNames('2.1.16', {
-      target:'2.1.16', discovery_complete:true, bases:[{
-        version, status:'verified', patch:patchName('2.1.16',version), patch_sha256:'a'.repeat(64)
+  for (const version of ['1.0.9', '2.0.0', '2.0.6', '2.0.6-test.99.abcdef0', '2.1.16', '2.1.16-test.99.abcdef0']) {
+    assert.throws(() => publicationNames('2.1.18', {
+      target:'2.1.18', discovery_complete:true, bases:[{
+        version, status:'verified', patch:patchName('2.1.18',version), patch_sha256:'a'.repeat(64)
       }]
     }), /Invalid verified patch record/)
   }

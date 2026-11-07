@@ -190,7 +190,7 @@ try {
 
   $Policy=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../build/portable-update-policy.json') -Raw | ConvertFrom-Json
   $Fixture=New-Fixture (Join-Path $TestRoot 'source-policy')
-  foreach ($Version in @('2.1.14','2.1.14-test.17.abcdef','2.1.15','2.1.15-test.17.abcdef','2.1.16','2.1.16-test.17.abcdef')) {
+  foreach ($Version in @('2.1.16','2.1.16-test.17.abcdef','2.1.17','2.1.17-test.17.abcdef','2.1.18','2.1.18-test.17.abcdef')) {
     Write-FixtureVersion $Fixture.Install $Version 'original work'
     $Accepted=$true
     try { Assert-PortableUpgradeSourceVersion $Fixture.Install 'patch' $Version | Out-Null } catch { $Accepted=$false }
@@ -198,7 +198,7 @@ try {
     if ($Accepted -ne ($Numeric -ge [version]$Policy.minimum_source_version)) { throw "Signed helper source policy differs from shared policy: $Version" }
   }
   $Rejected=$false
-  try { Assert-PortableUpgradeSourceVersion $Fixture.Install 'patch' '2.1.15' | Out-Null } catch { $Rejected=$true }
+  try { Assert-PortableUpgradeSourceVersion $Fixture.Install 'patch' '2.1.17' | Out-Null } catch { $Rejected=$true }
   if (-not $Rejected) { throw 'Mismatched patch base was accepted.' }
   Write-Output 'PASS: stable/test source-version boundaries match shared policy and patch base is independently checked'
   if ((Get-PortableStartupHealthTimeout ([pscustomobject]@{})) -ne 300) { throw 'Legacy plans must use the 300-second health deadline.' }
