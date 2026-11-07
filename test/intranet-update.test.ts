@@ -8,7 +8,7 @@ import { IntranetUpdateClient, intranetIndexUrl } from '../src/main/update/intra
 const keys = generateKeyPairSync('ed25519')
 const pem = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString()
 function fixture() {
-  const url = (file: string) => `https://updates.example:8443/api/tools/pangea/files/download?path=${encodeURIComponent('stable/windows/x64/' + file)}`
+  const url = (file: string) => `https://updates.example:8443/api/tools/pangea/files/download?path=${encodeURIComponent('stable/' + file)}`
   const full = Buffer.from('full package fixture')
   const patch = Buffer.from('patch')
   const info = (name: string, bytes: Buffer) => ({ name, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') })
@@ -72,8 +72,8 @@ it('rejects duplicate baselines and invalid source settings', async () => {
 })
 
 it('maps stable and test versions to separate built-in indexes', () => {
-  expect(new URL(intranetIndexUrl('2.1.19')).searchParams.get('path')).toBe('stable/windows/x64/latest.json')
-  expect(new URL(intranetIndexUrl('2.1.20-test.1.abcdef0')).searchParams.get('path')).toBe('beta/windows/x64/latest.json')
+  expect(new URL(intranetIndexUrl('2.1.19')).searchParams.get('path')).toBe('stable/latest.json')
+  expect(new URL(intranetIndexUrl('2.1.20-test.1.abcdef0')).searchParams.get('path')).toBe('beta/latest.json')
 })
 
 it('does not offer the installed or an older version', async () => {

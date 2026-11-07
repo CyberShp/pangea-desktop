@@ -64,8 +64,8 @@ beforeAll(async () => {
     '--public-key', join(resources, 'update', 'pangea-update-public-key.pem'), '--full-remote-name', 'pangea-desktop.zip', '--release-notes', join(root, 'notes.json')])
   intranetIndex = JSON.parse(await readFile(join(root, 'dist', 'latest.json'), 'utf8'))
   const uploadList = JSON.parse(await readFile(join(root, 'dist', 'intranet-upload-list.json'), 'utf8'))
-  expect(new URL(intranetIndex.full_url, 'https://pangea.rnd.huawei.com/api/tools/27/files/download').searchParams.get('path')).toBe(`stable/windows/x64/${version}/pangea-desktop.zip`)
-  expect(uploadList.upload_first.find((file: any) => file.local === name).path).toBe(`stable/windows/x64/${version}/pangea-desktop.zip`)
+  expect(new URL(intranetIndex.full_url, 'https://pangea.rnd.huawei.com/api/tools/27/files/download').searchParams.get('path')).toBe(`stable/${version}/pangea-desktop.zip`)
+  expect(uploadList.upload_first.find((file: any) => file.local === name).path).toBe(`stable/${version}/pangea-desktop.zip`)
   intranetUrl = new URL(uploadList.publish_last.url, 'https://pangea.rnd.huawei.com/api/tools/27/files/download').href
   expect(intranetIndex.full_url.startsWith('?path=')).toBe(true)
   expect(JSON.stringify(intranetIndex)).not.toContain('https://')

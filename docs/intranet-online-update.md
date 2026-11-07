@@ -6,7 +6,7 @@
 ## 客户端使用
 
 Windows x64 客户端固定使用内置内网源，无需填写地址。正式版读取
-`stable/windows/x64/latest.json`，测试版读取 `beta/windows/x64/latest.json`。
+`stable/latest.json`，测试版读取 `beta/latest.json`。
 设置页、菜单和错误提示均不再提供更新网络配置入口；旧 `update-network.json` 不再读取。
 启动自动检查，下载和重启安装仍分别由用户触发；保留离线升级包导入。
 
@@ -20,7 +20,7 @@ Windows x64 客户端固定使用内置内网源，无需填写地址。正式�
 同时附加到 workflow artifact 和 GitHub Release。大包的服务端名称固定为 `pangea-desktop.zip`，
 补丁保留原名。无需在 CI 配置内网域名，也不会访问内网。
 
-构建生成的 URL 使用 `?path=stable%2Fwindows%2Fx64%2F...` 查询相对地址，Desktop 沿用
+构建生成的 URL 使用 `?path=stable%2F...` 查询相对地址，Desktop 沿用
 用户配置的索引 URL 的 HTTPS 域名、端口和下载接口路径。用户仍填写完整的索引下载 URL。
 默认 `path` 相对于工具根，没有额外根前缀。索引内的相对 URL 不能单独当作浏览器完整地址。
 
@@ -59,8 +59,8 @@ node scripts/create-intranet-update-index.mjs --directory D:/release-upload --pu
 - `latest.json`：客户端入口索引。
 - `intranet-upload-list.json`：每个文件的上传路径、下载核对 URL，以及最后发布的入口 URL。
 
-目录为 `stable/windows/x64/{version}/`；签名通道 `test` 映射到 `beta/windows/x64/{version}/`。
-入口分别是 `stable/windows/x64/latest.json` 和 `beta/windows/x64/latest.json`。
+目录为 `stable/{version}/`；签名通道 `test` 映射到 `beta/{version}/`。
+入口分别是 `stable/latest.json` 和 `beta/latest.json`。
 每个基线只能有一个补丁；不要将不同目标版本的附件混在同一目录。
 
 ## 发布顺序
@@ -83,9 +83,9 @@ node scripts/create-intranet-update-index.mjs --directory D:/release-upload --pu
   "platform": "win32",
   "arch": "x64",
   "version": "2.1.16",
-  "manifest_url": "https://updates.example/download?path=stable%2Fwindows%2Fx64%2F2.1.16%2Fpangea-desktop-update.json",
-  "signature_url": "https://updates.example/download?path=stable%2Fwindows%2Fx64%2F2.1.16%2Fpangea-desktop-update.json.sig",
-  "full_url": "https://updates.example/download?path=stable%2Fwindows%2Fx64%2F2.1.16%2Fpangea-desktop-2.1.16-windows-x64-portable.zip",
+  "manifest_url": "https://updates.example/download?path=stable%2F2.1.16%2Fpangea-desktop-update.json",
+  "signature_url": "https://updates.example/download?path=stable%2F2.1.16%2Fpangea-desktop-update.json.sig",
+  "full_url": "https://updates.example/download?path=stable%2F2.1.16%2Fpangea-desktop-2.1.16-windows-x64-portable.zip",
   "patches": []
 }
 ```

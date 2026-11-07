@@ -26,7 +26,7 @@ export async function createIntranetIndex({ directory, downloadUrl, publicKeyFil
   if (typeof remoteName !== 'string' || !/^[a-zA-Z0-9._-]+\.zip$/.test(remoteName)) throw new Error('full-remote-name must be a ZIP filename without directories')
   if ((await stat(path.join(directory, full.name))).size !== full.size || await sha256(path.join(directory, full.name)) !== full.sha256) throw new Error('Full package size/hash mismatch')
   const channelDirectory = manifest.channel === 'test' ? 'beta' : 'stable'
-  const prefix = [root.replace(/^\/+|\/+$/g, ''), channelDirectory, 'windows', 'x64'].filter(Boolean).join('/')
+  const prefix = [root.replace(/^\/+|\/+$/g, ''), channelDirectory].filter(Boolean).join('/')
   const versionPath = `${prefix}/${manifest.version}`
   const url = relative => { const target = new URL(base); target.searchParams.set('path', relative); return downloadUrl === undefined ? target.search : target.href }
   const patches = []

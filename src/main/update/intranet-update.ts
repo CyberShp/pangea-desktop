@@ -6,7 +6,7 @@ import { isNewerPortableVersion, portableUpdateChannelForVersion } from './porta
 export const INTRANET_UPDATE_ORIGIN = 'https://pangea.rnd.huawei.com'
 export function intranetIndexUrl(version: string): string {
   const directory = portableUpdateChannelForVersion(version) === 'test' ? 'beta' : 'stable'
-  return `${INTRANET_UPDATE_ORIGIN}/api/tools/27/files/download?path=${directory}/windows/x64/latest.json`
+  return `${INTRANET_UPDATE_ORIGIN}/api/tools/27/files/download?path=${directory}/latest.json`
 }
 
 /** The unsigned index locates immutable release files. Trust stays in signed metadata and ZIPs. */
