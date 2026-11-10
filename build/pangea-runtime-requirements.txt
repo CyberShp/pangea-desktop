@@ -7,3 +7,5 @@ python-docx==1.2.0
 tree-sitter==0.25.2
 tree-sitter-c==0.24.2
 tree-sitter-cpp==0.23.4
+tree-sitter-lua==0.5.0
+tree-sitter-bash==0.25.1

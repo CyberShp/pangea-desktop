@@ -1,0 +1,4 @@
+{
+  "target": "分析 module 中配额申请程序的公开业务行为：从 sh submit.sh 经 Python bridge.py 到 C quota 的完整调用及状态提交链路。按 README.md 的业务契约生成可直接执行的黑盒用例，核查参数传递、退出码/标准流、错误传播、状态保持及恢复；未知关系如实标记，不虚构动态调用或并发能力。",
+  "context_scope": ["module/README.md"]
+}
