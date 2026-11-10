@@ -18,7 +18,7 @@ Shell 首期为 POSIX sh/Bash；Bash 语法解析成功不代表符合 POSIX sh�
 
 插件已通过后端 scope preview 与 capabilities 发现语言，无需新增语言选择控件。Desktop 的 `build/pangea-runtime-requirements.txt` 独立于引擎 `pyproject.toml`，需要同时包含 `tree-sitter-bash` 和 `tree-sitter-lua`。
 
-引擎改动位于独立 pangea-agent 仓库。Desktop 当前锁定已提交的 `cf9d5079f29d02066bcbbc30ad92233c416df3ef`，插件锁定 `53f23170eca22857da886744deeda5a0b9b36d1b`；组件锁修改尚未提交。运行时依赖均使用 `==` 精确版本，其中 `tree-sitter-bash==0.25.1`、`tree-sitter-lua==0.5.0`。
+引擎改动位于独立 pangea-agent 仓库。Desktop 的组件锁以 `pangea.components.json` 为准：引擎 `4f495a8cc4f01a51cc71a3963a17ae8e4601671c`，插件 `284ac9efcdc2fd621696fdf280078260a553e752`，包含联合多语言分析与仓内拓展调查。新任务的起始目录仍限定规划主责，可通过绑定工具追查所选仓库内的相关代码，并按需保存补充证据；不进入未选仓库，不扩大全仓分析义务，不启用审核。运行时依赖均使用 `==` 精确版本，其中 `tree-sitter-bash==0.25.1`、`tree-sitter-lua==0.5.0`。
 
 ## 验证
 
