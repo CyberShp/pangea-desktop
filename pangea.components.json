@@ -8,7 +8,7 @@
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
     "branch": "feature/fault-injection-e2e",
-    "commit": "95b31645e40f2630c6a5fca24f93be1ff1583be9"
+    "commit": "e5e267bda01f8ef5ebb9d9c36f31b4ce5549d587"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
