@@ -7,12 +7,12 @@
   },
   "dshPangea": {
     "repository": "https://github.com/CyberShp/dsh-pangea.git",
-    "branch": "feature/fault-injection-e2e",
-    "commit": "142ebfc0de0699d06c3d2d10fb28ea98352322cf"
+    "branch": "langgraph",
+    "commit": "35819aecb87dd7234617b2bc2dee6b6853646207"
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
-    "branch": "feature/fault-injection-e2e",
+    "branch": "langgraph",
     "commit": "390aa7d11d062f523ff2b68331317ff09be1890c"
   },
   "python": {

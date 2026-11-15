@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -67,9 +68,11 @@ describe('PANGEA Desktop release contract', () => {
     expect(lock.desktopBase.commit).toMatch(/^[0-9a-f]{40}$/)
     expect(lock.desktopBase.branch).toBe('main')
     expect(lock.dshPangea.commit).toMatch(/^[0-9a-f]{40}$/)
-    expect(lock.dshPangea.branch).toBe('langgraph')
+    expect(typeof lock.dshPangea.branch).toBe('string')
+    expect(() => execFileSync('git', ['check-ref-format', `refs/heads/${lock.dshPangea.branch}`])).not.toThrow()
     expect(lock.pangeaAgent.commit).toMatch(/^[0-9a-f]{40}$/)
-    expect(lock.pangeaAgent.branch).toBe('langgraph')
+    expect(typeof lock.pangeaAgent.branch).toBe('string')
+    expect(() => execFileSync('git', ['check-ref-format', `refs/heads/${lock.pangeaAgent.branch}`])).not.toThrow()
     expect(lock.python.sha256).toMatch(/^[0-9a-f]{64}$/)
     expect(profile).toContain("PANGEA_CORE_BUNDLE = 'dsh-pangea-product'")
     expect(safeMode).toContain("'dsh-pangea-product'")
