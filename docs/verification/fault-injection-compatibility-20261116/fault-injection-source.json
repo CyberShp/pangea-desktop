@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "status": "failed",
+  "platform": "win32",
+  "node": "v24.9.0",
+  "model": "deterministic fixture",
+  "checks": [
+    "unfixed Windows checkout fails on the same deep file"
+  ],
+  "startedAt": "2026-11-16T14:22:02.039Z",
+  "gitLongpathsDefault": "false",
+  "companion": "D:\\a\\pangea-desktop\\pangea-desktop\\.pangea-build\\plugin-source\\plugins\\dsh-pangea-companion",
+  "sourceHashes": {
+    "src/index.js": "b75266202656715cb62d0d50a679806dad2039883db818aa3e52bffb08aad511",
+    "src/fault-injection.js": "54a6f328d4c588cbb01c1a1cb686dd1f0530e45a3ce1c92cb30bfa2923023f94",
+    "src/repositories/git-source.js": "84b3a9e4bdb7b4692a400362f96baddc246f1dadc7266926499443d9513af819"
+  },
+  "git": "git version 2.56.1.windows.1",
+  "trackedRelativePathLength": 314,
+  "negativeControl": {
+    "config": "file:.git/config\tfalse",
+    "tracked": "layer-0-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-1-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-2-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-3-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-4-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-5-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-6-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-7-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-8-xxxxxxxxxxxxxxxxxxxxxxxxx/target.c"
+  },
+  "checkoutDiagnostics": [
+    {
+      "mode": "cwd",
+      "success": false,
+      "error": "fatal: cannot create directory at 'layer-0-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-1-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-2-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-3-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-4-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-5-xxxxxxxxxxxxxxxxxxxxxxxxx': Filename too long\n"
+    },
+    {
+      "mode": "dash-C",
+      "success": false,
+      "error": "fatal: cannot create directory at 'layer-0-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-1-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-2-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-3-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-4-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-5-xxxxxxxxxxxxxxxxxxxxxxxxx': Filename too long\n"
+    },
+    {
+      "mode": "environment-config",
+      "success": false,
+      "error": "fatal: cannot create directory at 'layer-0-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-1-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-2-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-3-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-4-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-5-xxxxxxxxxxxxxxxxxxxxxxxxx': Filename too long\n"
+    },
+    {
+      "mode": "local-config",
+      "success": false,
+      "error": "fatal: cannot create directory at 'layer-0-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-1-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-2-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-3-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-4-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-5-xxxxxxxxxxxxxxxxxxxxxxxxx': Filename too long\n"
+    },
+    {
+      "mode": "global-config",
+      "success": true,
+      "content": "int operation(void) { return 0; }\n"
+    }
+  ],
+  "error": "Error: fatal: cannot create directory at 'layer-0-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-1-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-2-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-3-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-4-xxxxxxxxxxxxxxxxxxxxxxxxx/layer-5-xxxxxxxxxxxxxxxxxxxxxxxxx': Filename too long\n\n    at sourceGit (file:///D:/a/pangea-desktop/pangea-desktop/.pangea-build/plugin-source/plugins/dsh-pangea-companion/src/repositories/git-source.js:16:11)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///D:/a/pangea-desktop/pangea-desktop/scripts/verify-fault-injection-compat.mjs:101:7",
+  "finishedAt": "2026-11-16T14:22:07.539Z"
+}
