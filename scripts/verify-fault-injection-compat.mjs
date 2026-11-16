@@ -65,7 +65,13 @@ try {
     await writeFile(path.join(source, file), bytes)
   }
   await sourceGit(source, ['add', '.'])
+  // Seed the deep tracked entry explicitly, like Git for Windows t2031. Directory
+  // discovery during `add .` is not the checkout behavior this fixture measures.
+  const deepBlob = execFileSync('git', ['-C', source, 'hash-object', '-w', '--stdin'],
+    { input: original, encoding: 'utf8', windowsHide: true, timeout: 30000 }).trim()
+  await sourceGit(source, ['update-index', '--add', '--cacheinfo', '100644', deepBlob, relative])
   await sourceGit(source, ['commit', '-m', 'compatibility baseline'])
+  assert.ok((await sourceGit(source, ['ls-tree', '-r', '--name-only', 'HEAD'])).split('\n').includes(relative), 'deep fixture must exist in the committed tree')
   const base = await sourceGit(source, ['rev-parse', 'HEAD'])
   await sourceGit(root, ['clone', '--bare', '--', source, remote])
   await sourceGit(source, ['remote', 'add', 'origin', remote])
@@ -76,7 +82,7 @@ try {
     rawGit(control, ['config', '--local', 'core.longpaths', 'false'])
     report.negativeControl = {
       config: rawGit(control, ['config', '--show-origin', '--get', 'core.longpaths']),
-      tracked: rawGit(control, ['ls-tree', '-r', '--name-only', base, '--', relative]),
+      tracked: rawGit(control, ['ls-tree', '-r', '--name-only', base]).split('\n').filter(file => file === relative).join(''),
     }
     assert.equal(report.negativeControl.tracked, relative)
     assert.throws(() => execFileSync('git', ['-c', 'core.longpaths=false', '-C', control, 'checkout', '--detach', base],
