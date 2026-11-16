@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "platform": "win32",
+  "node": "v24.9.0",
+  "model": "deterministic fixture",
+  "checks": [
+    "sourceGit: deep-file clone and detached checkout, config unchanged",
+    "injectionGit: deep-file clone and detached checkout, config unchanged",
+    "212 CRLF-only files; real edit 1/211; BOM, binary, invalid UTF-8 and untracked content stay visible",
+    "HTTP import/configure/defaults/generate: preparing reaches ready with a deep-file diff and detached HEAD",
+    "HTTP generation failure remains visible; next generation recovers in a separate checkout",
+    "snapshots, source HEAD, remote branches and Git config unchanged"
+  ],
+  "startedAt": "2026-11-16T14:22:08.002Z",
+  "gitLongpathsDefault": "true",
+  "companion": "D:\\a\\pangea-desktop\\pangea-desktop\\.pangea-build\\plugin-source\\plugins\\dsh-pangea-companion",
+  "sourceHashes": {
+    "src/index.js": "b75266202656715cb62d0d50a679806dad2039883db818aa3e52bffb08aad511",
+    "src/fault-injection.js": "54a6f328d4c588cbb01c1a1cb686dd1f0530e45a3ce1c92cb30bfa2923023f94",
+    "src/repositories/git-source.js": "84b3a9e4bdb7b4692a400362f96baddc246f1dadc7266926499443d9513af819"
+  },
+  "git": "git version 2.56.1.windows.1",
+  "trackedRelativePathLength": 314,
+  "paths": {
+    "checkoutLength": 174,
+    "fileLength": 489
+  },
+  "finishedAt": "2026-11-16T14:22:19.298Z"
+}

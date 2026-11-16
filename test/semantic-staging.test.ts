@@ -49,8 +49,11 @@ it('accepts matching staging metadata and rejects a stale Agent lock or missing 
     ]) await write(file, 'metadata test fixture')
     const verify = () => execFileSync(process.execPath, [path.join(root, 'scripts/verify-pangea-staging.mjs')], { encoding: 'utf8', stdio: 'pipe' })
     expect(verify()).toContain('staging verified')
+    // Windows PowerShell 5.1 Set-Content -Encoding UTF8 emits a BOM.
+    await write('.pangea-build/manifest.json', '\uFEFF' + JSON.stringify(manifest))
+    expect(verify()).toContain('staging verified')
     manifest.components.pangea_agent.commit = '0'.repeat(40)
-    await write('.pangea-build/manifest.json', JSON.stringify(manifest))
+    await write('.pangea-build/manifest.json', '\uFEFF' + JSON.stringify(manifest))
     expect(verify).toThrow(/does not match the locked pangea-agent commit/)
     manifest.components.pangea_agent.commit = components.pangeaAgent.commit
     await write('.pangea-build/manifest.json', JSON.stringify(manifest))

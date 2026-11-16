@@ -1,12 +1,27 @@
 name: Release pipeline regression
 on:
   workflow_dispatch:
+    inputs:
+      build_unsigned:
+        description: Assemble an unsigned win-unpacked test instance from the component lock and validate it; never sign or publish
+        required: false
+        type: boolean
+        default: false
+      package_run_id:
+        description: Optional successful build run whose existing portable artifact should also be tested (no build or publish)
+        required: false
+        type: string
   pull_request:
     paths:
       - pangea.components.json
       - test/acp-injection-delivery.test.mjs
       - scripts/fixtures/acp-diagnostic-agent.mjs
       - scripts/build-pangea-desktop.ps1
+      - scripts/verify-fault-injection-compat.mjs
+      - scripts/test-packaged-fault-injection.ps1
+      - scripts/verify-pangea-staging.mjs
+      - test/semantic-staging.test.ts
+      - test/fault-injection-compat-gate.test.ts
       - .github/workflows/release*.yml
       - scripts/*release*.mjs
       - scripts/*historical*.mjs
@@ -41,6 +56,11 @@ on:
       - test/acp-injection-delivery.test.mjs
       - scripts/fixtures/acp-diagnostic-agent.mjs
       - scripts/build-pangea-desktop.ps1
+      - scripts/verify-fault-injection-compat.mjs
+      - scripts/test-packaged-fault-injection.ps1
+      - scripts/verify-pangea-staging.mjs
+      - test/semantic-staging.test.ts
+      - test/fault-injection-compat-gate.test.ts
       - .github/workflows/release*.yml
       - scripts/*release*.mjs
       - scripts/*historical*.mjs
@@ -70,12 +90,13 @@ on:
       - test/portable-patch*.test.ts
 permissions:
   contents: read
+  actions: read
 jobs:
   windows-components:
     # Run the plugin checks that gate release assembly on the release OS,
     # using the exact component lock, without signing or publishing a package.
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -96,6 +117,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Could not check out locked plugin commit.' }
           $Actual = git -C .pangea-build/plugin-source rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or $Actual -cne $Component.commit) { throw 'Plugin checkout differs from component lock.' }
+      - name: Verify Windows fault injection compatibility through HTTP
+        shell: pwsh
+        run: |
+          node scripts/verify-fault-injection-compat.mjs --companion .pangea-build/plugin-source/plugins/dsh-pangea-companion --require-windows --report .pangea-build/verification/fault-injection-source.json
+          if ($LASTEXITCODE -ne 0) { throw 'Windows fault injection compatibility failed.' }
+      - name: Verify HTTP compatibility with longpaths already enabled
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          node scripts/verify-fault-injection-compat.mjs --companion .pangea-build/plugin-source/plugins/dsh-pangea-companion --require-windows --git-longpaths-default true --report .pangea-build/verification/fault-injection-source-enabled.json
+          if ($LASTEXITCODE -ne 0) { throw 'Enabled-default Windows compatibility failed.' }
       - name: Verify the release plugin suites on Windows
         shell: pwsh
         run: |
@@ -113,6 +145,72 @@ jobs:
           $env:PANGEA_TEST_COMPANION_ROOT = (Resolve-Path '.pangea-build/plugin-source/plugins/dsh-pangea-companion').Path
           node --test test/acp-injection-delivery.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'ACP injection delivery regression failed.' }
+      - name: Assemble unsigned Windows test instance
+        if: inputs.build_unsigned == true
+        shell: powershell
+        run: |
+          ./scripts/build-pangea-desktop.ps1 -SkipPackage
+          if ($LASTEXITCODE -ne 0) { throw 'Unsigned test staging failed.' }
+          npm run package:dir
+          if ($LASTEXITCODE -ne 0) { throw 'Unsigned win-unpacked assembly failed.' }
+      - name: Verify newly assembled packaged runtime with longpaths disabled
+        if: inputs.build_unsigned == true
+        shell: powershell
+        run: |
+          ./scripts/test-packaged-fault-injection.ps1 -PackageDirectory dist/win-unpacked -ReportPath .pangea-build/verification/fault-injection-packaged.json
+      - name: Verify newly assembled packaged runtime with longpaths enabled
+        if: ${{ !cancelled() && inputs.build_unsigned == true }}
+        shell: powershell
+        run: |
+          ./scripts/test-packaged-fault-injection.ps1 -PackageDirectory dist/win-unpacked -GitLongpathsDefault true -ReportPath .pangea-build/verification/fault-injection-packaged-enabled.json
+      - name: Retain unsigned Windows test instance
+        if: inputs.build_unsigned == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-win-unpacked-compatibility-${{ github.run_id }}
+          path: dist/win-unpacked/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Download existing portable artifact for acceptance
+        if: ${{ !cancelled() && inputs.package_run_id != '' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_RUN_ID: ${{ inputs.package_run_id }}
+        run: |
+          if ($env:PACKAGE_RUN_ID -notmatch '^\d+$') { throw 'package_run_id must be numeric.' }
+          $Run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:PACKAGE_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $Run.conclusion -ne 'success' -or $Run.path -ne '.github/workflows/release.yml') { throw 'Expected a successful package build run.' }
+          gh run download $env:PACKAGE_RUN_ID --repo $env:GITHUB_REPOSITORY --pattern '*-windows-x64-portable' --dir .pangea-build/acceptance-download
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download the existing portable artifact.' }
+          $Packages = @(Get-ChildItem .pangea-build/acceptance-download -Recurse -Filter '*-portable.zip')
+          if ($Packages.Count -ne 1) { throw 'Expected exactly one portable ZIP.' }
+          $ExpectedHash = ((Get-Content "$($Packages[0].FullName).sha256" -Raw).Trim() -split '\s+')[0]
+          if ((Get-FileHash $Packages[0].FullName -Algorithm SHA256).Hash -ine $ExpectedHash) { throw 'Portable ZIP checksum mismatch.' }
+          Expand-Archive $Packages[0].FullName .pangea-build/acceptance-package
+      - name: Verify existing packaged Node and companion on Windows
+        if: ${{ !cancelled() && inputs.package_run_id != '' }}
+        shell: powershell
+        run: |
+          $Manifests = @(Get-ChildItem .pangea-build/acceptance-package -Recurse -Filter pangea-manifest.json)
+          if ($Manifests.Count -ne 1) { throw 'Expected exactly one component manifest.' }
+          $PackageRoot = Split-Path -Parent (Split-Path -Parent $Manifests[0].FullName)
+          ./scripts/test-packaged-fault-injection.ps1 -PackageDirectory $PackageRoot -ReportPath .pangea-build/verification/fault-injection-packaged.json
+      - name: Verify packaged HTTP compatibility with longpaths already enabled
+        if: ${{ !cancelled() && inputs.package_run_id != '' }}
+        shell: powershell
+        run: |
+          $Manifests = @(Get-ChildItem .pangea-build/acceptance-package -Recurse -Filter pangea-manifest.json)
+          if ($Manifests.Count -ne 1) { throw 'Expected exactly one component manifest.' }
+          $PackageRoot = Split-Path -Parent (Split-Path -Parent $Manifests[0].FullName)
+          ./scripts/test-packaged-fault-injection.ps1 -PackageDirectory $PackageRoot -GitLongpathsDefault true -ReportPath .pangea-build/verification/fault-injection-packaged-enabled.json
+      - name: Retain compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-fault-injection-compatibility
+          path: .pangea-build/verification/
+          if-no-files-found: warn
   tooling:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -132,7 +230,7 @@ jobs:
       - name: Verify proactive network settings entry and isolated dialog
         run: npx --no-install vitest run test/update-network-entry.test.ts test/update-network-view.test.ts test/update-network.test.ts test/git-proxy-ipc.test.ts test/windows-titlebar.test.ts
       - name: Verify existing package and patch contracts
-        run: npx --no-install vitest run test/release.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts test/portable-upgrade-policy.test.ts
+        run: npx --no-install vitest run test/release.test.ts test/semantic-staging.test.ts test/fault-injection-compat-gate.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts test/portable-upgrade-policy.test.ts
   windows-updater:
     runs-on: windows-latest
     timeout-minutes: 25

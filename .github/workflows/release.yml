@@ -241,6 +241,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Retain pre-delivery compatibility evidence
+        if: always() && steps.release_meta.outputs.mode == 'build'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-delivery-compatibility-${{ github.run_id }}
+          path: .pangea-build/verification/
+          if-no-files-found: warn
+
       - name: Publish GitHub release
         if: steps.release_meta.outputs.mode == 'build'
         shell: pwsh

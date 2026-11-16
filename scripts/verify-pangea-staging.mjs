@@ -46,7 +46,7 @@ const staged = JSON.parse(
 const companion = JSON.parse(
   readFileSync(path.join(root, '.pangea-build/plugins/dsh-pangea-companion/package.json'), 'utf8')
 )
-const manifest = JSON.parse(readFileSync(path.join(root, '.pangea-build/manifest.json'), 'utf8'))
+const manifest = JSON.parse(readFileSync(path.join(root, '.pangea-build/manifest.json'), 'utf8').replace(/^\uFEFF/, ''))
 const components = JSON.parse(readFileSync(path.join(root, 'pangea.components.json'), 'utf8'))
 const dshPatch = readFileSync(
   path.join(root, '.pangea-build/plugins/dsh-pangea/cordis.patch.yml'),
