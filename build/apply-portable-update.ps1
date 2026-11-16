@@ -13,6 +13,7 @@ function Initialize-PortableWorkerJob {
   if ('PangeaPortableWorkerJob' -as [type]) { return }
   Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -33,10 +34,15 @@ public sealed class PangeaPortableWorkerJob : IDisposable {
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr security, string name);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job, int type, ref ExtendedLimits data, uint length);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job, int type, out Accounting data, uint length, IntPtr returned);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job, int type, IntPtr data, uint length, IntPtr returned);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateJobObject(IntPtr job, uint code);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint id);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool member);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
   IntPtr handle;
+  bool stopAttempted, stopConfirmed;
   public PangeaPortableWorkerJob() {
     handle=CreateJobObject(IntPtr.Zero,null);
     if(handle==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -48,16 +54,77 @@ public sealed class PangeaPortableWorkerJob : IDisposable {
   public void Attach(Process process) {
     if(!AssignProcessToJobObject(handle,process.Handle)) throw new Win32Exception(Marshal.GetLastWin32Error());
   }
-  public bool StopAndWait(int milliseconds) {
-    if(!TerminateJobObject(handle,1)) return false;
-    var timer=Stopwatch.StartNew();
-    do {
-      Accounting state;
-      if(!QueryInformationJobObject(handle,1,out state,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero)) return false;
-      if(state.Active==0) return true;
-      Thread.Sleep(50);
-    } while(timer.ElapsedMilliseconds<milliseconds);
+  bool CaptureProcesses(List<IntPtr> processes, Stopwatch timer, int milliseconds) {
+    int capacity=16;
+    while(timer.ElapsedMilliseconds<milliseconds) {
+      int length=checked(8+capacity*IntPtr.Size);
+      IntPtr buffer=Marshal.AllocHGlobal(length);
+      try {
+        if(!QueryInformationJobObject(handle,3,buffer,(uint)length,IntPtr.Zero)) {
+          if(Marshal.GetLastWin32Error()!=234) return false; // ERROR_MORE_DATA
+          capacity=checked(capacity*2);
+          continue;
+        }
+        uint assigned=(uint)Marshal.ReadInt32(buffer,0);
+        uint listed=(uint)Marshal.ReadInt32(buffer,4);
+        if(assigned>listed) { capacity=checked(capacity*2); continue; }
+        if(listed>(uint)capacity) return false;
+        for(int index=0;index<(int)listed;index++) {
+          if(timer.ElapsedMilliseconds>=milliseconds) return false;
+          long id=Marshal.ReadIntPtr(buffer,8+index*IntPtr.Size).ToInt64();
+          if(id<=0 || id>UInt32.MaxValue) return false;
+          // A retained handle binds the wait to this process, even after its
+          // PID disappears. Query rights verify it belongs to our exact job.
+          IntPtr process=OpenProcess(0x00101000,false,(uint)id); // SYNCHRONIZE | QUERY_LIMITED_INFORMATION
+          if(process==IntPtr.Zero) return false;
+          processes.Add(process);
+          bool member;
+          if(!IsProcessInJob(process,handle,out member) || !member) return false;
+        }
+        return true;
+      } finally { Marshal.FreeHGlobal(buffer); }
+    }
     return false;
+  }
+  public bool StopAndWait(int milliseconds) {
+    // The caller retries from finally. An uncertain first snapshot must not
+    // become a successful empty snapshot after the missing process vanishes.
+    if(stopAttempted) return stopConfirmed;
+    stopAttempted=true;
+    var timer=Stopwatch.StartNew();
+    var processes=new List<IntPtr>();
+    bool terminationAttempted=false;
+    try {
+      Accounting before;
+      bool captured=QueryInformationJobObject(handle,1,out before,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero)
+        && CaptureProcesses(processes,timer,milliseconds)
+        && before.Active<=(uint)processes.Count;
+      terminationAttempted=true;
+      bool terminated=TerminateJobObject(handle,1);
+      if(!captured || !terminated) return false;
+      foreach(IntPtr process in processes) {
+        uint remaining=(uint)Math.Max(0,(long)milliseconds-timer.ElapsedMilliseconds);
+        if(WaitForSingleObject(process,remaining)!=0) return false;
+      }
+      do {
+        Accounting state;
+        if(!QueryInformationJobObject(handle,1,out state,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero)) return false;
+        // A descendant created during capture/termination might have escaped
+        // the handle snapshot. Do not certify it using an empty job counter.
+        if(state.Total!=before.Total) return false;
+        if(state.Active==0) { stopConfirmed=true; return true; }
+        int remaining=(int)Math.Max(0,(long)milliseconds-timer.ElapsedMilliseconds);
+        if(remaining==0) break;
+        Thread.Sleep(Math.Min(50,remaining));
+      } while(timer.ElapsedMilliseconds<milliseconds);
+      return false;
+    } catch { return false; }
+    finally {
+      // Even an incomplete snapshot must stop the owned tree. Failure to
+      // confirm it remains fail-closed and blocks directory changes/rollback.
+      if(!terminationAttempted) TerminateJobObject(handle,1);
+      foreach(IntPtr process in processes) CloseHandle(process);
+    }
   }
   public void Dispose() { if(handle!=IntPtr.Zero) { CloseHandle(handle); handle=IntPtr.Zero; } }
 }
