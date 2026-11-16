@@ -258,7 +258,7 @@ function Get-PortableSpaceRequirement {
 }
 
 function Get-PortableProtectedInventory {
-  param([string]$InstallRoot)
+  param([string]$InstallRoot,[switch]$MoveUserData)
   Initialize-PortableFileIO
   $ManifestPath=Join-Path $InstallRoot 'resources\update\pangea-package-manifest.json'
   if (-not [PangeaPortableFileIO]::IsFile($ManifestPath)) { throw 'Cannot protect custom installation files: installed package manifest is missing. Keep the original directory and restore its package manifest before retrying.' }
@@ -272,13 +272,21 @@ function Get-PortableProtectedInventory {
     $KnownFiles[$Normalized]=$true
     while ($Normalized.Contains('/')) { $Normalized=$Normalized.Substring(0,$Normalized.LastIndexOf('/')); $KnownDirectories[$Normalized]=$true }
   }
-  $Entries=@([PangeaPortableTree]::Inventory($InstallRoot,$false))
+  $Entries=@([PangeaPortableTree]::Inventory($InstallRoot,$false,[bool]$MoveUserData))
   $Unknown=[Collections.Generic.List[string]]::new(); [long]$UnknownCount=0; [long]$UserBytes=0; [long]$UserCount=0
   foreach ($Entry in $Entries) {
     $Relative=$Entry.Path.Replace('\','/').ToLowerInvariant()
     $Top=$Relative.Split('/')[0]
     if ($Top -in @('local-skills','launch-root')) {
-      if ($Relative -eq $Top -and $Entry.Kind -ne 'directory') { throw "User-data root must be a real directory, not a file or link: $($Entry.Path). Original data is retained." }
+      if ($Relative -eq $Top -and $Entry.Kind -ne 'directory') {
+        if (-not $MoveUserData -or $Entry.Kind -ne 'link-directory') { throw "User-data root must be a real directory, not a file or link: $($Entry.Path). Original data is retained." }
+        $DataContext=Get-PortableTransactionContext $InstallRoot
+        $Receipt=Read-PortableDataReceipt $DataContext
+        if (-not $Receipt) { throw 'Unowned user-data junction; refusing upgrade.' }
+        $Identity=@($Receipt.entries | Where-Object { $_.name -eq $Top })[0].identity
+        $Data=Get-PortableDataContext $DataContext
+        Assert-PortableDataLink (Join-Path $InstallRoot $Top) (Join-Path $Data.Root $Top) $Identity
+      }
       $UserBytes += [long]$Entry.Length; $UserCount++; continue
     }
     if ($Entry.Kind -eq 'file' -and $KnownFiles.ContainsKey($Relative)) { continue }
@@ -300,14 +308,15 @@ function Get-PortableProtectedInventory {
 }
 
 function Assert-PortableUpdatePreflight {
-  param([string]$InstallRoot, [string]$PackagePath, [string]$PackageType)
+  param([string]$InstallRoot, [string]$PackagePath, [string]$PackageType, [switch]$MoveUserData)
   if (-not (Test-PortableIOWorker)) {
-    return Invoke-PortableIOWorker -Operation Preflight -Arguments @{InstallRoot=$InstallRoot;PackagePath=$PackagePath;PackageType=$PackageType} -TimeoutSeconds 600
+    return Invoke-PortableIOWorker -Operation Preflight -Arguments @{InstallRoot=$InstallRoot;PackagePath=$PackagePath;PackageType=$PackageType;MoveUserData=[bool]$MoveUserData} -TimeoutSeconds 600
   }
   Initialize-PortableFileIO
   Add-Type -AssemblyName System.IO.Compression.FileSystem
-  $Inventory=Get-PortableProtectedInventory $InstallRoot
+  $Inventory=Get-PortableProtectedInventory $InstallRoot -MoveUserData:$MoveUserData
   [long]$UserBytes=$Inventory.UserBytes; [long]$UserCount=$Inventory.UserCount
+  if ($MoveUserData) { $UserBytes=0; $UserCount=2 }
   [long]$CandidateBytes=0; [long]$CandidateCount=0
   $Zip=[IO.Compression.ZipFile]::OpenRead($PackagePath)
   try {
@@ -335,7 +344,7 @@ function Assert-PortableUpdatePreflight {
   $Available=[PangeaPortableTree]::AvailableBytes($Parent)
   Write-UpdateLog "disk preflight: install=$InstallRoot; available=$Available; required=$Required; candidate=$CandidateBytes; user-data=$UserBytes; profile-rollback-budget=536870912; allocation=$Unit"
   if ($Available -lt $Required) {
-    throw ("安装盘空间不足：需要额外 {0:N2} GiB（新版本、用户数据副本及余量），可用 {1:N2} GiB。原版本未替换。" -f ($Required/1GB),($Available/1GB))
+    throw ("安装盘空间不足：需要额外 {0:N2} GiB（新版本、数据保留操作及余量），可用 {1:N2} GiB。原版本未替换。" -f ($Required/1GB),($Available/1GB))
   }
   return [pscustomobject]@{required_bytes=$Required;available_bytes=$Available;candidate_bytes=$CandidateBytes;user_bytes=$UserBytes}
 }
@@ -434,6 +443,109 @@ function Assert-PortableUserDataUnchanged {
     if ($Actual -ne $Expected) { throw "User directory changed after copy: $Name. Version switch stopped; original data is retained." }
     if ($Expected -ne 'missing' -and [PangeaPortableTree]::Fingerprint($Target) -ne $Expected) { throw "Candidate user directory changed after verification: $Name. Original data is retained." }
   }
+}
+
+function Get-PortableDataContext {
+  param($Context)
+  $Key=[IO.Path]::GetFileNameWithoutExtension($Context.Journal).Substring('.pangea-update-'.Length)
+  return [pscustomobject]@{Root=(Join-Path $Context.Parent ("pangea-data-"+$Key)); Receipt=($Context.Journal+'.data.json')}
+}
+
+function Read-PortableDataReceipt {
+  param($Context)
+  $Data=Get-PortableDataContext $Context
+  Assert-PortableTransactionPath $Data.Receipt
+  Assert-PortableTransactionPath $Data.Root
+  if (-not [IO.File]::Exists($Data.Receipt)) { return $null }
+  $Receipt=[IO.File]::ReadAllText($Data.Receipt) | ConvertFrom-Json
+  if ($Receipt.schema_version -ne 1 -or $Receipt.install_root -ine $Context.InstallRoot -or
+      $Receipt.owner -ne (Get-PortableTransactionOwner) -or @($Receipt.entries).Count -ne 2) { throw 'Invalid persistent user-data receipt; all directories retained.' }
+  $Names=@{}
+  foreach ($Entry in $Receipt.entries) {
+    if ($Entry.name -notin @('launch-root','local-skills') -or $Names.ContainsKey([string]$Entry.name) -or
+        [string]$Entry.identity -notmatch '^[0-9a-f]{8}-[0-9a-f]{16}$') { throw 'Invalid persistent user-data entry; all directories retained.' }
+    $Names[[string]$Entry.name]=$true
+  }
+  return $Receipt
+}
+
+function Assert-PortableDataLink {
+  param([string]$Link,[string]$Target,[string]$Identity)
+  $Attributes=[PangeaPortableFileIO]::Attributes($Link)
+  if ($Attributes -eq [uint32]::MaxValue -or ($Attributes -band 0x410) -ne 0x410) { throw "Expected a managed user-data junction: $Link" }
+  Initialize-PortableTransactionPaths
+  if ([PangeaTransactionPaths]::Parent($Link).TrimEnd('\') -ine [IO.Path]::GetFullPath($Target).TrimEnd('\') -or
+      [PangeaPortableFileIO]::DirectoryIdentity($Link,$true) -ne $Identity) { throw "User-data junction target or identity changed: $Link. All data retained." }
+}
+
+function Connect-PortableDataRoot {
+  param([string]$ApplicationRoot,[string]$Target,$Entry)
+  Assert-PortableTransactionPath $ApplicationRoot
+  Assert-PortableTransactionPath $Target
+  if ([PangeaPortableFileIO]::DirectoryIdentity($Target,$false) -ne $Entry.identity) { throw "Persistent user-data identity changed: $Target" }
+  $Link=Join-Path $ApplicationRoot $Entry.name
+  if ([PangeaPortableFileIO]::Attributes($Link) -ne [uint32]::MaxValue) {
+    Assert-PortableDataLink $Link $Target $Entry.identity
+    return
+  }
+  # Build a junction under an unguessable temporary name, then rename atomically.
+  # A crash cannot leave an empty real directory at the user's original path.
+  $Temporary=Join-Path $ApplicationRoot ('.pangea-link-'+[guid]::NewGuid().ToString('N'))
+  [PangeaPortableFileIO]::NewJunction($Temporary,$Target)
+  Assert-PortableDataLink $Temporary $Target $Entry.identity
+  [PangeaPortableFileIO]::MoveDirectory($Temporary,$Link)
+  Assert-PortableDataLink $Link $Target $Entry.identity
+}
+
+function Initialize-PortableDataMigration {
+  param($Context)
+  Initialize-PortableFileIO
+  $Data=Get-PortableDataContext $Context
+  $Receipt=Read-PortableDataReceipt $Context
+  if ($Receipt) { return $Receipt }
+  if ([PangeaPortableFileIO]::Attributes($Data.Root) -ne [uint32]::MaxValue) { throw 'Unowned persistent data directory already exists; refusing adoption or overwrite.' }
+  $Entries=@()
+  foreach ($Name in @('launch-root','local-skills')) {
+    $Source=Join-Path $Context.InstallRoot $Name
+    Assert-PortableTransactionPath $Source
+    [PangeaPortableFileIO]::EnsureDirectory($Source)
+    $Entries += [pscustomobject]@{name=$Name;identity=[PangeaPortableFileIO]::DirectoryIdentity($Source,$false)}
+  }
+  $Receipt=[pscustomobject]@{schema_version=1;install_root=$Context.InstallRoot;owner=(Get-PortableTransactionOwner);entries=$Entries}
+  # Durable identity and intent precede every directory move. No user bytes are copied.
+  Write-PortableTransactionJson $Data.Receipt $Receipt
+  return $Receipt
+}
+
+function Resume-PortableDataMigration {
+  param($Context,[string]$OriginalRoot)
+  $Receipt=Read-PortableDataReceipt $Context
+  if (-not $Receipt) { return }
+  Initialize-PortableFileIO
+  $Data=Get-PortableDataContext $Context
+  [PangeaPortableFileIO]::EnsureDirectory($Data.Root)
+  foreach ($Entry in $Receipt.entries) {
+    $Source=Join-Path $OriginalRoot $Entry.name
+    $Target=Join-Path $Data.Root $Entry.name
+    Assert-PortableTransactionPath $Target
+    if ([PangeaPortableFileIO]::Attributes($Target) -eq [uint32]::MaxValue) {
+      Assert-PortableTransactionPath $Source
+      if ([PangeaPortableFileIO]::DirectoryIdentity($Source,$false) -ne $Entry.identity) { throw "Migration source identity changed: $Source. All data retained." }
+      # Same-volume MoveFile has no copy fallback. A directory held without
+      # FILE_SHARE_DELETE fails without modifying either copy or killing writers.
+      [PangeaPortableFileIO]::MoveDirectory($Source,$Target)
+    }
+    Connect-PortableDataRoot $OriginalRoot $Target $Entry
+  }
+}
+
+function Mount-PortableData {
+  param($Context,[string]$ApplicationRoot)
+  Initialize-PortableFileIO
+  $Receipt=Read-PortableDataReceipt $Context
+  if (-not $Receipt) { throw 'Persistent user-data receipt missing.' }
+  $Data=Get-PortableDataContext $Context
+  foreach ($Entry in $Receipt.entries) { Connect-PortableDataRoot $ApplicationRoot (Join-Path $Data.Root $Entry.name) $Entry }
 }
 
 function Copy-PortableUserData([string]$PreviousRoot, [string]$CandidateRoot) {
@@ -1809,6 +1921,16 @@ public static class PangeaPortableFileIO {
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
   static extern bool CopyFileW(string source, string target, bool failIfExists);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+  static extern bool CreateHardLinkW(string target, string source, IntPtr security);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+  static extern bool MoveFileW(string source, string target);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool DeviceIoControl(SafeFileHandle handle,uint code,byte[] input,uint length,IntPtr output,uint outputLength,out uint returned,IntPtr overlap);
+  [StructLayout(LayoutKind.Sequential)] struct FileInfo {
+    public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Created,Accessed,Written;
+    public uint Volume,SizeHigh,SizeLow,Links,IndexHigh,IndexLow;
+  }
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle handle,out FileInfo info);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
   static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint mode, uint flags, IntPtr template);
 
   static IOException Error(string operation, string path, int code) {
@@ -1857,7 +1979,7 @@ public static class PangeaPortableFileIO {
   static void EnsureExtendedDirectory(string path) {
     uint attributes = GetFileAttributesW(path);
     if (attributes != UInt32.MaxValue) {
-      if ((attributes & 16) == 0) throw new IOException("Update directory is a file: " + path);
+      if ((attributes & 16) == 0 || (attributes & 0x400) != 0) throw new IOException("Update directory is a file or reparse point: " + path);
       return;
     }
     int code = Marshal.GetLastWin32Error();
@@ -1899,13 +2021,84 @@ public static class PangeaPortableFileIO {
   public static void Copy(string source, string target) {
     string destination = Extended(target);
     EnsureExtendedDirectory(Parent(destination));
-    if (!CopyFileW(Extended(source), destination, false)) throw Error("Copy file", target, Marshal.GetLastWin32Error());
+    if (!CopyFileW(Extended(source), destination, true)) throw Error("Copy file", target, Marshal.GetLastWin32Error());
+  }
+  public static uint Attributes(string path) {
+    uint result=GetFileAttributesW(Extended(path));
+    if(result==UInt32.MaxValue) {
+      int code=Marshal.GetLastWin32Error();
+      if(code==2 || code==3) return result;
+      throw Error("Inspect path",path,code);
+    }
+    return result;
+  }
+  public static string DirectoryIdentity(string path, bool followLink) {
+    using(var handle=CreateFileW(Extended(path),0,7,IntPtr.Zero,3,followLink ? 0x02000000u : 0x02200000u,IntPtr.Zero)) {
+      if(handle.IsInvalid) throw Error("Open directory identity",path,Marshal.GetLastWin32Error());
+      FileInfo info;
+      if(!GetFileInformationByHandle(handle,out info)) throw Error("Read directory identity",path,Marshal.GetLastWin32Error());
+      if((info.Attributes&16)==0 || (!followLink && (info.Attributes&0x400)!=0)) throw new IOException("Expected real directory: "+path);
+      return info.Volume.ToString("x8")+"-"+info.IndexHigh.ToString("x8")+info.IndexLow.ToString("x8");
+    }
+  }
+  public static void MoveDirectory(string source,string target) {
+    if(!MoveFileW(Extended(source),Extended(target))) throw Error("Move user directory",source,Marshal.GetLastWin32Error());
+  }
+  public static void NewJunction(string path,string target) {
+    string destination=Extended(path);
+    if(!CreateDirectoryW(destination,IntPtr.Zero)) throw Error("Reserve junction",path,Marshal.GetLastWin32Error());
+    string substitute=@"\??\"+FullPath(target);
+    byte[] sub=Encoding.Unicode.GetBytes(substitute), print=Encoding.Unicode.GetBytes(FullPath(target));
+    byte[] buffer=new byte[16+sub.Length+2+print.Length+2];
+    Array.Copy(BitConverter.GetBytes(0xA0000003u),0,buffer,0,4);
+    Array.Copy(BitConverter.GetBytes((ushort)(buffer.Length-8)),0,buffer,4,2);
+    Array.Copy(BitConverter.GetBytes((ushort)sub.Length),0,buffer,10,2);
+    Array.Copy(BitConverter.GetBytes((ushort)(sub.Length+2)),0,buffer,12,2);
+    Array.Copy(BitConverter.GetBytes((ushort)print.Length),0,buffer,14,2);
+    Array.Copy(sub,0,buffer,16,sub.Length); Array.Copy(print,0,buffer,18+sub.Length,print.Length);
+    using(var handle=CreateFileW(destination,0x40000000,0,IntPtr.Zero,3,0x02200000,IntPtr.Zero)) {
+      if(handle.IsInvalid) throw Error("Open junction",path,Marshal.GetLastWin32Error());
+      uint returned;
+      if(!DeviceIoControl(handle,0x000900A4,buffer,(uint)buffer.Length,IntPtr.Zero,0,out returned,IntPtr.Zero))
+        throw Error("Create junction",path,Marshal.GetLastWin32Error());
+    }
+  }
+  public static void AssertNoReparse(string path) {
+    string current=FullPath(path);
+    while(current.Length>3) {
+      uint attributes=Attributes(current);
+      if(attributes!=UInt32.MaxValue && (attributes&0x400)!=0) throw new IOException("Package path contains a reparse point: "+current);
+      current=Parent(current);
+    }
+  }
+  public static bool ReuseVerified(string source,string target,long size,string hash,string relative) {
+    AssertNoReparse(source);
+    AssertNoReparse(target);
+    // This handle denies concurrent writes/deletion while verification and link
+    // creation bind the candidate to the exact bytes just checked.
+    using(var input=Open(source,false)) {
+      if(input.Length!=size) throw new IOException("Patched file size mismatch: "+relative);
+      using(var sha=SHA256.Create()) {
+        string actual=BitConverter.ToString(sha.ComputeHash(input)).Replace("-", "").ToLowerInvariant();
+        if(actual!=hash) throw new IOException("Patched file hash mismatch: "+relative);
+      }
+      string destination=Extended(target);
+      EnsureExtendedDirectory(Parent(destination));
+      if(CreateHardLinkW(destination,Extended(source),IntPtr.Zero)) return true;
+      int error=Marshal.GetLastWin32Error();
+      // Only unsupported links/cross-volume/link-count exhaustion can fall back.
+      // Existing destinations and access failures remain fatal, never overwrite.
+      if(error!=1 && error!=17 && error!=50 && error!=1142) throw Error("Create hard link",target,error);
+      Copy(source,target);
+      Verify(target,size,hash,relative);
+      return false;
+    }
   }
   public static FileStream Open(string path, bool write) {
     string full = Extended(path);
     if (write) EnsureExtendedDirectory(Parent(full));
     SafeFileHandle handle = CreateFileW(full, write ? 0x40000000u : 0x80000000u,
-      write ? 0u : 1u, IntPtr.Zero, write ? 2u : 3u, 0x08000000u, IntPtr.Zero);
+      write ? 0u : 1u, IntPtr.Zero, write ? 1u : 3u, 0x08000000u, IntPtr.Zero);
     if (handle.IsInvalid) {
       int code = Marshal.GetLastWin32Error(); handle.Dispose();
       throw Error(write ? "Create file" : "Read file", path, code);
@@ -1965,7 +2158,7 @@ public static class PangeaPortableTree {
       using(var sha=SHA256.Create()) return Hex(sha.ComputeHash(buffer,0,(int)length));
     }
   }
-  static void Walk(string root,string relative,bool hashes,System.Collections.Generic.List<PangeaPortableEntry> entries,int depth) {
+  static void Walk(string root,string relative,bool hashes,System.Collections.Generic.List<PangeaPortableEntry> entries,int depth,bool skipUserData) {
     if(depth>1024 || entries.Count>1000000) throw new IOException("Installation inventory exceeds safe traversal limits; original data is retained.");
     string directory=relative.Length==0 ? root : PangeaPortableFileIO.Child(root,relative);
     FindData data; IntPtr search=FindFirstFileW(Native(directory.TrimEnd('\\')+"\\*"),out data);
@@ -1988,17 +2181,18 @@ public static class PangeaPortableTree {
           }
         }
         entries.Add(entry);
-        if(folder && !link) Walk(root,child,hashes,entries,depth+1);
+        if(folder && !link && !(skipUserData && relative.Length==0 && (data.Name.Equals("launch-root",StringComparison.OrdinalIgnoreCase) || data.Name.Equals("local-skills",StringComparison.OrdinalIgnoreCase)))) Walk(root,child,hashes,entries,depth+1,skipUserData);
       } while(FindNextFileW(search,out data));
       if(Marshal.GetLastWin32Error()!=18) throw Error("Cannot finish installation inventory",directory);
     } finally { FindClose(search); }
   }
-  public static PangeaPortableEntry[] Inventory(string root,bool hashes) {
+  public static PangeaPortableEntry[] Inventory(string root,bool hashes) { return Inventory(root,hashes,false); }
+  public static PangeaPortableEntry[] Inventory(string root,bool hashes,bool skipUserData) {
     uint attributes=GetFileAttributesW(Native(root));
     if(attributes==UInt32.MaxValue) throw Error("Cannot inspect installation data",root);
     if((attributes&16)==0 || (attributes&0x400)!=0) throw new IOException("Data root must be a real directory, not a link: "+root);
     var entries=new System.Collections.Generic.List<PangeaPortableEntry>();
-    Walk(root,"",hashes,entries,0);
+    Walk(root,"",hashes,entries,0,skipUserData);
     entries.Sort(delegate(PangeaPortableEntry a,PangeaPortableEntry b) {return StringComparer.OrdinalIgnoreCase.Compare(a.Path,b.Path);});
     return entries.ToArray();
   }
@@ -2108,25 +2302,26 @@ function Apply-VerifiedPatch {
     }
 
     [PangeaPortableFileIO]::EnsureDirectory($Destination)
-    $Completed = 0; $LastProgress=[DateTime]::UtcNow
+    $Completed = 0; $Linked=0; $Copied=0; $LastProgress=[DateTime]::UtcNow
     foreach ($File in $TargetManifest.files) {
       $Relative = [string]$File.path
       $TargetPath = [PangeaPortableFileIO]::Child($Destination, $Relative)
       $Key = $Relative.ToLowerInvariant()
       if ($Payload.ContainsKey($Key)) {
         Extract-ZipEntry $Zip ("payload/" + $Relative) $TargetPath
+        [PangeaPortableFileIO]::Verify($TargetPath, [long]$File.size, [string]$File.sha256, $Relative)
       } else {
         $BasePath = [PangeaPortableFileIO]::Child($BaseRoot, $Relative)
         if (-not [PangeaPortableFileIO]::IsFile($BasePath)) { throw "Base package is missing unchanged file: $Relative" }
-        [PangeaPortableFileIO]::Copy($BasePath, $TargetPath)
+        if ([PangeaPortableFileIO]::ReuseVerified($BasePath, $TargetPath, [long]$File.size, [string]$File.sha256, $Relative)) { $Linked++ } else { $Copied++ }
       }
-      [PangeaPortableFileIO]::Verify($TargetPath, [long]$File.size, [string]$File.sha256, $Relative)
       $Completed++
       if ($Completed % 100 -eq 0 -or $Completed -eq $TargetManifest.files.Count -or ([DateTime]::UtcNow-$LastProgress).TotalSeconds -ge 2) {
         Set-UpdateStage "正在重建并校验补丁：$Completed / $($TargetManifest.files.Count) 个文件" (42 + [int](24 * $Completed / $TargetManifest.files.Count)) 'rebuild' $Completed $TargetManifest.files.Count
         $LastProgress=[DateTime]::UtcNow
       }
     }
+    Write-UpdateLog "patch reconstruction: linked=$Linked; copied=$Copied; payload=$($Payload.Count)"
     Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json' (Join-Path $Destination 'resources\update\pangea-package-manifest.json')
     Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json.sig' (Join-Path $Destination 'resources\update\pangea-package-manifest.json.sig')
   } finally { $Zip.Dispose() }
@@ -2351,6 +2546,9 @@ function Restore-PortableUpdateTransaction {
     # configuration since then; never replay its profile snapshot again.
     return $Transaction
   }
+  $DataSource=if ([IO.Directory]::Exists($Old)) { $Old } else { $Root }
+  if (-not (Test-PortableRootIdentity $DataSource $Transaction.base_identity)) { throw 'Original installation identity changed before data recovery; all data retained.' }
+  Resume-PortableDataMigration $Context $DataSource
   if ([IO.Directory]::Exists($Old)) {
     if (-not (Test-PortableRootIdentity $Old $Transaction.base_identity)) { throw 'Original backup identity does not match; all directories have been preserved.' }
     if ([IO.Directory]::Exists($Root)) {
@@ -2503,7 +2701,7 @@ try {
   Invoke-PortableIOWorker -Operation ValidatePackage -Arguments @{ Path=$PackagePath; Size=$ExpectedSize; Sha256=$ExpectedSha256 } | Out-Null
 
   Initialize-PortableFileIO
-  Assert-PortableUpdatePreflight -InstallRoot $InstallRoot -PackagePath $PackagePath -PackageType $PackageType | Out-Null
+  Assert-PortableUpdatePreflight -InstallRoot $InstallRoot -PackagePath $PackagePath -PackageType $PackageType -MoveUserData | Out-Null
   $UpdateWorkspace = [PangeaPortableFileIO]::CreateWorkspace($InstallParent)
   $CandidateRoot = Join-Path $UpdateWorkspace 'new'
   $BackupRoot = Join-Path $UpdateWorkspace 'old'
@@ -2534,16 +2732,20 @@ try {
 
   Set-UpdateStage '正在保留用户工作区、任务和本地技能…' 70 'user-data'
   Stop-PortableOwnedWriters -InstallRoot $InstallRoot
-  Copy-PortableUserData $InstallRoot $CandidateRoot
+  Initialize-PortableDataMigration $TransactionContext | Out-Null
+  Resume-PortableDataMigration $TransactionContext $InstallRoot
+  Mount-PortableData $TransactionContext $CandidateRoot
   New-UpdateProfileSnapshot -UserDataRoot $UserDataRoot -SnapshotRoot (Join-Path $UpdateWorkspace 'profile') | Out-Null
   $Transaction.profile_snapshot_ready=$true
   Set-PortableTransactionState $TransactionContext $Transaction 'candidate_ready'
-  Assert-PortableUserDataUnchanged -PreviousRoot $InstallRoot -CandidateRoot $CandidateRoot
+  Mount-PortableData $TransactionContext $InstallRoot
+  Mount-PortableData $TransactionContext $CandidateRoot
   Set-UpdateStage '正在切换版本，保留原版本备份…' 76 'switch-version'
   Set-PortableTransactionState $TransactionContext $Transaction 'original_move_pending'
   Move-UpdateDirectory $InstallRoot $BackupRoot -ResolveLocks
   Set-PortableTransactionState $TransactionContext $Transaction 'original_moved'
-  Assert-PortableUserDataUnchanged -PreviousRoot $BackupRoot -CandidateRoot $CandidateRoot
+  Mount-PortableData $TransactionContext $BackupRoot
+  Mount-PortableData $TransactionContext $CandidateRoot
   Set-UpdateStage '原版本已备份，正在启用新版本…' 78 'switch-version'
   Set-PortableTransactionState $TransactionContext $Transaction 'activate_pending'
   Move-UpdateDirectory $CandidateRoot $InstallRoot -ResolveLocks
