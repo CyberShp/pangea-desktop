@@ -17,6 +17,8 @@ on:
       - scripts/verify-fault-injection-compat.mjs
       - scripts/test-packaged-fault-injection.ps1
       - scripts/build-pangea-desktop.ps1
+      - scripts/verify-pangea-staging.mjs
+      - test/semantic-staging.test.ts
       - test/fault-injection-compat-gate.test.ts
       - .github/workflows/release*.yml
       - scripts/*release*.mjs
@@ -52,6 +54,8 @@ on:
       - scripts/verify-fault-injection-compat.mjs
       - scripts/test-packaged-fault-injection.ps1
       - scripts/build-pangea-desktop.ps1
+      - scripts/verify-pangea-staging.mjs
+      - test/semantic-staging.test.ts
       - test/fault-injection-compat-gate.test.ts
       - .github/workflows/release*.yml
       - scripts/*release*.mjs
@@ -214,7 +218,7 @@ jobs:
       - name: Verify proactive network settings entry and isolated dialog
         run: npx --no-install vitest run test/update-network-entry.test.ts test/update-network-view.test.ts test/update-network.test.ts test/git-proxy-ipc.test.ts test/windows-titlebar.test.ts
       - name: Verify existing package and patch contracts
-        run: npx --no-install vitest run test/release.test.ts test/fault-injection-compat-gate.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts test/portable-upgrade-policy.test.ts
+        run: npx --no-install vitest run test/release.test.ts test/semantic-staging.test.ts test/fault-injection-compat-gate.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts test/portable-upgrade-policy.test.ts
   windows-updater:
     runs-on: windows-latest
     timeout-minutes: 25

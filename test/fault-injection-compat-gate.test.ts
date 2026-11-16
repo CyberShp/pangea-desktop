@@ -27,7 +27,8 @@ describe('fault injection delivery acceptance', () => {
     const workflow = parse(await read('.github/workflows/release-pipeline-tests.yml'))
     for (const event of ['push', 'pull_request']) {
       for (const file of ['pangea.components.json', 'scripts/verify-fault-injection-compat.mjs',
-        'scripts/test-packaged-fault-injection.ps1', 'scripts/build-pangea-desktop.ps1']) {
+        'scripts/test-packaged-fault-injection.ps1', 'scripts/build-pangea-desktop.ps1',
+        'scripts/verify-pangea-staging.mjs', 'test/semantic-staging.test.ts']) {
         expect(workflow.on[event].paths).toContain(file)
       }
     }
