@@ -177,7 +177,7 @@ public static class MigrationFixture {
   if((Get-FileHash -LiteralPath $Source).Hash.ToLowerInvariant() -ne $Hash){throw 'Candidate cleanup damaged baseline'}
   Pass 'same-volume hard links verify bytes first; all updater overwrite paths reject shared targets'
   # Exercise real ERROR_NOT_SAME_DEVICE fallback when CI exposes another volume.
-  $OtherVolume=@(Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Root -and $_.Root -ine [IO.Path]::GetPathRoot($Root) -and [IO.Directory]::Exists($_.Root) }) | Select-Object -First 1
+  $OtherVolume=@(Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Root -match '^[A-Za-z]:\\$' -and $_.Root -ine [IO.Path]::GetPathRoot($Root) -and [IO.Directory]::Exists($_.Root) }) | Select-Object -First 1
   if($OtherVolume) {
     $Other=Join-Path $OtherVolume.Root ('pangea-link-fallback-'+[guid]::NewGuid().ToString('N'))
     try {
@@ -190,7 +190,7 @@ public static class MigrationFixture {
       Pass 'real cross-volume link failure falls back to a verified independent copy'
     } finally {if([IO.Directory]::Exists($Other)){Remove-PortableDirectory $Other}}
   } else {Pass 'SKIP cross-volume fallback: only one filesystem volume available'}
-  $Results.status='passed' 
+  $Results.status='passed'
 } catch {$Results.status='failed';$Results.error=$_.Exception.Message;throw}
 finally {
   if($ReportPath -and -not $ChildRoot){$Parent=Split-Path -Parent $ReportPath;if($Parent){[IO.Directory]::CreateDirectory($Parent)|Out-Null};[IO.File]::WriteAllText($ReportPath,($Results|ConvertTo-Json -Depth 10),(New-Object Text.UTF8Encoding($false)))}

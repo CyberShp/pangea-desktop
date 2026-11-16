@@ -16,13 +16,18 @@ $Legacy=$Current.Replace($LinkLine,'[PangeaPortableFileIO]::Copy($BasePath, $Tar
 Set-Item Function:Apply-CopyBaseline ([scriptblock]::Create($Legacy))
 Initialize-PortableFileIO
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$script:PortableIOWorker=$true;$script:UpdateForm=$null
+$script:PortableIOWorker=$true;$script:UpdateForm=$null;$script:UpdaterScriptPath=[IO.Path]::GetFullPath($Updater)
 function Set-UpdateStage {param($Message,$Percent,$Stage,$FilesCompleted,$FilesTotal)}
 $Root=Join-Path ([IO.Path]::GetTempPath()) ('pangea-benchmark-'+[guid]::NewGuid())
 $Base=Join-Path $Root 'installed';$Workspace=Join-Path $Root 'p-up-1';$Candidate=Join-Path $Workspace 'new';$Copy=Join-Path $Root 'copy-baseline'
 $LogPath=Join-Path $Root 'benchmark.log'
 $ExpectedBaseVersion='2.1.25';$ExpectedVersion='2.1.26';$Plan=@{package_channel='stable'}
 $Report=[ordered]@{status='running';file_count=$FileCount;user_bytes=$UserBytes;os=[Environment]::OSVersion.ToString();powershell=$PSVersionTable.PSVersion.ToString();scope='Native NTFS fixture: production patch reconstruction, legacy data copy+five fingerprints, data migration, switch, recovery. Signature admission and Electron startup are separate tests.';timings_ms=[ordered]@{};handle_scans=0}
+Set-Item Function:Get-BenchmarkOriginalHolders ([scriptblock]::Create((Get-Command Get-UpdateLockHolders).Definition))
+Set-Item Function:Start-BenchmarkOriginalServer ([scriptblock]::Create((Get-Command Start-UpdateHandleServer).Definition))
+$Report.handle_worker_starts=0
+function Get-UpdateLockHolders {param([string]$Root,[int]$TimeoutMilliseconds=15000);$Report.handle_scans++;Get-BenchmarkOriginalHolders $Root $TimeoutMilliseconds}
+function Start-UpdateHandleServer {$Report.handle_worker_starts++;Start-BenchmarkOriginalServer}
 function Timed([string]$Name,[scriptblock]$Action){$sw=[Diagnostics.Stopwatch]::StartNew();& $Action;$sw.Stop();$Report.timings_ms[$Name]=$sw.ElapsedMilliseconds;Write-Output ('TIMING '+$Name+'='+$sw.ElapsedMilliseconds+'ms')}
 try {
   [IO.Directory]::CreateDirectory($Base)|Out-Null

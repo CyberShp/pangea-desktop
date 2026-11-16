@@ -253,6 +253,7 @@ jobs:
             'scripts/verify-portable-batch-cleanup.ps1',
             'scripts/verify-portable-handle-server.ps1',
             'scripts/verify-portable-zero-copy.ps1',
+            'scripts/verify-portable-update-lifecycle.ps1',
             'scripts/verify-portable-update-locks.ps1',
             'scripts/verify-portable-patch-apply.ps1',
             'scripts/verify-portable-handle-resolution.ps1',
