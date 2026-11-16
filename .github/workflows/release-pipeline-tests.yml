@@ -2,6 +2,11 @@ name: Release pipeline regression
 on:
   workflow_dispatch:
     inputs:
+      build_unsigned:
+        description: Assemble an unsigned win-unpacked test instance from the component lock and validate it; never sign or publish
+        required: false
+        type: boolean
+        default: false
       package_run_id:
         description: Optional successful build run whose existing portable artifact should also be tested (no build or publish)
         required: false
@@ -83,7 +88,7 @@ jobs:
     # Run the plugin checks that gate release assembly on the release OS,
     # using the exact component lock, without signing or publishing a package.
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -124,6 +129,32 @@ jobs:
             npm --prefix ".pangea-build/plugin-source/plugins/$Plugin" test
             if ($LASTEXITCODE -ne 0) { throw "Windows plugin regression failed: $Plugin" }
           }
+      - name: Assemble unsigned Windows test instance
+        if: inputs.build_unsigned == true
+        shell: powershell
+        run: |
+          ./scripts/build-pangea-desktop.ps1 -SkipPackage
+          if ($LASTEXITCODE -ne 0) { throw 'Unsigned test staging failed.' }
+          npm run package:dir
+          if ($LASTEXITCODE -ne 0) { throw 'Unsigned win-unpacked assembly failed.' }
+      - name: Verify newly assembled packaged runtime with longpaths disabled
+        if: inputs.build_unsigned == true
+        shell: powershell
+        run: |
+          ./scripts/test-packaged-fault-injection.ps1 -PackageDirectory dist/win-unpacked -ReportPath .pangea-build/verification/fault-injection-packaged.json
+      - name: Verify newly assembled packaged runtime with longpaths enabled
+        if: ${{ !cancelled() && inputs.build_unsigned == true }}
+        shell: powershell
+        run: |
+          ./scripts/test-packaged-fault-injection.ps1 -PackageDirectory dist/win-unpacked -GitLongpathsDefault true -ReportPath .pangea-build/verification/fault-injection-packaged-enabled.json
+      - name: Retain unsigned Windows test instance
+        if: inputs.build_unsigned == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-win-unpacked-compatibility-${{ github.run_id }}
+          path: dist/win-unpacked/
+          retention-days: 7
+          if-no-files-found: error
       - name: Download existing portable artifact for acceptance
         if: ${{ !cancelled() && inputs.package_run_id != '' }}
         shell: pwsh

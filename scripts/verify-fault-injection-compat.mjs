@@ -29,7 +29,7 @@ try {
   const companion = await realpath(values.companion)
   report.companion = companion
   report.sourceHashes = {}
-  for (const file of ['src/index.js', 'src/fault-injection.js', 'src/repositories/git-source.js']) {
+  for (const file of ['src/index.js', 'src/fault-injection.js', 'src/repositories/git-source.js', 'src/repositories/git-environment.js']) {
     report.sourceHashes[file] = hash(await readFile(path.join(companion, file)))
   }
   const load = file => import(pathToFileURL(path.join(companion, 'src', file)).href)
