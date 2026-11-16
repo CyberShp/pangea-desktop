@@ -340,6 +340,8 @@ jobs:
           PYTHONUTF8: '1'
         run: |
           $ErrorActionPreference = 'Stop'
+          $env:PANGEA_RUNTIME_ROOT = (Resolve-Path '.pangea-build/agent-source').Path
+          $env:PYTHONPATH = (Resolve-Path '.pangea-build/agent-source/src').Path
           foreach ($Script in @('backend_evidence_contracts.py', 'coverage_reference_diagnostics.py', 'flow_path_diagnostics.py', 'model_review_removed.py', 'report_delivery_smoke.py')) {
             python ".pangea-build/agent-source/verification/$Script"
             if ($LASTEXITCODE -ne 0) { throw "Agent contract regression failed: $Script" }

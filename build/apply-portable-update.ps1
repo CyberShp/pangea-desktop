@@ -2102,9 +2102,23 @@ public static class PangeaPortableFileIO {
     }
     public bool Reuse(string source,string target,long size,string hash,string relative) {
       if(disposed) throw new ObjectDisposedException("ReuseSession");
-      PinDirectory(Parent(FullPath(source)),false);
-      PinDirectory(Parent(FullPath(target)),true);
+      lock(directories) {
+        PinDirectory(Parent(FullPath(source)),false);
+        PinDirectory(Parent(FullPath(target)),true);
+      }
       return ReuseVerifiedCore(source,target,size,hash,relative);
+    }
+    public int ReuseBatch(string baseRoot,string destination,string[] paths,long[] sizes,string[] hashes,bool copyOnly) {
+      if(disposed) throw new ObjectDisposedException("ReuseSession");
+      if(paths.Length!=sizes.Length || paths.Length!=hashes.Length) throw new IOException("Invalid reuse batch lengths.");
+      int linked=0;
+      var options=new System.Threading.Tasks.ParallelOptions(); options.MaxDegreeOfParallelism=copyOnly ? 1 : 4;
+      System.Threading.Tasks.Parallel.For(0,paths.Length,options,delegate(int index) {
+        string source=Child(baseRoot,paths[index]), target=Child(destination,paths[index]);
+        if(copyOnly) { Copy(source,target); Verify(target,sizes[index],hashes[index],paths[index]); }
+        else if(Reuse(source,target,sizes[index],hashes[index],paths[index])) System.Threading.Interlocked.Increment(ref linked);
+      });
+      return linked;
     }
     public void Dispose() {
       if(disposed) return;
@@ -2355,24 +2369,39 @@ function Apply-VerifiedPatch {
 
     [PangeaPortableFileIO]::EnsureDirectory($Destination)
     $Completed = 0; $Linked=0; $Copied=0; $LastProgress=[DateTime]::UtcNow
+    # Bounded batches keep progress observable and cap in-flight filesystem work.
+    # Copy-only is used by the controlled performance baseline, never the worker.
+    $CopyOnly=$false
+    $PendingPaths=[Collections.Generic.List[string]]::new()
+    $PendingSizes=[Collections.Generic.List[long]]::new()
+    $PendingHashes=[Collections.Generic.List[string]]::new()
     foreach ($File in $TargetManifest.files) {
       $Relative = [string]$File.path
-      $TargetPath = [PangeaPortableFileIO]::Child($Destination, $Relative)
       $Key = $Relative.ToLowerInvariant()
+      if ($Key.Replace('\','/').Split('/')[0] -in @('launch-root','local-skills')) { throw "Package manifest includes reserved user-data root: $Relative" }
       if ($Payload.ContainsKey($Key)) {
+        $TargetPath = [PangeaPortableFileIO]::Child($Destination, $Relative)
         Extract-ZipEntry $Zip ("payload/" + $Relative) $TargetPath
         [PangeaPortableFileIO]::Verify($TargetPath, [long]$File.size, [string]$File.sha256, $Relative)
+        $Completed++
       } else {
-        $BasePath = [PangeaPortableFileIO]::Child($BaseRoot, $Relative)
-        if (-not [PangeaPortableFileIO]::IsFile($BasePath)) { throw "Base package is missing unchanged file: $Relative" }
-        if ($Reuse.Reuse($BasePath, $TargetPath, [long]$File.size, [string]$File.sha256, $Relative)) { $Linked++ } else { $Copied++ }
+        $PendingPaths.Add($Relative); $PendingSizes.Add([long]$File.size); $PendingHashes.Add([string]$File.sha256)
       }
-      $Completed++
-      if ($Completed % 100 -eq 0 -or $Completed -eq $TargetManifest.files.Count -or ([DateTime]::UtcNow-$LastProgress).TotalSeconds -ge 2) {
+      if ($PendingPaths.Count -ge 512) {
+        $BatchLinked=$Reuse.ReuseBatch($BaseRoot,$Destination,$PendingPaths.ToArray(),$PendingSizes.ToArray(),$PendingHashes.ToArray(),$CopyOnly)
+        $Linked+=$BatchLinked; $Copied+=$PendingPaths.Count-$BatchLinked; $Completed+=$PendingPaths.Count
+        $PendingPaths.Clear();$PendingSizes.Clear();$PendingHashes.Clear()
+      }
+      if ($Completed -gt 0 -and (($Completed % 512 -eq 0 -and $PendingPaths.Count -eq 0) -or ([DateTime]::UtcNow-$LastProgress).TotalSeconds -ge 2)) {
         Set-UpdateStage "正在重建并校验补丁：$Completed / $($TargetManifest.files.Count) 个文件" (42 + [int](24 * $Completed / $TargetManifest.files.Count)) 'rebuild' $Completed $TargetManifest.files.Count
         $LastProgress=[DateTime]::UtcNow
       }
     }
+    if ($PendingPaths.Count) {
+      $BatchLinked=$Reuse.ReuseBatch($BaseRoot,$Destination,$PendingPaths.ToArray(),$PendingSizes.ToArray(),$PendingHashes.ToArray(),$CopyOnly)
+      $Linked+=$BatchLinked; $Copied+=$PendingPaths.Count-$BatchLinked; $Completed+=$PendingPaths.Count
+    }
+    Set-UpdateStage "补丁已重建并逐文件校验：$Completed / $($TargetManifest.files.Count) 个文件" 66 'rebuild' $Completed $TargetManifest.files.Count
     Write-UpdateLog "patch reconstruction: linked=$Linked; copied=$Copied; payload=$($Payload.Count)"
     Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json' (Join-Path $Destination 'resources\update\pangea-package-manifest.json')
     Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json.sig' (Join-Path $Destination 'resources\update\pangea-package-manifest.json.sig')

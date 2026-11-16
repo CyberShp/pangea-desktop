@@ -10,9 +10,9 @@ foreach($f in $a.FindAll({param($n) $n -is [Management.Automation.Language.Funct
 # A controlled baseline: the identical production patch function, with only the
 # unchanged-file strategy replaced by the previous copy-then-verify algorithm.
 $Current=(Get-Command Apply-VerifiedPatch).Definition
-$LinkLine='if ($Reuse.Reuse($BasePath, $TargetPath, [long]$File.size, [string]$File.sha256, $Relative)) { $Linked++ } else { $Copied++ }'
+$LinkLine='$CopyOnly=$false'
 if(-not $Current.Contains($LinkLine)){throw 'Benchmark baseline transformation no longer matches production.'}
-$Legacy=$Current.Replace($LinkLine,'[PangeaPortableFileIO]::Copy($BasePath, $TargetPath); [PangeaPortableFileIO]::Verify($TargetPath, [long]$File.size, [string]$File.sha256, $Relative); $Copied++')
+$Legacy=$Current.Replace($LinkLine,'$CopyOnly=$true')
 Set-Item Function:Apply-CopyBaseline ([scriptblock]::Create($Legacy))
 Initialize-PortableFileIO
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -89,12 +89,16 @@ try {
     }
     [IO.File]::WriteAllText((Join-Path $Base 'launch-root/post-activation.txt'),'retained on rollback')
     Timed 'rollback' {Restore-PortableUpdateTransaction $Context $Tx $Profile|Out-Null}
+    Write-Output 'VERIFY: restored program identity'
     if((Get-PortableRootIdentity $Base).version -ne $ExpectedBaseVersion){throw 'Rollback version mismatch'}
-    if((Get-FileHash -LiteralPath (Join-Path $Base 'launch-root/repository.bin')).Hash -ne $Before){throw 'User bytes changed'}
+    Write-Output 'VERIFY: retained 1 GiB bytes through managed data junction'
+    [PangeaPortableFileIO]::Verify((Join-Path $Base 'launch-root/repository.bin'),$UserBytes,$Before.ToLowerInvariant(),'repository.bin')
+    Write-Output 'VERIFY: retained bytes confirmed'
     if([IO.File]::ReadAllText((Join-Path $Base 'launch-root/post-activation.txt')) -ne 'retained on rollback'){throw 'Rollback lost new edit'}
     $Receipt=Read-PortableDataReceipt $Context;$Data=Get-PortableDataContext $Context
     foreach($Entry in $Receipt.entries){if([PangeaPortableFileIO]::DirectoryIdentity((Join-Path $Data.Root $Entry.name),$false) -ne $Entry.identity){throw 'Data directory identity changed'}}
   } finally {$Lock.Dispose()}
+  Write-Output 'VERIFY: migration receipt identities confirmed'
   $Report.copy_total_ms=$Report.timings_ms.copy_patch+$Report.timings_ms.copy_user_data_and_five_fingerprints
   $Report.zero_copy_total_ms=$Report.timings_ms.hardlink_patch+$Report.timings_ms.zero_copy_data+$Report.timings_ms.switch
   $Report.target_under_60_seconds=($Report.zero_copy_total_ms -lt 60000)

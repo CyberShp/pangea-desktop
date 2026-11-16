@@ -209,6 +209,18 @@ public static class MigrationFixture {
   [PangeaPortableFileIO]::MoveDirectory($Base,($Base+'-released'))
   [PangeaPortableFileIO]::MoveDirectory(($Base+'-released'),$Base)
   Pass 'reuse session pins parent identity, rejects reparse parents and releases every handle before switching'
+  $BatchBase=Join-Path $Root 'batch-base';$BatchNew=Join-Path $Root 'batch-new'
+  [IO.Directory]::CreateDirectory($BatchBase)|Out-Null
+  foreach($Name in @('one.txt','two.txt','bad.txt')){[IO.File]::WriteAllText((Join-Path $BatchBase $Name),'signed bytes')}
+  $Reuse=[PangeaPortableFileIO]::BeginReuse()
+  try {
+    $Rejected=$false
+    try{$Reuse.ReuseBatch($BatchBase,$BatchNew,[string[]]@('one.txt','two.txt','bad.txt'),[long[]]@($Size,$Size,$Size),[string[]]@($Hash,$Hash,('0'*64)),$false)|Out-Null}catch{$Rejected=$true}
+    if(-not $Rejected -or [IO.File]::Exists((Join-Path $BatchNew 'bad.txt'))){throw 'Concurrent batch accepted corrupt source'}
+    foreach($Name in @('one.txt','two.txt','bad.txt')){if((Get-FileHash -LiteralPath (Join-Path $BatchBase $Name)).Hash.ToLowerInvariant() -ne $Hash){throw 'Concurrent batch changed baseline'}}
+  } finally {$Reuse.Dispose()}
+  [PangeaPortableFileIO]::MoveDirectory($BatchBase,($BatchBase+'-released'))
+  Pass 'bounded concurrent batch rejects a corrupt source, retains baseline bytes and releases directory handles on failure'
   # Exercise real ERROR_NOT_SAME_DEVICE fallback when CI exposes another volume.
   $OtherVolume=@(Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Root -match '^[A-Za-z]:\\$' -and $_.Root -ine [IO.Path]::GetPathRoot($Root) -and [IO.Directory]::Exists($_.Root) }) | Select-Object -First 1
   if($OtherVolume) {

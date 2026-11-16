@@ -99,7 +99,7 @@ try {
       foreach($Pair in @(@('launch-root/keep.txt','user data'),@('local-skills/keep.txt','private skill'),@('launch-root/new-edit.txt','new version data'))){if([IO.File]::ReadAllText((Join-Path $Install $Pair[0])) -ne $Pair[1]){throw 'Supervisor lost user bytes'}}
       $Health=if($Mode -eq 'healthy'){$Plan.health_marker}else{"$PlanPath.rollback-healthy.json"}
       if(-not [IO.File]::Exists($Health)){throw 'Expected healthy native process was not observed'}
-      if($UserBytes -gt 0 -and (Get-FileHash -LiteralPath (Join-Path $Install 'launch-root/repository.bin')).Hash -ne $DataHash){throw 'Whole supervisor changed user payload'}
+      if($UserBytes -gt 0){Initialize-PortableFileIO;[PangeaPortableFileIO]::Verify((Join-Path $Install 'launch-root/repository.bin'),$UserBytes,$DataHash.ToLowerInvariant(),'repository.bin')}
       $Context=Get-PortableTransactionContext $Install;$Receipt=Read-PortableDataReceipt $Context
       if(-not $Receipt){throw 'Supervisor omitted durable data receipt'}
       $Message="main supervisor ${Mode}: real patch workers, native launch, health, program version and new user edits verified"
