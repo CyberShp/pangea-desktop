@@ -36,10 +36,15 @@ public static class PangeaUpdateHandles {
   $Info.RedirectStandardInput=$true; $Info.RedirectStandardOutput=$true; $Info.RedirectStandardError=$true
   $Worker=New-Object Diagnostics.Process; $Worker.StartInfo=$Info
   if (-not $Worker.Start()) { throw 'fixture start failed' }
-  # Reproduce the Framework pipe BOM/console-code-page mismatch on every OS.
-  $Preamble=[byte[]]@(239,187,191)
-  $Worker.StandardInput.BaseStream.Write($Preamble,0,$Preamble.Length)
-  $Worker.StandardInput.BaseStream.Flush()
+  # Framework Process.Start already flushes its encoding preamble. Core's
+  # default writer has none; inject one there to exercise the same boundary.
+  $NativePreamble=$Worker.StandardInput.Encoding.GetPreamble()
+  if ($NativePreamble.Length -eq 0) {
+    $Preamble=[byte[]]@(239,187,191)
+    $Worker.StandardInput.BaseStream.Write($Preamble,0,$Preamble.Length)
+    $Worker.StandardInput.BaseStream.Flush()
+  }
+  Write-Host "INFO: stdin encoding=$($Worker.StandardInput.Encoding.WebName); native preamble bytes=$($NativePreamble.Length)"
   $Job=[pscustomobject]@{Worker=$Worker}
   $Job | Add-Member -MemberType ScriptMethod -Name Dispose -Value { if (-not $this.Worker.HasExited) { $this.Worker.Kill(); $null=$this.Worker.WaitForExit(5000) } }
   $script:HandleServerState=[pscustomobject]@{Process=$Worker; Job=$Job; Errors=$Worker.StandardError.ReadToEndAsync(); Sequence=0}
