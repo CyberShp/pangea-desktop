@@ -14,6 +14,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+if ($SkipTests -and -not $SkipPackage) {
+  throw 'SkipTests is only allowed with SkipPackage; deliverable packages require validation.'
+}
+
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $StageRoot = Join-Path $ProjectRoot '.pangea-build'
 $SourceRoot = Join-Path $StageRoot 'sources'
@@ -334,6 +338,11 @@ Invoke-Checked 'node' $UpdateArguments
 
 if (-not $SkipTests) {
   Write-Host 'Running focused product checks...'
+  Invoke-Checked 'node' @(
+    (Join-Path $ProjectRoot 'scripts/verify-fault-injection-compat.mjs'),
+    '--companion', (Join-Path $PluginRoot 'dsh-pangea-companion'),
+    '--require-windows', '--report', (Join-Path $StageRoot 'verification/fault-injection-source.json')
+  )
   foreach ($Plugin in @('dsh-pangea', 'dsh-pangea-companion', 'dsh-pangea-asset-catalog')) {
     Invoke-Checked 'npm' @('--prefix', (Join-Path $PluginRoot $Plugin), 'test')
   }
@@ -362,6 +371,13 @@ if (-not $SkipTests) {
 if (-not $SkipPackage) {
   Write-Host 'Packaging the Windows portable ZIP...'
   Invoke-Checked 'npm' @('run', 'package:dir')
+  # Mandatory before signing: use the exact Node and companion in the unpacked product.
+  Invoke-Checked 'powershell.exe' @(
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', (Join-Path $ProjectRoot 'scripts/test-packaged-fault-injection.ps1'),
+    '-PackageDirectory', (Join-Path $ProjectRoot 'dist/win-unpacked'),
+    '-ReportPath', (Join-Path $StageRoot 'verification/fault-injection-packaged.json')
+  )
   if (-not $SkipTests) {
     Write-Host 'Running packaged Cordis analysis launch integration...'
     $PackagedAppRoot = Join-Path $ProjectRoot 'dist\win-unpacked\resources\app'
