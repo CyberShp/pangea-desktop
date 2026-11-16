@@ -2,6 +2,11 @@ name: Release pipeline regression
 on:
   workflow_dispatch:
     inputs:
+      benchmark_native:
+        description: Include the 100000-file and 1 GiB native performance comparison
+        required: false
+        type: boolean
+        default: true
       native_zero_copy_only:
         description: Run only native zero-copy migration, lifecycle and benchmark tests
         required: false
@@ -288,7 +293,7 @@ jobs:
         shell: powershell
         run: ./scripts/verify-portable-update-lifecycle.ps1
       - name: Measure native 100k-file patch and 1 GiB user-data migration
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.benchmark_native != false }}
         shell: powershell
         run: |
           ./scripts/measure-portable-zero-copy.ps1

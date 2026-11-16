@@ -2077,7 +2077,12 @@ public static class PangeaPortableFileIO {
     bool disposed;
     void PinDirectory(string path,bool create) {
       string full=FullPath(path);
-      if(directories.ContainsKey(full)) return;
+      if(directories.ContainsKey(full)) {
+        FileInfo current;
+        if(!GetFileInformationByHandle(directories[full],out current)) throw Error("Recheck pinned directory",full,Marshal.GetLastWin32Error());
+        if((current.Attributes&0x410)!=0x10) throw new IOException("Pinned package directory became a reparse point: "+full);
+        return;
+      }
       int rootLength=full.StartsWith(@"\\",StringComparison.Ordinal) ? full.IndexOf('\\',full.IndexOf('\\',2)+1) : 3;
       if(rootLength<0 || full.TrimEnd('\\').Length<=rootLength) return;
       string parent=Parent(full);
@@ -2086,7 +2091,7 @@ public static class PangeaPortableFileIO {
       if(create) EnsureDirectory(full);
       // Read access is intentional: a zero-access handle does not enforce the
       // sharing restriction on Windows. Pin each directory against replacement.
-      var handle=CreateFileW(Extended(full),0x80000000u,1,IntPtr.Zero,3,0x02200000u,IntPtr.Zero);
+      var handle=CreateFileW(Extended(full),0x80000000u,create ? 3u : 1u,IntPtr.Zero,3,0x02200000u,IntPtr.Zero);
       try {
         if(handle.IsInvalid) throw Error("Pin package directory",full,Marshal.GetLastWin32Error());
         FileInfo info;
