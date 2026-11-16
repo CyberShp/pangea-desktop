@@ -51,7 +51,9 @@ try {
   await sourceGit(source, ['init', '-b', 'personal-A'])
   await sourceGit(source, ['config', '--local', 'core.longpaths', 'false'])
   // Keep the repository root below MAX_PATH; put depth in tracked file names.
-  const relative = [...Array.from({ length: 6 }, (_, i) => `layer-${i}-${'x'.repeat(25)}`), 'target.c'].join('/')
+  const relative = [...Array.from({ length: 9 }, (_, i) => `layer-${i}-${'x'.repeat(25)}`), 'target.c'].join('/')
+  assert.ok(relative.length > 280, `tracked relative path must exceed MAX_PATH: ${relative.length}`)
+  report.trackedRelativePathLength = relative.length
   const original = 'int operation(void) { return 0; }\n'
   const files = new Map([[relative, Buffer.from(original)], ['bom.c', Buffer.from('\ufefffirst\n')],
     ['binary.dat', Buffer.from([0, 10, 65])], ['invalid.dat', Buffer.from([255, 10, 65])]])
