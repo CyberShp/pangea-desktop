@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - pangea.components.json
       - .github/workflows/release*.yml
       - scripts/*release*.mjs
       - scripts/*historical*.mjs
@@ -33,6 +34,7 @@ on:
   push:
     branches: [langgraph]
     paths:
+      - pangea.components.json
       - .github/workflows/release*.yml
       - scripts/*release*.mjs
       - scripts/*historical*.mjs
@@ -63,6 +65,40 @@ on:
 permissions:
   contents: read
 jobs:
+  windows-components:
+    # Run the plugin checks that gate release assembly on the release OS,
+    # using the exact component lock, without signing or publishing a package.
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.9.0
+          cache: npm
+      - name: Install locked test dependencies
+        run: npm ci --ignore-scripts --legacy-peer-deps
+      - name: Check out the locked plugin source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Component = (Get-Content pangea.components.json -Raw | ConvertFrom-Json).dshPangea
+          if ($Component.commit -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid plugin commit lock.' }
+          git clone --no-checkout $Component.repository .pangea-build/plugin-source
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch locked plugin source.' }
+          git -C .pangea-build/plugin-source checkout --detach $Component.commit
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check out locked plugin commit.' }
+          $Actual = git -C .pangea-build/plugin-source rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $Actual -cne $Component.commit) { throw 'Plugin checkout differs from component lock.' }
+      - name: Verify the release plugin suites on Windows
+        shell: pwsh
+        run: |
+          cc --version
+          if ($LASTEXITCODE -ne 0) { throw 'The compiled fault-injection fixture requires a C compiler.' }
+          foreach ($Plugin in @('dsh-pangea', 'dsh-pangea-companion', 'dsh-pangea-asset-catalog')) {
+            npm --prefix ".pangea-build/plugin-source/plugins/$Plugin" test
+            if ($LASTEXITCODE -ne 0) { throw "Windows plugin regression failed: $Plugin" }
+          }
   tooling:
     runs-on: ubuntu-latest
     timeout-minutes: 20

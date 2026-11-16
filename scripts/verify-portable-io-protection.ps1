@@ -72,6 +72,80 @@ $Plan=@{package_channel='stable'}
 $ExpectedVersion='2.1.18'; $ExpectedBaseVersion='2.1.17'
 $Quote={param($Value) "'"+$Value.Replace("'","''")+"'"}
 $Shell="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+$ProgressDefinition=(Get-Command Publish-PortableIOProgress).ScriptBlock
+$script:TimeoutWriter=$null; $CrashWriter=$null; $Supervisor=$null
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.InteropServices;
+public static class PangeaWriterProbe {
+  [DllImport("kernel32.dll", SetLastError=true)]
+  static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool member);
+  public static bool IsMember(Process process, object job) {
+    // Inspect this exact production job, not the runner's enclosing job.
+    var field=job.GetType().GetField("handle",BindingFlags.Instance|BindingFlags.NonPublic);
+    if(field==null) throw new InvalidOperationException("Cannot inspect the owned worker job.");
+    bool member;
+    if(!IsProcessInJob(process.Handle,(IntPtr)field.GetValue(job),out member))
+      throw new Win32Exception(Marshal.GetLastWin32Error());
+    return member;
+  }
+}
+'@
+function Get-WriterProbe {
+  param([string]$Prefix,$Job=$null)
+  if (-not [IO.File]::Exists("$Prefix.pid")) { return $null }
+  [int]$WriterId=0
+  if (-not [int]::TryParse([IO.File]::ReadAllText("$Prefix.pid"),[ref]$WriterId)) { return $null }
+  $ExpectedStart=[long][IO.File]::ReadAllText("$Prefix.started")
+  try { $Process=[Diagnostics.Process]::GetProcessById($WriterId) } catch [ArgumentException] { return $null }
+  try {
+    # Retain the original kernel object before termination; a numeric PID is
+    # neither a lifetime guarantee nor evidence that its process is running.
+    $null=$Process.Handle
+    $Started=$Process.StartTime.ToUniversalTime().Ticks
+    if ($Started -ne $ExpectedStart) { $Process.Dispose(); return $null }
+    $Member=if ($null -ne $Job) { [PangeaWriterProbe]::IsMember($Process,$Job) } else { $null }
+    return [pscustomobject]@{Process=$Process;Id=$WriterId;Started=$Started;Member=$Member;Wrote=$false}
+  } catch { $Process.Dispose(); throw }
+}
+function Update-WriterProbe {
+  param($Probe,[string]$Prefix)
+  if ($Probe -and [IO.File]::Exists("$Prefix.data") -and (Get-Item -LiteralPath "$Prefix.data").Length -gt 0) { $Probe.Wrote=$true }
+}
+function Get-WriterExitEvidence {
+  param($Probe,[string]$Prefix)
+  # Check immediately, before the observation window. It must not serve as
+  # extra time for the production cleanup to finish.
+  $Exited=$Probe -and $Probe.Process.WaitForExit(0)
+  $Before=if ([IO.File]::Exists("$Prefix.data")) { (Get-Item -LiteralPath "$Prefix.data").Length } else { -1 }
+  Start-Sleep -Milliseconds 300
+  $After=if ([IO.File]::Exists("$Prefix.data")) { (Get-Item -LiteralPath "$Prefix.data").Length } else { -1 }
+  $Identity='original process handle was not captured'
+  if ($Probe) {
+    $Current=Get-Process -Id $Probe.Id -ErrorAction SilentlyContinue
+    try {
+      $Identity=if (-not $Current) { 'PID no longer enumerated' }
+        elseif ($Current.StartTime.ToUniversalTime().Ticks -ne $Probe.Started) { 'PID reused by a different process' }
+        elseif ($Current.HasExited) { 'original PID still enumerated but exited' }
+        else { 'original PID still enumerated' }
+    } catch { $Identity='PID enumeration changed during diagnosis: '+$_.Exception.Message }
+    finally { if ($Current) { $Current.Dispose() } }
+  }
+  return [pscustomobject]@{Exited=$Exited;Before=$Before;After=$After;Detail="handle-signaled=$Exited; bytes=$Before->$After; identity=$Identity"}
+}
+function Stop-WriterProbe {
+  param($Probe)
+  if (-not $Probe) { return }
+  try {
+    if (-not $Probe.Process.WaitForExit(0)) {
+      $Probe.Process.Kill()
+      if (-not $Probe.Process.WaitForExit(5000)) { throw "Fixture writer did not stop: PID $($Probe.Id)" }
+    }
+  } finally { $Probe.Process.Dispose() }
+}
 try {
   New-Item -ItemType Directory -Path (Join-Path $Source 'resources/update'),(Join-Path $Source 'launch-root'),$ZipRoot -Force | Out-Null
   [IO.File]::WriteAllText((Join-Path $Source 'app.exe'),'installed fixture')
@@ -135,19 +209,36 @@ try {
     $ChildEncoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($ChildBody))
     $Body='while(-not [IO.File]::Exists(' + (& $Quote ($Control+'.go')) + ')){Start-Sleep -Milliseconds 20};' +
       '$child=Start-Process -FilePath ' + (& $Quote $Shell) + ' -ArgumentList @("-NoProfile","-NonInteractive","-EncodedCommand",' + (& $Quote $ChildEncoded) + ') -PassThru -WindowStyle Hidden;' +
+      '[IO.File]::WriteAllText(' + (& $Quote ($script:Probe+'.started')) + ',$child.StartTime.ToUniversalTime().Ticks);' +
       '[IO.File]::WriteAllText(' + (& $Quote ($script:Probe+'.pid')) + ',$child.Id);Start-Sleep -Seconds 120'
     $Encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Body))
     Microsoft.PowerShell.Management\Start-Process -FilePath $Shell -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand',$Encoded) -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -RedirectStandardOutput $RedirectStandardOutput -RedirectStandardError $RedirectStandardError -PassThru
   }
+  function Publish-PortableIOProgress {
+    param([string]$Control,[long]$LastSequence=0)
+    if (-not $script:TimeoutWriter) {
+      $OwnedJob=(Get-Variable -Name Job -Scope 1 -ErrorAction Stop).Value
+      $script:TimeoutWriter=Get-WriterProbe -Prefix $script:Probe -Job $OwnedJob
+    }
+    Update-WriterProbe -Probe $script:TimeoutWriter -Prefix $script:Probe
+    & $ProgressDefinition -Control $Control -LastSequence $LastSequence
+  }
   $Rejected=$false
-  try { Invoke-PortableIOWorker -Operation Preflight -Arguments @{} -TimeoutSeconds 5 | Out-Null } catch { $Rejected=$_.Exception.Message -like '*timed out*' }
-  Remove-Item Function:\Start-Process
-  if (-not $Rejected -or $script:UnsafeIOWorker -or -not [IO.File]::Exists("$script:Probe.pid")) { throw 'Timeout did not terminate and confirm the owned worker tree.' }
-  $ChildId=[int][IO.File]::ReadAllText("$script:Probe.pid")
-  if (Get-Process -Id $ChildId -ErrorAction SilentlyContinue) { throw 'The timed-out helper left a writer alive.' }
-  $Length=(Get-Item -LiteralPath "$script:Probe.data").Length
-  Start-Sleep -Milliseconds 300
-  if ((Get-Item -LiteralPath "$script:Probe.data").Length -ne $Length) { throw 'The timed-out helper continued writing after control returned.' }
+  $TimeoutError='none'
+  try { Invoke-PortableIOWorker -Operation Preflight -Arguments @{} -TimeoutSeconds 5 | Out-Null }
+  catch { $TimeoutError=$_.Exception.Message; $Rejected=$TimeoutError -like '*timed out*' }
+  finally {
+    Remove-Item Function:\Start-Process
+    Set-Item Function:\Publish-PortableIOProgress -Value $ProgressDefinition
+  }
+  # Always collect write evidence, even when the exit/ownership assertion fails.
+  $Evidence=Get-WriterExitEvidence -Probe $script:TimeoutWriter -Prefix $script:Probe
+  if (-not $Rejected -or $script:UnsafeIOWorker -or -not $script:TimeoutWriter -or -not $script:TimeoutWriter.Wrote) {
+    throw "Timeout fixture did not exercise and confirm an active writer: error=$TimeoutError; unsafe=$script:UnsafeIOWorker; $($Evidence.Detail)"
+  }
+  if (-not $script:TimeoutWriter.Member) { throw "Timeout fixture writer was outside the owned job before termination: PID $($script:TimeoutWriter.Id); $($Evidence.Detail)" }
+  if (-not $Evidence.Exited -or $Evidence.Before -ne $Evidence.After) { throw "Timed-out writer was not quiescent when control returned: PID $($script:TimeoutWriter.Id); $($Evidence.Detail)" }
+  Write-Output "INFO: timeout writer PID $($script:TimeoutWriter.Id); owned-job=$($script:TimeoutWriter.Member); $($Evidence.Detail)"
   Write-Output 'PASS: timeout kills the whole owned job and confirms no descendant can keep writing'
 
   # Abrupt supervisor death bypasses PowerShell finally blocks. The kernel
@@ -158,20 +249,46 @@ try {
   $JobDefinition=($Definitions | Where-Object {$_.Name -eq 'Initialize-PortableWorkerJob'}).Extent.Text
   $HostBody=$JobDefinition + "`nInitialize-PortableWorkerJob;" + '$job=New-Object PangeaPortableWorkerJob;' +
     '$worker=Start-Process -FilePath ' + (& $Quote $Shell) + ' -ArgumentList @("-NoProfile","-NonInteractive","-EncodedCommand",' + (& $Quote $WriterEncoded) + ') -PassThru -WindowStyle Hidden;' +
-    '$job.Attach($worker);[IO.File]::WriteAllText(' + (& $Quote ($CrashProbe+'.pid')) + ',$worker.Id);Start-Sleep -Seconds 2;[Environment]::Exit(99)'
+    '$job.Attach($worker);[IO.File]::WriteAllText(' + (& $Quote ($CrashProbe+'.started')) + ',$worker.StartTime.ToUniversalTime().Ticks);' +
+    '[IO.File]::WriteAllText(' + (& $Quote ($CrashProbe+'.pid')) + ',$worker.Id);' +
+    '$deadline=[DateTime]::UtcNow.AddSeconds(30);while(-not [IO.File]::Exists(' + (& $Quote ($CrashProbe+'.release')) + ')){if([DateTime]::UtcNow -ge $deadline){throw "Writer capture handshake timed out."};Start-Sleep -Milliseconds 20};[Environment]::Exit(99)'
   $HostEncoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($HostBody))
   $Supervisor=Start-Process -FilePath $Shell -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand',$HostEncoded) -PassThru -WindowStyle Hidden
   try {
-    if (-not $Supervisor.WaitForExit(20000)) { $Supervisor.Kill(); throw 'Parent-death fixture did not finish.' }
-    $ChildId=[int][IO.File]::ReadAllText($CrashProbe+'.pid')
-    $Deadline=[DateTime]::UtcNow.AddSeconds(5)
-    while ((Get-Process -Id $ChildId -ErrorAction SilentlyContinue) -and [DateTime]::UtcNow -lt $Deadline) { Start-Sleep -Milliseconds 50 }
-    if (Get-Process -Id $ChildId -ErrorAction SilentlyContinue) { throw 'Job writer survived abrupt supervisor exit.' }
-    if (-not [IO.File]::Exists($CrashProbe+'.data')) { throw 'Parent-death fixture never exercised an active writer.' }
-  } finally { $Supervisor.Dispose() }
+    $null=$Supervisor.Handle
+    $Deadline=[DateTime]::UtcNow.AddSeconds(20)
+    do {
+      if (-not $CrashWriter) { $CrashWriter=Get-WriterProbe -Prefix $CrashProbe }
+      Update-WriterProbe -Probe $CrashWriter -Prefix $CrashProbe
+      if ($CrashWriter -and $CrashWriter.Wrote) { break }
+      if ($Supervisor.WaitForExit(20)) { throw 'Parent-death supervisor exited before its writer was captured.' }
+    } while ([DateTime]::UtcNow -lt $Deadline)
+    if (-not $CrashWriter -or -not $CrashWriter.Wrote) { throw 'Parent-death fixture never exercised an active writer.' }
+    [IO.File]::WriteAllText($CrashProbe+'.release','captured active writer')
+    if (-not $Supervisor.WaitForExit(20000) -or $Supervisor.ExitCode -ne 99) { throw 'Parent-death fixture did not finish with the expected abrupt exit.' }
+    # Job-close termination is asynchronous; wait on the original object with
+    # the existing five-second budget, rather than polling a reusable PID.
+    $Stopped=$CrashWriter.Process.WaitForExit(5000)
+    $Evidence=Get-WriterExitEvidence -Probe $CrashWriter -Prefix $CrashProbe
+    if (-not $Stopped -or -not $Evidence.Exited -or $Evidence.Before -ne $Evidence.After) { throw "Job writer survived abrupt supervisor exit: PID $($CrashWriter.Id); $($Evidence.Detail)" }
+    Write-Output "INFO: parent-death writer PID $($CrashWriter.Id); $($Evidence.Detail)"
+  } finally {
+    if (-not $Supervisor.WaitForExit(0)) { $Supervisor.Kill(); $null=$Supervisor.WaitForExit(5000) }
+    $Supervisor.Dispose(); $Supervisor=$null
+  }
   Write-Output 'PASS: kill-on-job-close stops file writers after abrupt supervisor exit'
 } finally {
   if (Test-Path Function:\Start-Process) { Remove-Item Function:\Start-Process }
+  Set-Item Function:\Publish-PortableIOProgress -Value $ProgressDefinition
+  try {
+    # On a failed capture, only clean up a PID whose creation time still
+    # matches the fixture record; never stop a process that reused the PID.
+    if (-not $script:TimeoutWriter) { $script:TimeoutWriter=Get-WriterProbe -Prefix (Join-Path $Root 'timeout-writer') }
+    Stop-WriterProbe $script:TimeoutWriter
+  } finally {
+    if (-not $CrashWriter) { $CrashWriter=Get-WriterProbe -Prefix (Join-Path $Root 'parent-death') }
+    Stop-WriterProbe $CrashWriter
+  }
   $script:PortableIOWorker=$true
   if ([IO.Directory]::Exists($Root)) { Remove-PortableDirectory $Root }
 }
