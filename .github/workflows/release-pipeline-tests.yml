@@ -309,3 +309,38 @@ jobs:
           name: windows-zero-copy-evidence
           path: .pangea-build/verification/portable-zero-copy*.json
           if-no-files-found: warn
+  windows-agent-contracts:
+    if: inputs.native_zero_copy_only != true
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the exact Agent candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Component = (Get-Content pangea.components.json -Raw | ConvertFrom-Json).pangeaAgent
+          if ($Component.commit -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid Agent commit lock.' }
+          git clone --no-checkout $Component.repository .pangea-build/agent-source
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch Agent source.' }
+          git -C .pangea-build/agent-source checkout --detach $Component.commit
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check out Agent lock.' }
+          $Actual = git -C .pangea-build/agent-source rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $Actual -cne $Component.commit) { throw 'Agent checkout differs from lock.' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: .pangea-build/agent-source/pyproject.toml
+      - name: Install the pinned Agent candidate
+        run: python -m pip install ./.pangea-build/agent-source
+      - name: Verify evidence contracts and historical workflow compatibility
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($Script in @('backend_evidence_contracts.py', 'coverage_reference_diagnostics.py', 'flow_path_diagnostics.py', 'model_review_removed.py', 'report_delivery_smoke.py')) {
+            python ".pangea-build/agent-source/verification/$Script"
+            if ($LASTEXITCODE -ne 0) { throw "Agent contract regression failed: $Script" }
+          }

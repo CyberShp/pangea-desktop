@@ -12,8 +12,8 @@
   },
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
-    "branch": "langgraph",
-    "commit": "390aa7d11d062f523ff2b68331317ff09be1890c"
+    "branch": "codex/backend-contracts-20261117",
+    "commit": "96f572106c685ce6b3070b7c97128a35f10988fb"
   },
   "python": {
     "version": "3.12.10",
