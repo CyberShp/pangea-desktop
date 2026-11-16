@@ -938,7 +938,11 @@ function Start-UpdateHandleServer {
 function Invoke-UpdateHandleServer {
   # Base64 UTF-8 JSON lines over inherited pipes (independent of console code page): no shared mutable command file,
   # no executable input, and EOF ends the worker when the parent exits normally.
-  while ($null -ne ($Line=[Console]::ReadLine())) {
+  # .NET Framework redirected stdin may start with an encoding preamble.
+  # Console.ReadLine uses the console code page and can expose that BOM as
+  # non-base64 characters. Decode the pipe itself and detect its preamble.
+  $InputReader=New-Object IO.StreamReader([Console]::OpenStandardInput(), [Text.Encoding]::UTF8, $true)
+  while ($null -ne ($Line=$InputReader.ReadLine())) {
     try {
       $Request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Line)) | ConvertFrom-Json
       Initialize-HandleInspector
@@ -963,8 +967,10 @@ function Get-UpdateLockHolders {
     if ($State.Process.HasExited) { throw 'Local handle inspector exited; no occupying processes were stopped.' }
     $State.Sequence++
     $Request=ConvertTo-Json -InputObject @{sequence=$State.Sequence; root=$Root} -Compress
-    $State.Process.StandardInput.WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Request)))
-    $State.Process.StandardInput.Flush()
+    # Write ASCII protocol bytes directly, without a StreamWriter preamble.
+    $Bytes=[Text.Encoding]::ASCII.GetBytes([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Request))+"`n")
+    $State.Process.StandardInput.BaseStream.Write($Bytes,0,$Bytes.Length)
+    $State.Process.StandardInput.BaseStream.Flush()
     $Read=$State.Process.StandardOutput.ReadLineAsync()
     $Remaining=[Math]::Max(0,$TimeoutMilliseconds-$Timer.ElapsedMilliseconds)
     if (-not $Read.Wait([int]$Remaining)) { throw 'Local handle inspection timed out; no occupying processes were stopped.' }

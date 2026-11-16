@@ -28,7 +28,7 @@ public static class PangeaUpdateHandles {
 "@
 }
 '@
-  $Code=$Stub + "`nfunction Invoke-UpdateHandleServer {`n"+$ServerBody+"`n}`nInvoke-UpdateHandleServer"
+  $Code="[Console]::InputEncoding=[Text.Encoding]::ASCII`n" + $Stub + "`nfunction Invoke-UpdateHandleServer {`n"+$ServerBody+"`n}`nInvoke-UpdateHandleServer"
   $Info=New-Object Diagnostics.ProcessStartInfo
   $Info.FileName=[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
   $Info.Arguments='-NoProfile -NonInteractive -EncodedCommand '+[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Code))
@@ -36,6 +36,10 @@ public static class PangeaUpdateHandles {
   $Info.RedirectStandardInput=$true; $Info.RedirectStandardOutput=$true; $Info.RedirectStandardError=$true
   $Worker=New-Object Diagnostics.Process; $Worker.StartInfo=$Info
   if (-not $Worker.Start()) { throw 'fixture start failed' }
+  # Reproduce the Framework pipe BOM/console-code-page mismatch on every OS.
+  $Preamble=[byte[]]@(239,187,191)
+  $Worker.StandardInput.BaseStream.Write($Preamble,0,$Preamble.Length)
+  $Worker.StandardInput.BaseStream.Flush()
   $Job=[pscustomobject]@{Worker=$Worker}
   $Job | Add-Member -MemberType ScriptMethod -Name Dispose -Value { if (-not $this.Worker.HasExited) { $this.Worker.Kill(); $null=$this.Worker.WaitForExit(5000) } }
   $script:HandleServerState=[pscustomobject]@{Process=$Worker; Job=$Job; Errors=$Worker.StandardError.ReadToEndAsync(); Sequence=0}
