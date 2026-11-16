@@ -119,7 +119,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Windows plugin regression failed: $Plugin" }
           }
       - name: Download existing portable artifact for acceptance
-        if: inputs.package_run_id != ''
+        if: ${{ !cancelled() && inputs.package_run_id != '' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -136,7 +136,7 @@ jobs:
           if ((Get-FileHash $Packages[0].FullName -Algorithm SHA256).Hash -ine $ExpectedHash) { throw 'Portable ZIP checksum mismatch.' }
           Expand-Archive $Packages[0].FullName .pangea-build/acceptance-package
       - name: Verify existing packaged Node and companion on Windows
-        if: inputs.package_run_id != ''
+        if: ${{ !cancelled() && inputs.package_run_id != '' }}
         shell: powershell
         run: |
           $Manifests = @(Get-ChildItem .pangea-build/acceptance-package -Recurse -Filter pangea-manifest.json)

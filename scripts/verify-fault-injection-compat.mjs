@@ -111,6 +111,18 @@ try {
           report.checkoutDiagnostics.push({ mode, success: true, content: await readFile(path.join(target, relative), 'utf8') })
         } catch (probe) { report.checkoutDiagnostics.push({ mode, success: false, error: String(probe.stderr || probe.message) }) }
       }
+      for (const mode of ['local-config', 'global-config']) {
+        try {
+          if (mode === 'local-config') rawGit(target, ['config', '--local', 'core.longpaths', 'true'])
+          else await writeFile(gitconfig, configBefore.toString().replace('longpaths = false', 'longpaths = true'))
+          execFileSync('git', ['-C', target, 'checkout', '-f', '--detach', base], { encoding: 'utf8', windowsHide: true, timeout: 30000 })
+          report.checkoutDiagnostics.push({ mode, success: true, content: await readFile(path.join(target, relative), 'utf8') })
+        } catch (probe) { report.checkoutDiagnostics.push({ mode, success: false, error: String(probe.stderr || probe.message) }) }
+        finally {
+          if (mode === 'local-config') rawGit(target, ['config', '--local', '--unset', 'core.longpaths'])
+          await writeFile(gitconfig, configBefore)
+        }
+      }
       throw error
     }
     assert.equal(await git(target, ['status', '--porcelain']), '')
