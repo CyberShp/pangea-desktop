@@ -137,6 +137,17 @@ public static class MigrationFixture {
   } finally {$Held.Dispose()}
   Resume-PortableDataMigration $f.Context $f.Install
   Pass 'locked first migration fails intact and resumes after the retained holder releases its handle'
+  # A permitted external writer keeps its original file handle through the move.
+  $f=Fixture (Join-Path $Root 'live-writer');$receipt=Initialize-PortableDataMigration $f.Context
+  $Stream=New-Object IO.FileStream((Join-Path $f.Install 'launch-root/live.txt'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+  try {
+    $Before=[Text.Encoding]::UTF8.GetBytes('before;');$After=[Text.Encoding]::UTF8.GetBytes('after;')
+    $Stream.Write($Before,0,$Before.Length);$Stream.Flush($true)
+    Resume-PortableDataMigration $f.Context $f.Install
+    $Stream.Write($After,0,$After.Length);$Stream.Flush($true)
+  } finally {$Stream.Dispose()}
+  if([IO.File]::ReadAllText((Join-Path $f.Install 'launch-root/live.txt')) -ne 'before;after;' -or [IO.File]::ReadAllText((Join-Path $f.Data.Root 'launch-root/live.txt')) -ne 'before;after;'){throw 'Same-handle writer lost bytes through migration'}
+  Pass 'share-delete writer retains the same live file through migration; both writes remain visible through the original path'
   # No adoption of arbitrary links or replacement directories, even with valid content.
   foreach($Tamper in @('wrong-link','changed-identity','missing-receipt')) {
     $f=Fixture (Join-Path $Root $Tamper);$receipt=Initialize-PortableDataMigration $f.Context;Resume-PortableDataMigration $f.Context $f.Install
