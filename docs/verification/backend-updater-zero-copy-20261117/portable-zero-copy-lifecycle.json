@@ -1,0 +1,14 @@
+{
+  "scope": "Production main supervisor with UI monitor substitution; real native fixture executable and real worker processes, health and rollback. No Electron business acceptance.",
+  "checks": [
+    "main supervisor healthy: real patch workers, native launch, health, program version and new user edits verified",
+    "main supervisor failed-start: real patch workers, native launch, health, program version and new user edits verified"
+  ],
+  "user_payload_bytes": 0,
+  "supervisor_ms": {
+    "failed-start": 6579,
+    "healthy": 6191
+  },
+  "status": "passed",
+  "extra_package_files": 0
+}

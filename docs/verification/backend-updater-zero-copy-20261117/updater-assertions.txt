@@ -1,0 +1,128 @@
+2026-11-16T18:17:22.0341520Z PASS: actual process termination at candidate_ready; independent mutex, durable recovery and preserved data
+2026-11-16T18:17:23.2023439Z PASS: actual process termination at original_move_pending; independent mutex, durable recovery and preserved data
+2026-11-16T18:17:24.3699495Z PASS: actual process termination at original_rename; independent mutex, durable recovery and preserved data
+2026-11-16T18:17:25.6196797Z PASS: actual process termination at activate_pending; independent mutex, durable recovery and preserved data
+2026-11-16T18:17:26.8150793Z PASS: actual process termination at activate_rename; independent mutex, durable recovery and preserved data
+2026-11-16T18:17:28.1441320Z PASS: actual process termination at activated; independent mutex, durable recovery and preserved data
+2026-11-16T18:17:29.4760079Z PASS: actual process termination at rollback_displace; independent mutex, durable recovery and preserved data
+2026-11-16T18:17:30.6334295Z PASS: actual process termination at rollback_restore; independent mutex, durable recovery and preserved data
+2026-11-16T18:17:31.7706044Z PASS: actual process termination at committed; independent mutex, durable recovery and preserved data
+2026-11-16T18:17:31.8978098Z PASS: missing-owner is rejected without overwriting unrelated data
+2026-11-16T18:17:31.9940389Z PASS: outside-workspace is rejected without overwriting unrelated data
+2026-11-16T18:17:32.1772809Z PASS: wrong-owner is rejected without overwriting unrelated data
+2026-11-16T18:17:32.2865582Z PASS: changed-install is rejected without overwriting unrelated data
+2026-11-16T18:17:32.4111414Z PASS: changed-backup is rejected without overwriting unrelated data
+2026-11-16T18:17:32.5374873Z PASS: file-at-install is rejected without overwriting unrelated data
+2026-11-16T18:17:32.6389909Z PASS: linked-workspace is rejected without overwriting unrelated data
+2026-11-16T18:17:32.7217341Z PASS: linked-journal is rejected without overwriting unrelated data
+2026-11-16T18:17:32.8471439Z PASS: committed tolerates missing receipt but rejects a changed installation
+2026-11-16T18:17:32.9801404Z PASS: committed tolerates missing workspace but rejects a changed installation
+2026-11-16T18:17:33.1012678Z PASS: restored tolerates missing receipt but rejects a changed installation
+2026-11-16T18:17:33.2259158Z PASS: restored tolerates missing workspace but rejects a changed installation
+2026-11-16T18:17:33.3409316Z PASS: terminal restored transaction does not replay profile migration or overwrite later user configuration
+2026-11-16T18:17:33.4251056Z PASS: stable/test source-version boundaries match shared policy and patch base is independently checked
+2026-11-16T18:17:33.4394724Z PASS: health deadline defaults to 300 seconds with explicit integer range 30 through 600
+2026-11-16T18:17:34.2843124Z PASS: space peak includes rebuilt program, user-data copy, allocation slack and reserve; overflow rejected
+2026-11-16T18:17:34.3768113Z PASS: user-data cleanup reuses the existing policy and requires a fresh empty bounded scan
+2026-11-16T18:17:34.3870677Z PASS: protected holders and newly opened post-verification handles block switching
+2026-11-16T18:17:34.3886803Z PASS: unavailable handle inspection fails closed before copy
+2026-11-16T18:17:36.1484972Z PASS: extras and Python cache do not block preflight; rollback source remains intact
+2026-11-16T18:17:36.9940724Z PASS: patch disk budget uses full target size, not compressed patch size
+2026-11-16T18:17:40.4185067Z PASS: protected roots migrate, old extras do not; late extras do not block switch
+2026-11-16T18:17:41.2091331Z PASS: worker-backed copy verifies content and rejects a later source write
+2026-11-16T18:17:46.6798500Z PASS: timeout kills the whole owned job and confirms no descendant can keep writing
+2026-11-16T18:17:49.9193669Z PASS: kill-on-job-close stops file writers after abrupt supervisor exit
+2026-11-16T18:17:50.9501624Z PASS: existing snapshot cannot be silently replaced
+2026-11-16T18:17:51.5247681Z PASS: exact configuration rollback, missing files, failed-version copies, unrelated data preservation
+2026-11-16T18:17:51.7006016Z PASS: repeated rollback preserves the first failed-version configuration
+2026-11-16T18:17:51.7075716Z PASS: all snapshot hashes validated before any live file changes
+2026-11-16T18:17:51.7170728Z PASS: path traversal in snapshot manifest is rejected
+2026-11-16T18:17:51.7243088Z PASS: duplicate snapshot path is rejected
+2026-11-16T18:17:51.7275830Z PASS: snapshot cannot restore into another user profile
+2026-11-16T18:17:51.7363765Z PASS: missing original snapshot bytes block restoration
+2026-11-16T18:17:51.7416599Z PASS: linked profile root cannot redirect snapshot operations
+2026-11-16T18:17:51.7558586Z PASS: oversized configuration fails before publishing a complete snapshot
+2026-11-16T18:17:51.7880386Z PASS: interruption during restoration remains retryable
+2026-11-16T18:17:51.8395411Z PASS: interrupted rollback resumes without losing original or failed-version configuration
+2026-11-16T18:17:51.8461797Z PASS: unknown external profile writer blocks snapshot and rollback
+2026-11-16T18:17:51.8470175Z PASS: profile operations proceed only after known writers stop and remaining handles clear
+2026-11-16T18:17:53.0196255Z PASS: 20 actual holder identities are cleaned automatically and retry never requests confirmation
+2026-11-16T18:17:53.0922428Z PASS: Python, Node, shells, terminal hosts, Agent wrappers and uv runtimes release their installation handles automatically
+2026-11-16T18:17:53.1071730Z PASS: unknown applications and editors remain protected without opening a blocking modal
+2026-11-16T18:17:53.1548723Z PASS: registered TortoiseGit cache is cleaned only with matching executable metadata and existing identity protections
+2026-11-16T18:17:53.1853217Z PASS: a recreated cache receives a fresh holder identity and policy check before a later cleanup pass stops it
+2026-11-16T18:17:53.3035768Z PASS: one holder failure preserves its diagnostic and does not suppress the remaining cleanup batch
+2026-11-16T18:17:53.3100925Z PASS: an expired overall cleanup deadline stops further scanning and termination
+2026-11-16T18:17:53.4406567Z PASS: rescan excludes released, reused, executable-changed, service, user, session, critical, ancestor and unknown holders
+2026-11-16T18:17:53.4407470Z PASS: a newly appearing process cannot inherit another holder identity
+2026-11-16T18:17:53.4494544Z PASS: fresh ownership policy must still authorize automatic termination
+2026-11-16T18:17:54.0478276Z PASS: matching Explorer folders close automatically, preserving Explorer when that releases the lock
+2026-11-16T18:17:54.5530532Z PASS: automatic Explorer policy still needs no extra confirmation
+2026-11-16T18:17:55.0656285Z PASS: Explorer retaining a lock is terminated once after its independent recovery guard is armed
+2026-11-16T18:17:55.6164505Z PASS: a later independently verified cleanup pass can release a recreated holder and complete the rename
+2026-11-16T18:17:57.6323305Z PASS: persistent locks stop after three passes within the time budget, preserve the original, and name the blocking process
+2026-11-16T18:17:58.5515717Z PASS: real pipe requests reuse one compiled worker and preserve Unicode literal paths
+2026-11-16T18:17:58.6736946Z PASS: timeout terminates owned worker and invalidates pending response
+2026-11-16T18:17:59.1084067Z PASS: scan errors fail closed; next request uses a new worker
+2026-11-16T18:18:01.0093045Z PASS: persistent directory lock leaves installation and Run untouched
+2026-11-16T18:18:05.1237689Z PASS: transient directory lock is retried until released
+2026-11-16T18:18:05.1332245Z PASS: rollback rename preserves data and rejects occupied destination
+2026-11-16T18:18:06.0151762Z PASS: bracket paths, patch reconstruction and changed payload leaves rollback bytes intact
+2026-11-16T18:18:06.0846827Z PASS: user data copied and rollback source retained
+2026-11-16T18:18:07.4264948Z PASS: resident helper does not retain a CWD handle on the control directory
+2026-11-16T18:18:07.4266691Z PASS: zero holders return an empty pipeline, not a nested empty JSON array
+2026-11-16T18:18:07.8271978Z PASS: one holder returns one scalar process record
+2026-11-16T18:18:08.0965394Z PASS: multiple actual CWD holders retain scalar PID, name and security flags
+2026-11-16T18:18:08.1008183Z PASS: actual directory handle finds external terminal by CWD
+2026-11-16T18:18:08.1071244Z PASS: mismatched process creation time cannot terminate a PID
+2026-11-16T18:18:10.5492988Z PASS: ownership, services, ancestors and unknown processes classified safely
+2026-11-16T18:18:11.8396297Z PASS: both actual external CWD holders exit automatically and directory rename succeeds without confirmation
+2026-11-16T18:18:11.8397426Z PASS: a Node runtime outside the installation remains alive during automatic cleanup
+2026-11-16T18:18:12.8984756Z PASS: live ownership snapshot automatically releases this Desktop runtime descendant
+2026-11-16T18:18:14.9282034Z PASS: Desktop exit timeout terminates only the original process identity
+2026-11-16T18:18:15.5275577Z PASS: Explorer exception is restricted to Windows executable, current user and session
+2026-11-16T18:18:17.2432266Z PASS: automatic Explorer cleanup starts recovery and rechecks handles without a confirmation dialog
+2026-11-16T18:18:17.2432778Z PASS: independent recovery guard handles complete
+2026-11-16T18:18:17.9898219Z PASS: independent recovery guard handles crash
+2026-11-16T18:18:18.7190948Z PASS: independent recovery guard handles cancel
+2026-11-16T18:18:19.1919011Z PASS: independent recovery guard handles reused-pid
+2026-11-16T18:18:20.1544530Z PASS: long paths, Unicode, bracket names, empty directories, Run and skill preserved
+2026-11-16T18:18:20.1680824Z PASS: source mutation after copy blocks version switch
+2026-11-16T18:18:20.2573018Z PASS: junction preserved and candidate cleanup leaves external repository intact
+2026-11-16T18:18:21.3198691Z PASS: unreadable source aborts with copy log and original data retained
+2026-11-16T18:18:21.9962339Z PASS: short control filenames preserve existing diagnostics
+2026-11-16T18:18:22.4005306Z PASS: >350-character baseline copy, changed/new payload, size/SHA validation and signed-manifest files
+2026-11-16T18:18:22.4249542Z PASS: 221-character installed file reconstructs at 261-character destination
+2026-11-16T18:18:22.4719967Z PASS: baseline-size rejected (Exception calling "ReuseBatch" with "6" argument(s): "Patch batch failed: Patched file size mismatch: resources/app/node_modules/@deepseek-ai/dsh-session-telemetry-otel/node_modules/@opentelemetry/resources/build/esnext/detectors/platform/node/machine-id/getMachineId-unsupported.js")
+2026-11-16T18:18:22.4923139Z PASS: baseline-hash rejected (Exception calling "ReuseBatch" with "6" argument(s): "Patch batch failed: Patched file hash mismatch: resources/app/node_modules/@deepseek-ai/dsh-session-telemetry-otel/node_modules/@opentelemetry/resources/build/esnext/detectors/platform/node/machine-id/getMachineId-unsupported.js")
+2026-11-16T18:18:22.5056167Z PASS: payload-size rejected (Exception calling "Verify" with "4" argument(s): "Patched file size mismatch: resources/app/node_modules/@deepseek-ai/dsh-session-telemetry-otel/node_modules/@opentelemetry/resources/build/esnext/detectors/platform/node/machine-id/changed [资源].js")
+2026-11-16T18:18:22.5192435Z PASS: payload-hash rejected (Exception calling "Verify" with "4" argument(s): "Patched file hash mismatch: resources/app/node_modules/@deepseek-ai/dsh-session-telemetry-otel/node_modules/@opentelemetry/resources/build/esnext/detectors/platform/node/machine-id/changed [资源].js")
+2026-11-16T18:18:22.5298929Z PASS: missing long baseline rejected (Exception calling "ReuseBatch" with "6" argument(s): "Patch batch failed: Base package is missing unchanged file: resources/app/node_modules/@deepseek-ai/dsh-session-telemetry-otel/node_modules/@opentelemetry/resources/build/esnext/detectors/platform/node/machine-id/missing [baseline].js")
+2026-11-16T18:18:22.6068740Z PASS: full-package extraction preserves long files and empty directories
+2026-11-16T18:18:22.6101170Z PASS: short workspaces reserve p-up-2 and p-up-3 without reusing p-up-1
+2026-11-16T18:18:22.6422886Z PASS: short new/old directories switch and roll back across parents, preserving long-path files
+2026-11-16T18:18:22.6479652Z PASS: full archive escape 1 rejected (Exception calling "Child" with "2" argument(s): "Unsafe package path: ..\escape.txt")
+2026-11-16T18:18:22.6560050Z PASS: patch manifest escape 1 rejected (Exception calling "Child" with "2" argument(s): "Unsafe package path: ..\escape.txt")
+2026-11-16T18:18:22.6590160Z PASS: full archive escape 2 rejected (Exception calling "Child" with "2" argument(s): "Unsafe package path: ..\escape.txt")
+2026-11-16T18:18:22.6673685Z PASS: patch manifest escape 2 rejected (Exception calling "Child" with "2" argument(s): "Unsafe package path: ..\escape.txt")
+2026-11-16T18:18:22.6721656Z PASS: full archive escape 3 rejected (Exception calling "Child" with "2" argument(s): "Unsafe package path: nested\..\..\escape.txt")
+2026-11-16T18:18:22.6812553Z PASS: patch manifest escape 3 rejected (Exception calling "Child" with "2" argument(s): "Unsafe package path: nested\..\..\escape.txt")
+2026-11-16T18:18:22.6844554Z PASS: full archive escape 4 rejected (Exception calling "Child" with "2" argument(s): "Unsafe package path: C:\Users\runneradmin\AppData\Local\Temp\pangea-long-paths-2ce3ce0dbf344d2582515d2e32e9f0fd\download\setup package [中文]\nested installation directory [验证]\nested installation directory [验证]\escape.txt")
+2026-11-16T18:18:22.6928784Z PASS: patch manifest escape 4 rejected (Exception calling "Child" with "2" argument(s): "Unsafe package path: C:\Users\runneradmin\AppData\Local\Temp\pangea-long-paths-2ce3ce0dbf344d2582515d2e32e9f0fd\download\setup package [中文]\nested installation directory [验证]\nested installation directory [验证]\escape.txt")
+2026-11-16T18:18:22.6934007Z PASS: path escape rejection leaves outside sentinel and installed baseline intact
+2026-11-16T18:18:23.5082751Z PASS: failed Desktop creation reports an error and preserves the parent environment
+2026-11-16T18:18:23.9579486Z PASS: literal working directory and output logs, clean child environment, intact arguments and correct live health identity
+2026-11-16T18:18:24.1816934Z PASS: exit17 does not pass Desktop health checks
+2026-11-16T18:18:25.4600368Z PASS: wrong-pid does not pass Desktop health checks
+2026-11-16T18:18:26.6773762Z PASS: wrong-version does not pass Desktop health checks
+2026-11-16T18:18:27.9728992Z PASS: wrong-schema does not pass Desktop health checks
+2026-11-16T18:18:29.2125220Z PASS: stale-time does not pass Desktop health checks
+2026-11-16T18:18:35.4938640Z PASS: no-marker does not pass Desktop health checks
+2026-11-16T18:18:35.5099323Z PASS: missing marker times out while refreshing persistent rollback progress
+2026-11-16T18:18:36.1510681Z PASS: progress updates atomically replace previous status and preserve process identity
+2026-11-16T18:18:36.1873528Z PASS: IO child progress stays isolated; forwarding preserves supervisor PID and child exit cannot publish failure
+2026-11-16T18:18:36.2441329Z PASS: stale running snapshots preserve a newly published terminal outcome
+2026-11-16T18:18:36.2515140Z PASS: worker identity distinguishes the original process from a reused PID
+2026-11-16T18:18:36.2654550Z PASS: worker prioritizes cancellation, accepts acknowledgement and supports legacy plans
+2026-11-16T18:18:38.4707869Z  Test Files  5 passed (5)
+2026-11-16T18:18:38.4708771Z       Tests  44 passed (44)

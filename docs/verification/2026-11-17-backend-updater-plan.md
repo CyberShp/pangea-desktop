@@ -1,5 +1,7 @@
 # Backend and portable updater implementation checkpoint — 2026-11-17
 
+> Historical checkpoint. Current implementation, authorization, native acceptance and remaining limits: [zero-copy updater acceptance](2026-11-17-zero-copy-updater.md). Statements below describe the earlier checkpoint.
+
 ## Ownership and baseline
 
 Task source: `/Volumes/Media/pangea-desktop/.pangea-build/TASK-FOR-GPT.md`.
