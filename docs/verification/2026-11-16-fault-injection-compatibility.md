@@ -34,8 +34,10 @@ lock, verifier, packaged entrypoint or assembly script changes. Failure propagat
 to the job; JSON evidence is uploaded even on failure. Its optional
 `package_run_id` dispatch input downloads a successful existing build's portable
 artifact, checks the ZIP checksum and component pin, then executes the verifier
-with that package's Node and companion. This workflow does not build, sign or
-publish a release.
+with that package's Node and companion. The optional `build_unsigned` input assembles a fresh unsigned `win-unpacked`
+from the component lock, runs both disabled/enabled-default packaged checks, and
+retains the test instance for seven days. The workflow never signs or publishes
+a release.
 
 `build-pangea-desktop.ps1` runs the source check and the packaged check before
 creating the signed ZIP. `SkipTests` is rejected unless `SkipPackage` is also set.
@@ -64,7 +66,7 @@ individual checks; a non-Windows run cannot satisfy `--require-windows`.
   CRLF classification each causes the new verifier to exit 1. Original sources
   remain unchanged.
 
-## Native Windows result — delivery blocked
+## Original 2.1.25 native Windows result — historical failure
 
 [Final native matrix run 43884768759](https://github.com/CyberShp/pangea-desktop/actions/runs/43884768759)
 executed test code `9973909c3922aaff9bdf14e2ef05b6cfe75c4980` against locked plugin
@@ -97,10 +99,11 @@ blob/index entry and asserts its presence in the committed tree, following the
 No failed assertion was disabled. The enabled-default scenario runs independently
 and cannot erase or bypass the required disabled-default failure.
 
-The CI run remains failed as intended; tooling and Windows updater jobs passed.
+That historical CI run remains failed as intended; tooling and Windows updater jobs passed.
 The new gate is on the isolated test branch and is not merged into `langgraph`.
-Production plugin behavior has not been modified. The remaining defect must be
-fixed and the disabled-default source/package checks must pass before delivery.
+At that point plugin behavior had not been modified. The subsequent test-branch
+fix and fresh unsigned package acceptance are recorded below; the existing signed
+2.1.25 artifact remains unchanged.
 
 Durable reports:
 
@@ -108,3 +111,90 @@ Durable reports:
 - [Package / disabled](fault-injection-compatibility-20261116/fault-injection-packaged.json)
 - [Source / enabled](fault-injection-compatibility-20261116/fault-injection-source-enabled.json)
 - [Package / enabled](fault-injection-compatibility-20261116/fault-injection-packaged-enabled.json)
+
+## Test-branch correction
+
+The companion's new `withGitLongPaths` helper supplies a temporary configuration
+through `GIT_CONFIG_GLOBAL` only to each Windows Git child process. It enables
+longpaths before reading the original global configuration and again afterward;
+the existing command override remains in place for repository-local overrides.
+The original files are included read-only, preserving proxy settings, credential
+helpers, relative includes, conditional includes and multivalue settings. No user
+configuration file or parent environment variable is modified. Each operation
+owns its temporary file and removes it on success, failure or cancellation.
+Non-Windows calls keep their original configuration behavior.
+
+The new helper regression tests use real Git to verify configuration preservation,
+concurrent isolation and cleanup. The source/HTTP verifier also retains the
+unmodified `longpaths=false` negative control and compares original config bytes.
+Local targeted plugin regressions passed 21 tests.
+
+The first fresh assembly attempt, run
+[43887306157](https://github.com/CyberShp/pangea-desktop/actions/runs/43887306157),
+passed both native source variants and plugin suites but failed while reading a
+PowerShell 5.1 UTF-8-BOM manifest. The staging verifier now accepts that BOM;
+regression coverage proves both matching-manifest acceptance and stale-lock
+rejection. No manifest validation was removed.
+
+The first fully successful unsigned assembly was
+[43889134345](https://github.com/CyberShp/pangea-desktop/actions/runs/43889134345)
+at Desktop `1687f8e4ee931d7a11015c6d7b46d899169b0a5f`, companion
+`cb6b308049c561dcff838ecf478c0945ae94b0b0`. Both source and packaged false/true
+variants passed; all four recorded runtime source hashes matched.
+
+A follow-up gate run
+[43890376610](https://github.com/CyberShp/pangea-desktop/actions/runs/43890376610)
+passed both compatibility variants and tooling/updater jobs, but exposed a timing
+sensitivity in the pre-existing ACP pending-tool test (two result reads instead
+of one). Its 20 ms watchdog can race real log/binding I/O. Injecting an 80 ms
+dispatch-log delay reproduced premature recovery locally (zero prompts instead
+of one); this supports the timing diagnosis but is not the identical CI assertion. The fixture now permits 500 ms for the
+intentional pending-turn timeout, retains every prompt/read/settlement/safety
+assertion, and keeps that injected latency. All 34 local ACP recovery tests passed.
+This changes only test timing; product timeout/recovery policy is unchanged. The
+component pin was advanced to include the regression correction, requiring a new
+unsigned assembly and acceptance run.
+
+## Final native Windows acceptance — passed
+
+[Run 43891667073](https://github.com/CyberShp/pangea-desktop/actions/runs/43891667073)
+completed successfully at Desktop `5ae97ca9935750b8a9cd9e7338c6c56fe7b10171`,
+companion `f587ff7d685eb37b8f800c7b5d7f07740a793bba`.
+All three jobs (tooling, windows-updater, windows-components) passed.
+
+| Target | Isolated global `core.longpaths` | Result |
+| --- | --- | --- |
+| Locked source | false | PASS, including unfixed negative control |
+| Locked source | true | PASS |
+| Fresh unsigned packaged Node + companion | false | PASS, including unfixed negative control |
+| Fresh unsigned packaged Node + companion | true | PASS |
+
+Environment: Windows Server 2022, Node 24.9.0, Git 2.56.1.windows.1. Checkout root
+length is 174; tracked file path length is 489. All four runtime source hashes
+match across all four reports. Original configuration remains false and unchanged
+in disabled-default checks. All HTTP, CRLF/content, detached-checkout, failure and
+recovery assertions passed.
+
+The Windows plugin suites ran before assembly and again during assembly: dsh-pangea
+43 passed; companion 1044 passed / 32 existing skips; asset catalog 119 passed /
+1 existing skip; no failures. The pending-tool latency regressions ran. Typecheck,
+Electron build, and 215 focused Desktop tests passed, including the BOM/stale-lock
+staging check. The existing skips are not counted as passes.
+
+[Unsigned Windows test instance](https://github.com/CyberShp/pangea-desktop/actions/runs/43891667073/artifacts/14238088039)
+contains the complete `win-unpacked` directory, retained for seven days. Extract
+the artifact to obtain `PANGEA Desktop.exe` and its resources; it is a test instance,
+not a published replacement for the existing 2.1.25 package.
+
+Durable final evidence:
+
+- [Source / disabled](fault-injection-compatibility-fixed-20261116/fault-injection-source.json)
+- [Source / enabled](fault-injection-compatibility-fixed-20261116/fault-injection-source-enabled.json)
+- [Package / disabled](fault-injection-compatibility-fixed-20261116/fault-injection-packaged.json)
+- [Package / enabled](fault-injection-compatibility-fixed-20261116/fault-injection-packaged-enabled.json)
+
+Runtime compatibility is verified against real Windows Git/filesystem/HTTP and the
+packaged Node/plugin. Model output and analysis projection remain deterministic
+fixtures; this is not real-model quality or interactive Electron UI acceptance,
+nor an assertion about every Git/Windows version. Both repositories remain on
+independent `codex/` test branches. No merge or publication was performed.
