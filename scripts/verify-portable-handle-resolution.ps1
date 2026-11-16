@@ -55,6 +55,7 @@ try {
   $Holders=@(Get-UpdateLockHolders $Installation)
   Assert-ScalarHolderRecords $Holders @()
   Write-Output 'PASS: zero holders return an empty pipeline, not a nested empty JSON array'
+  $InspectorPid=$script:HandleServerState.Process.Id
   # This PowerShell executable is outside the installation, but its native CWD
   # holds the installation directory open, reproducing a terminal lock.
   $Code="[IO.File]::WriteAllText('$($Ready.Replace("'","''"))','ready'); Start-Sleep -Seconds 120"
@@ -68,6 +69,7 @@ try {
   $Holders=@(Get-UpdateLockHolders $Installation)
   Assert-ScalarHolderRecords $Holders @($HolderProcess.Id)
   Write-Output 'PASS: one holder returns one scalar process record'
+  if ($script:HandleServerState.Process.Id -ne $InspectorPid -or $script:HandleServerState.Sequence -lt 2) { throw 'Native handle inspector was not reused' }
 
   # A single JSON result cannot catch PowerShell 5.1 treating a JSON array as
   # one pipeline item. Two real CWD holders must be returned and classified
@@ -153,6 +155,7 @@ try {
   if (-not $HolderProcess.HasExited) { throw 'Desktop timeout did not force the exact process to exit.' }
   Write-Output 'PASS: Desktop exit timeout terminates only the original process identity'
 } finally {
+  Stop-UpdateHandleServer
   if ($HolderProcess) { $HolderProcess.Refresh(); if (-not $HolderProcess.HasExited) { $HolderProcess.Kill(); $HolderProcess.WaitForExit() }; $HolderProcess.Dispose() }
   if ($SecondHolderProcess) { $SecondHolderProcess.Refresh(); if (-not $SecondHolderProcess.HasExited) { $SecondHolderProcess.Kill(); $SecondHolderProcess.WaitForExit() }; $SecondHolderProcess.Dispose() }
   if ($UnrelatedProcess) { $UnrelatedProcess.Refresh(); if (-not $UnrelatedProcess.HasExited) { $UnrelatedProcess.Kill(); $UnrelatedProcess.WaitForExit() }; $UnrelatedProcess.Dispose() }

@@ -1,6 +1,6 @@
 ﻿# PANGEA_UPDATE_MONITOR_PROTOCOL=1
 [CmdletBinding()]
-param([string]$PlanPath, [switch]$ScanLocks, [string]$ScanRoot, [string]$ScanOutput, [string]$WatchExplorer, [switch]$WatchUpdate, [switch]$RecoverOnly, [string]$IOWorker)
+param([string]$PlanPath, [switch]$ScanLocks, [switch]$HandleServer, [string]$ScanRoot, [string]$ScanOutput, [string]$WatchExplorer, [switch]$WatchUpdate, [switch]$RecoverOnly, [string]$IOWorker)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -895,26 +895,89 @@ function New-UpdateControlFile {
   throw "No unused update control file is available: $Prefix"
 }
 
+function Stop-UpdateHandleServer {
+  if (-not (Get-Variable -Name HandleServerState -Scope Script -ErrorAction SilentlyContinue)) { return }
+  $State=$script:HandleServerState
+  $script:HandleServerState=$null
+  if (-not $State) { return }
+  # Only our diagnostic process tree is owned by this job. Closing the job also
+  # ends a scan blocked in a native filesystem call, including on parent death.
+  try { $State.Job.Dispose() } finally { $State.Process.Dispose() }
+}
+
+function Start-UpdateHandleServer {
+  Initialize-PortableWorkerJob
+  $Quote = { param($Value) "'" + $Value.Replace("'", "''") + "'" }
+  $Command = '& ' + (& $Quote $script:UpdaterScriptPath) + ' -HandleServer'
+  $Encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Command))
+  $Info=New-Object Diagnostics.ProcessStartInfo
+  $Info.FileName="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+  $Info.Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $Encoded"
+  $Info.WorkingDirectory=[IO.Path]::GetDirectoryName($PlanPath)
+  $Info.UseShellExecute=$false; $Info.CreateNoWindow=$true
+  $Info.RedirectStandardInput=$true; $Info.RedirectStandardOutput=$true; $Info.RedirectStandardError=$true
+  $Worker=New-Object Diagnostics.Process
+  $Worker.StartInfo=$Info
+  $Job=New-Object PangeaPortableWorkerJob
+  try {
+    if (-not $Worker.Start()) { throw 'Cannot start local handle inspector.' }
+    $null=$Worker.Handle
+    # The child waits on stdin before compiling or inspecting anything.
+    $Job.Attach($Worker)
+    $Errors=$Worker.StandardError.ReadToEndAsync()
+    $script:HandleServerState=[pscustomobject]@{Process=$Worker; Job=$Job; Errors=$Errors; Sequence=0}
+    Write-UpdateLog "resident handle inspector started: pid=$($Worker.Id)"
+  } catch {
+    $Job.Dispose()
+    try { if (-not $Worker.HasExited) { $Worker.Kill(); $null=$Worker.WaitForExit(5000) } } catch { }
+    $Worker.Dispose()
+    throw
+  }
+}
+
+function Invoke-UpdateHandleServer {
+  # Base64 UTF-8 JSON lines over inherited pipes (independent of console code page): no shared mutable command file,
+  # no executable input, and EOF ends the worker when the parent exits normally.
+  while ($null -ne ($Line=[Console]::ReadLine())) {
+    try {
+      $Request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Line)) | ConvertFrom-Json
+      Initialize-HandleInspector
+      $Holders=@([PangeaUpdateHandles]::Scan([string]$Request.root))
+      $Reply=@{sequence=[long]$Request.sequence; holders=$Holders; error=$null}
+    } catch {
+      $Reply=@{sequence=0; holders=@(); error=$_.Exception.Message}
+    }
+    [Console]::WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $Reply -Depth 5 -Compress))))
+    [Console]::Out.Flush()
+  }
+}
+
 function Get-UpdateLockHolders {
   param([string]$Root, [int]$TimeoutMilliseconds = 15000)
-  # A remote filesystem handle query can block inside Windows. Isolate the scan
-  # and bound its lifetime; only this diagnostic child may be killed on timeout.
-  $Output = New-UpdateControlFile 'handles'
-  $Quote = { param($Value) "'" + $Value.Replace("'", "''") + "'" }
-  $Command = '& ' + (& $Quote $script:UpdaterScriptPath) + ' -ScanLocks -ScanRoot ' + (& $Quote $Root) + ' -ScanOutput ' + (& $Quote $Output)
-  $Encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Command))
-  $Worker = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$Encoded) -WorkingDirectory ([IO.Path]::GetDirectoryName($PlanPath)) -WindowStyle Hidden -PassThru
+  $Timer=[Diagnostics.Stopwatch]::StartNew()
   try {
-    $null = $Worker.Handle
-    if (-not $Worker.WaitForExit([Math]::Max(1, $TimeoutMilliseconds))) { $Worker.Kill(); throw 'Local handle inspection timed out; no occupying processes were stopped.' }
-    if ($Worker.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $Output)) { throw 'Local handle inspection unavailable; no occupying processes were stopped.' }
-    # Windows PowerShell 5.1 emits a top-level JSON array as one pipeline
-    # object. Wrapping that pipeline in @() nests the holders: member access
-    # then returns arrays, and a multi-item Critical array evaluates to true.
-    # Assign first and emit each record explicitly on both PowerShell editions.
-    $ParsedHolders = Get-Content -LiteralPath $Output -Raw -Encoding UTF8 | ConvertFrom-Json
-    foreach ($Holder in $ParsedHolders) { $Holder }
-  } finally { $Worker.Dispose(); Remove-Item -LiteralPath $Output -Force -ErrorAction SilentlyContinue }
+    if (-not (Get-Variable -Name HandleServerState -Scope Script -ErrorAction SilentlyContinue) -or -not $script:HandleServerState) {
+      Start-UpdateHandleServer
+    }
+    $State=$script:HandleServerState
+    if ($State.Process.HasExited) { throw 'Local handle inspector exited; no occupying processes were stopped.' }
+    $State.Sequence++
+    $Request=ConvertTo-Json -InputObject @{sequence=$State.Sequence; root=$Root} -Compress
+    $State.Process.StandardInput.WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Request)))
+    $State.Process.StandardInput.Flush()
+    $Read=$State.Process.StandardOutput.ReadLineAsync()
+    $Remaining=[Math]::Max(0,$TimeoutMilliseconds-$Timer.ElapsedMilliseconds)
+    if (-not $Read.Wait([int]$Remaining)) { throw 'Local handle inspection timed out; no occupying processes were stopped.' }
+    if ($null -eq $Read.Result) { throw 'Local handle inspector closed its response pipe.' }
+    $Reply=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Read.Result)) | ConvertFrom-Json
+    if ($Reply.error -or [long]$Reply.sequence -ne $State.Sequence) { throw 'Local handle inspection failed or returned a stale response; no occupying processes were stopped.' }
+    # Enumerate explicitly for Windows PowerShell 5.1 JSON array semantics.
+    foreach ($Holder in $Reply.holders) { $Holder }
+    Write-UpdateLog "resident handle scan: sequence=$($State.Sequence); elapsed_ms=$($Timer.ElapsedMilliseconds)"
+  } catch {
+    Stop-UpdateHandleServer
+    throw
+  }
 }
 
 function Get-RegisteredTortoiseGitCachePaths {
@@ -2302,6 +2365,7 @@ function Restore-PortableUpdateTransaction {
 $script:UpdaterScriptPath = $PSCommandPath
 if ($IOWorker) { Invoke-PortableIOWorkerEntry $IOWorker; exit 0 }
 if ($WatchExplorer) { Watch-ExplorerRecovery $WatchExplorer; exit 0 }
+if ($HandleServer) { Invoke-UpdateHandleServer; exit 0 }
 if ($ScanLocks) {
   Initialize-HandleInspector
   $Holders = @([PangeaUpdateHandles]::Scan($ScanRoot))
@@ -2589,6 +2653,7 @@ try {
   Write-UpdateProgress -State failed -Stage 'failed' -Message $FailureMessage -Percent 35 -Rollback $Rollback
   exit 1
 } finally {
+  Stop-UpdateHandleServer
   # Best effort only: failures here must not erase the true terminal outcome.
   try { Complete-ExplorerRecovery } catch { Write-UpdateLog "Explorer recovery final check: $($_.Exception.Message)" }
   if ($InstallLock) { $InstallLock.Dispose() }

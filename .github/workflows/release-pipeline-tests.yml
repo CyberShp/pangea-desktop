@@ -251,6 +251,7 @@ jobs:
             'scripts/verify-portable-io-protection.ps1',
             'scripts/verify-portable-profile-rollback.ps1',
             'scripts/verify-portable-batch-cleanup.ps1',
+            'scripts/verify-portable-handle-server.ps1',
             'scripts/verify-portable-update-locks.ps1',
             'scripts/verify-portable-patch-apply.ps1',
             'scripts/verify-portable-handle-resolution.ps1',
