@@ -176,6 +176,19 @@ public static class MigrationFixture {
   Remove-PortableDirectory $New
   if((Get-FileHash -LiteralPath $Source).Hash.ToLowerInvariant() -ne $Hash){throw 'Candidate cleanup damaged baseline'}
   Pass 'same-volume hard links verify bytes first; all updater overwrite paths reject shared targets'
+  $Pinned=Join-Path $Root 'pinned-candidate';[IO.Directory]::CreateDirectory($Pinned)|Out-Null
+  $Reuse=[PangeaPortableFileIO]::BeginReuse()
+  try {
+    if(-not $Reuse.Reuse($Source,(Join-Path $Pinned 'same.txt'),$Size,$Hash,'same.txt')){throw 'Pinned reuse did not link'}
+    $Rejected=$false;try{[PangeaPortableFileIO]::MoveDirectory($Base,($Base+'-changed'))}catch{$Rejected=$true}
+    if(-not $Rejected){throw 'Pinned source directory could be replaced during reuse'}
+    $Alias=Join-Path $Root 'source-alias';[PangeaPortableFileIO]::NewJunction($Alias,$Base)
+    $Rejected=$false;try{$Reuse.Reuse((Join-Path $Alias 'same.txt'),(Join-Path $Pinned 'alias.txt'),$Size,$Hash,'alias.txt')|Out-Null}catch{$Rejected=$true}
+    if(-not $Rejected -or [IO.File]::Exists((Join-Path $Pinned 'alias.txt'))){throw 'Pinned reuse followed a reparse parent'}
+  } finally {$Reuse.Dispose()}
+  [PangeaPortableFileIO]::MoveDirectory($Base,($Base+'-released'))
+  [PangeaPortableFileIO]::MoveDirectory(($Base+'-released'),$Base)
+  Pass 'reuse session pins parent identity, rejects reparse parents and releases every handle before switching'
   # Exercise real ERROR_NOT_SAME_DEVICE fallback when CI exposes another volume.
   $OtherVolume=@(Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Root -match '^[A-Za-z]:\\$' -and $_.Root -ine [IO.Path]::GetPathRoot($Root) -and [IO.Directory]::Exists($_.Root) }) | Select-Object -First 1
   if($OtherVolume) {

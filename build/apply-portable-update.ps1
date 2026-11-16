@@ -1905,6 +1905,7 @@ function Initialize-PortableFileIO {
   # Win32 calls with extended paths, then wrap the native handle for streaming.
   Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.ComponentModel;
@@ -2071,9 +2072,49 @@ public static class PangeaPortableFileIO {
       current=Parent(current);
     }
   }
+  public sealed class ReuseSession : IDisposable {
+    readonly Dictionary<string,SafeFileHandle> directories = new Dictionary<string,SafeFileHandle>(StringComparer.OrdinalIgnoreCase);
+    bool disposed;
+    void PinDirectory(string path,bool create) {
+      string full=FullPath(path);
+      if(directories.ContainsKey(full)) return;
+      int rootLength=full.StartsWith(@"\\",StringComparison.Ordinal) ? full.IndexOf('\\',full.IndexOf('\\',2)+1) : 3;
+      if(rootLength<0 || full.TrimEnd('\\').Length<=rootLength) return;
+      string parent=Parent(full);
+      if(parent.Length==2 && parent[1]==':') parent+="\\";
+      PinDirectory(parent,create);
+      if(create) EnsureDirectory(full);
+      // Read access is intentional: a zero-access handle does not enforce the
+      // sharing restriction on Windows. Pin each directory against replacement.
+      var handle=CreateFileW(Extended(full),0x80000000u,1,IntPtr.Zero,3,0x02200000u,IntPtr.Zero);
+      try {
+        if(handle.IsInvalid) throw Error("Pin package directory",full,Marshal.GetLastWin32Error());
+        FileInfo info;
+        if(!GetFileInformationByHandle(handle,out info)) throw Error("Inspect pinned directory",full,Marshal.GetLastWin32Error());
+        if((info.Attributes&0x410)!=0x10) throw new IOException("Package parent is not a real directory: "+full);
+        directories.Add(full,handle);
+      } catch { handle.Dispose(); throw; }
+    }
+    public bool Reuse(string source,string target,long size,string hash,string relative) {
+      if(disposed) throw new ObjectDisposedException("ReuseSession");
+      PinDirectory(Parent(FullPath(source)),false);
+      PinDirectory(Parent(FullPath(target)),true);
+      return ReuseVerifiedCore(source,target,size,hash,relative);
+    }
+    public void Dispose() {
+      if(disposed) return;
+      disposed=true;
+      foreach(var handle in directories.Values) handle.Dispose();
+      directories.Clear();
+    }
+  }
+  public static ReuseSession BeginReuse() { return new ReuseSession(); }
   public static bool ReuseVerified(string source,string target,long size,string hash,string relative) {
     AssertNoReparse(source);
     AssertNoReparse(target);
+    return ReuseVerifiedCore(source,target,size,hash,relative);
+  }
+  static bool ReuseVerifiedCore(string source,string target,long size,string hash,string relative) {
     // This handle denies concurrent writes/deletion while verification and link
     // creation bind the candidate to the exact bytes just checked.
     using(var input=Open(source,false)) {
@@ -2098,12 +2139,17 @@ public static class PangeaPortableFileIO {
     string full = Extended(path);
     if (write) EnsureExtendedDirectory(Parent(full));
     SafeFileHandle handle = CreateFileW(full, write ? 0x40000000u : 0x80000000u,
-      write ? 0u : 1u, IntPtr.Zero, write ? 1u : 3u, 0x08000000u, IntPtr.Zero);
+      write ? 0u : 1u, IntPtr.Zero, write ? 1u : 3u, 0x08200000u, IntPtr.Zero);
     if (handle.IsInvalid) {
       int code = Marshal.GetLastWin32Error(); handle.Dispose();
       throw Error(write ? "Create file" : "Read file", path, code);
     }
-    try { return new FileStream(handle, write ? FileAccess.Write : FileAccess.Read, 65536, false); }
+    try {
+      FileInfo info;
+      if(!GetFileInformationByHandle(handle,out info)) throw Error("Inspect opened file",path,Marshal.GetLastWin32Error());
+      if((info.Attributes&0x410)!=0) throw new IOException("Package file is a directory or reparse point: "+path);
+      return new FileStream(handle, write ? FileAccess.Write : FileAccess.Read, 65536, false);
+    }
     catch { handle.Dispose(); throw; }
   }
   public static void Verify(string path, long size, string hash, string relative) {
@@ -2276,6 +2322,7 @@ function Apply-VerifiedPatch {
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   Initialize-PortableFileIO
   $Zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
+  $Reuse=[PangeaPortableFileIO]::BeginReuse()
   try {
     $Patch = Read-ZipEntryText $Zip 'pangea-patch-manifest.json' | ConvertFrom-Json
     if ($Patch.schema_version -ne 1 -or [string]$Patch.product -ne 'PANGEA Desktop') { throw 'Patch manifest is invalid.' }
@@ -2313,7 +2360,7 @@ function Apply-VerifiedPatch {
       } else {
         $BasePath = [PangeaPortableFileIO]::Child($BaseRoot, $Relative)
         if (-not [PangeaPortableFileIO]::IsFile($BasePath)) { throw "Base package is missing unchanged file: $Relative" }
-        if ([PangeaPortableFileIO]::ReuseVerified($BasePath, $TargetPath, [long]$File.size, [string]$File.sha256, $Relative)) { $Linked++ } else { $Copied++ }
+        if ($Reuse.Reuse($BasePath, $TargetPath, [long]$File.size, [string]$File.sha256, $Relative)) { $Linked++ } else { $Copied++ }
       }
       $Completed++
       if ($Completed % 100 -eq 0 -or $Completed -eq $TargetManifest.files.Count -or ([DateTime]::UtcNow-$LastProgress).TotalSeconds -ge 2) {
@@ -2324,7 +2371,7 @@ function Apply-VerifiedPatch {
     Write-UpdateLog "patch reconstruction: linked=$Linked; copied=$Copied; payload=$($Payload.Count)"
     Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json' (Join-Path $Destination 'resources\update\pangea-package-manifest.json')
     Extract-ZipEntry $Zip 'target/resources/update/pangea-package-manifest.json.sig' (Join-Path $Destination 'resources\update\pangea-package-manifest.json.sig')
-  } finally { $Zip.Dispose() }
+  } finally { $Reuse.Dispose(); $Zip.Dispose() }
 }
 
 function Initialize-PortableTransactionPaths {

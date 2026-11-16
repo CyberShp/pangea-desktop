@@ -10,7 +10,7 @@ foreach($f in $a.FindAll({param($n) $n -is [Management.Automation.Language.Funct
 # A controlled baseline: the identical production patch function, with only the
 # unchanged-file strategy replaced by the previous copy-then-verify algorithm.
 $Current=(Get-Command Apply-VerifiedPatch).Definition
-$LinkLine='if ([PangeaPortableFileIO]::ReuseVerified($BasePath, $TargetPath, [long]$File.size, [string]$File.sha256, $Relative)) { $Linked++ } else { $Copied++ }'
+$LinkLine='if ($Reuse.Reuse($BasePath, $TargetPath, [long]$File.size, [string]$File.sha256, $Relative)) { $Linked++ } else { $Copied++ }'
 if(-not $Current.Contains($LinkLine)){throw 'Benchmark baseline transformation no longer matches production.'}
 $Legacy=$Current.Replace($LinkLine,'[PangeaPortableFileIO]::Copy($BasePath, $TargetPath); [PangeaPortableFileIO]::Verify($TargetPath, [long]$File.size, [string]$File.sha256, $Relative); $Copied++')
 Set-Item Function:Apply-CopyBaseline ([scriptblock]::Create($Legacy))
@@ -28,7 +28,8 @@ Set-Item Function:Start-BenchmarkOriginalServer ([scriptblock]::Create((Get-Comm
 $Report.handle_worker_starts=0
 function Get-UpdateLockHolders {param([string]$Root,[int]$TimeoutMilliseconds=15000);$Report.handle_scans++;Get-BenchmarkOriginalHolders $Root $TimeoutMilliseconds}
 function Start-UpdateHandleServer {$Report.handle_worker_starts++;Start-BenchmarkOriginalServer}
-function Timed([string]$Name,[scriptblock]$Action){$sw=[Diagnostics.Stopwatch]::StartNew();& $Action;$sw.Stop();$Report.timings_ms[$Name]=$sw.ElapsedMilliseconds;Write-Output ('TIMING '+$Name+'='+$sw.ElapsedMilliseconds+'ms')}
+function Save-Checkpoint {[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReportPath)))|Out-Null;[IO.File]::WriteAllText([IO.Path]::GetFullPath($ReportPath),($Report|ConvertTo-Json -Depth 10),(New-Object Text.UTF8Encoding($false)))}
+function Timed([string]$Name,[scriptblock]$Action){$sw=[Diagnostics.Stopwatch]::StartNew();& $Action;$sw.Stop();$Report.timings_ms[$Name]=$sw.ElapsedMilliseconds;Save-Checkpoint;Write-Output ('TIMING '+$Name+'='+$sw.ElapsedMilliseconds+'ms')}
 try {
   [IO.Directory]::CreateDirectory($Base)|Out-Null
   $Files=New-Object 'Collections.Generic.List[object]'
