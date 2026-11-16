@@ -267,6 +267,7 @@ jobs:
           & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/verify-portable-update-progress.ps1 -FunctionsOnly
           if ($LASTEXITCODE -ne 0) { throw 'Updater progress ownership regression failed.' }
       - name: Measure native 100k-file patch and 1 GiB user-data migration
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           ./scripts/measure-portable-zero-copy.ps1

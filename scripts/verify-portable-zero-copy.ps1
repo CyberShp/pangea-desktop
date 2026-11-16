@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$ChildRoot,[string]$CrashPoint,[string]$ReportPath)
+param([string]$ChildRoot,[string]$CrashPoint,[string]$ReportPath='.pangea-build/verification/portable-zero-copy-crashes.json')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $Updater=Join-Path $PSScriptRoot '../build/apply-portable-update.ps1'
@@ -129,11 +129,11 @@ public static class MigrationFixture {
 }
 '@
   $f=Fixture (Join-Path $Root 'held');$receipt=Initialize-PortableDataMigration $f.Context
-  $Held=[MigrationFixture]::CreateFileW((Join-Path $f.Install 'launch-root'),0,3,[IntPtr]::Zero,3,0x02000000,[IntPtr]::Zero)
+  $Held=[MigrationFixture]::CreateFileW((Join-Path $f.Install 'launch-root'),0x80000000,1,[IntPtr]::Zero,3,0x02000000,[IntPtr]::Zero)
   if($Held.IsInvalid){throw 'Could not hold migration fixture directory'}
   try {
     $Rejected=$false;try{Resume-PortableDataMigration $f.Context $f.Install}catch{$Rejected=$true}
-    if(-not $Rejected -or -not [IO.File]::Exists((Join-Path $f.Install 'launch-root/keep.txt')) -or [IO.Directory]::Exists((Join-Path $f.Data.Root 'launch-root'))){throw 'Locked source was moved or lost'}
+    if(-not $Rejected -or -not [IO.File]::Exists((Join-Path $f.Install 'launch-root/keep.txt')) -or [IO.Directory]::Exists((Join-Path $f.Data.Root 'launch-root'))){throw ('Locked source check failed: rejected='+$Rejected+'; source='+[IO.File]::Exists((Join-Path $f.Install 'launch-root/keep.txt'))+'; target='+[IO.Directory]::Exists((Join-Path $f.Data.Root 'launch-root')))}
   } finally {$Held.Dispose()}
   Resume-PortableDataMigration $f.Context $f.Install
   Pass 'locked first migration fails intact and resumes after the retained holder releases its handle'
@@ -176,10 +176,24 @@ public static class MigrationFixture {
   Remove-PortableDirectory $New
   if((Get-FileHash -LiteralPath $Source).Hash.ToLowerInvariant() -ne $Hash){throw 'Candidate cleanup damaged baseline'}
   Pass 'same-volume hard links verify bytes first; all updater overwrite paths reject shared targets'
-  $Results.status='passed'
+  # Exercise real ERROR_NOT_SAME_DEVICE fallback when CI exposes another volume.
+  $OtherVolume=@(Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Root -and $_.Root -ine [IO.Path]::GetPathRoot($Root) -and [IO.Directory]::Exists($_.Root) }) | Select-Object -First 1
+  if($OtherVolume) {
+    $Other=Join-Path $OtherVolume.Root ('pangea-link-fallback-'+[guid]::NewGuid().ToString('N'))
+    try {
+      [PangeaPortableFileIO]::EnsureDirectory($Other)
+      $Copied=Join-Path $Other 'copy.txt'
+      if([PangeaPortableFileIO]::ReuseVerified($Source,$Copied,$Size,$Hash,'copy.txt')){throw 'Cross-volume fixture unexpectedly linked'}
+      if((Get-FileHash -LiteralPath $Copied).Hash.ToLowerInvariant() -ne $Hash){throw 'Cross-volume copy not verified'}
+      [IO.File]::WriteAllText($Copied,'independent copy')
+      if((Get-FileHash -LiteralPath $Source).Hash.ToLowerInvariant() -ne $Hash){throw 'Fallback copy shares writes'}
+      Pass 'real cross-volume link failure falls back to a verified independent copy'
+    } finally {if([IO.Directory]::Exists($Other)){Remove-PortableDirectory $Other}}
+  } else {Pass 'SKIP cross-volume fallback: only one filesystem volume available'}
+  $Results.status='passed' 
 } catch {$Results.status='failed';$Results.error=$_.Exception.Message;throw}
 finally {
-  if($ReportPath){$Parent=Split-Path -Parent $ReportPath;if($Parent){[IO.Directory]::CreateDirectory($Parent)|Out-Null};[IO.File]::WriteAllText($ReportPath,($Results|ConvertTo-Json -Depth 10),(New-Object Text.UTF8Encoding($false)))}
+  if($ReportPath -and -not $ChildRoot){$Parent=Split-Path -Parent $ReportPath;if($Parent){[IO.Directory]::CreateDirectory($Parent)|Out-Null};[IO.File]::WriteAllText($ReportPath,($Results|ConvertTo-Json -Depth 10),(New-Object Text.UTF8Encoding($false)))}
   Stop-UpdateHandleServer
   Remove-PortableDirectory $Root
 }
