@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$ChildRoot,[string]$CrashPoint,[switch]$Benchmark,[string]$ReportPath)
+param([string]$ChildRoot,[string]$CrashPoint,[string]$ReportPath)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $Updater=Join-Path $PSScriptRoot '../build/apply-portable-update.ps1'
@@ -118,6 +118,48 @@ try {
   $Rejected=$false;try{Resume-PortableDataMigration $f.Context $f.Install}catch{$Rejected=$true}
   if(-not $Rejected -or [IO.File]::ReadAllText((Join-Path $f.Install 'launch-root/concurrent.txt')) -ne 'keep conflict' -or -not [IO.File]::Exists((Join-Path $f.Data.Root 'launch-root/keep.txt'))){throw 'Migration overwrote a conflicting directory'}
   Pass 'conflicting source and target remain untouched for explicit recovery'
+  # A non-share-delete directory handle blocks first migration without killing its owner.
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class MigrationFixture {
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+  public static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
+}
+'@
+  $f=Fixture (Join-Path $Root 'held');$receipt=Initialize-PortableDataMigration $f.Context
+  $Held=[MigrationFixture]::CreateFileW((Join-Path $f.Install 'launch-root'),0,3,[IntPtr]::Zero,3,0x02000000,[IntPtr]::Zero)
+  if($Held.IsInvalid){throw 'Could not hold migration fixture directory'}
+  try {
+    $Rejected=$false;try{Resume-PortableDataMigration $f.Context $f.Install}catch{$Rejected=$true}
+    if(-not $Rejected -or -not [IO.File]::Exists((Join-Path $f.Install 'launch-root/keep.txt')) -or [IO.Directory]::Exists((Join-Path $f.Data.Root 'launch-root'))){throw 'Locked source was moved or lost'}
+  } finally {$Held.Dispose()}
+  Resume-PortableDataMigration $f.Context $f.Install
+  Pass 'locked first migration fails intact and resumes after the retained holder releases its handle'
+  # No adoption of arbitrary links or replacement directories, even with valid content.
+  foreach($Tamper in @('wrong-link','changed-identity','missing-receipt')) {
+    $f=Fixture (Join-Path $Root $Tamper);$receipt=Initialize-PortableDataMigration $f.Context;Resume-PortableDataMigration $f.Context $f.Install
+    switch($Tamper) {
+      'wrong-link' {
+        $Wrong=Join-Path $Root 'unrelated';[IO.Directory]::CreateDirectory($Wrong)|Out-Null;[IO.File]::WriteAllText((Join-Path $Wrong 'keep.txt'),'unrelated')
+        [IO.Directory]::Delete((Join-Path $f.Install 'launch-root'))
+        [PangeaPortableFileIO]::NewJunction((Join-Path $f.Install 'launch-root'),$Wrong)
+      }
+      'changed-identity' {
+        [PangeaPortableFileIO]::MoveDirectory((Join-Path $f.Data.Root 'launch-root'),(Join-Path $f.Data.Root 'retained-original'))
+        [IO.Directory]::CreateDirectory((Join-Path $f.Data.Root 'launch-root'))|Out-Null
+        [IO.File]::WriteAllText((Join-Path $f.Data.Root 'launch-root/keep.txt'),'replacement')
+      }
+      'missing-receipt' {[IO.File]::Delete($f.Data.Receipt)}
+    }
+    $Rejected=$false;try{Initialize-PortableDataMigration $f.Context|Out-Null;Resume-PortableDataMigration $f.Context $f.Install}catch{$Rejected=$true}
+    if(-not $Rejected){throw "Unsafe migration accepted: $Tamper"}
+    $Original=if($Tamper -eq 'changed-identity'){Join-Path $f.Data.Root 'retained-original/keep.txt'}else{Join-Path $f.Data.Root 'launch-root/keep.txt'}
+    if([IO.File]::ReadAllText($Original) -ne 'launch-root'){throw 'Tamper handling lost original data'}
+    if($Tamper -eq 'wrong-link' -and [IO.File]::ReadAllText((Join-Path $Wrong 'keep.txt')) -ne 'unrelated'){throw 'Tamper handling altered unrelated data'}
+    Pass "$Tamper is rejected while original and unrelated data remain intact"
+  }
   # Hard-link reuse: verify first, reject overwrite and changed bytes.
   $Base=Join-Path $Root 'links/base';$New=Join-Path $Root 'links/new'
   [IO.Directory]::CreateDirectory($Base)|Out-Null;[IO.Directory]::CreateDirectory($New)|Out-Null
