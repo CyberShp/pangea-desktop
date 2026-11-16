@@ -128,13 +128,13 @@ function Get-WriterExitEvidence {
     $Current=Get-Process -Id $Probe.Id -ErrorAction SilentlyContinue
     try {
       $Identity=if (-not $Current) { 'PID no longer enumerated' }
-        elseif ($Current.StartTime.ToUniversalTime().Ticks -ne $Probe.Started) { 'PID reused by a different process' }
         elseif ($Current.HasExited) { 'original PID still enumerated but exited' }
+        elseif ($Current.StartTime.ToUniversalTime().Ticks -ne $Probe.Started) { 'PID reused by a different process' }
         else { 'original PID still enumerated' }
     } catch { $Identity='PID enumeration changed during diagnosis: '+$_.Exception.Message }
     finally { if ($Current) { $Current.Dispose() } }
   }
-  return [pscustomobject]@{Exited=$Exited;Before=$Before;After=$After;Detail="handle-signaled=$Exited; bytes=$Before->$After; identity=$Identity"}
+  return [pscustomobject]@{Exited=$Exited;Before=$Before;After=$After;Detail="handle-signaled-at-check=$Exited; bytes=$Before->$After; identity-after-observation=$Identity"}
 }
 function Stop-WriterProbe {
   param($Probe)
