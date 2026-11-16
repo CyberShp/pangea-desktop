@@ -1949,10 +1949,16 @@ public static class PangeaPortableFileIO {
     else if (path.Length >= 3 && Char.IsLetter(path[0]) && path[1] == ':' && path[2] == '\\') native = @"\\?\" + path;
     else throw new IOException("Update path must be absolute: " + path);
     // GetFullPathNameW also needs the extended prefix on non-opted-in hosts.
-    var buffer = new StringBuilder(32768);
+    // Most package paths are short. A 32K-char buffer per normalization creates
+    // tens of GiB of transient allocations across a 100K-file patch.
+    var buffer = new StringBuilder(Math.Min(32768,Math.Max(260,native.Length+2)));
     uint length = GetFullPathNameW(native, (uint)buffer.Capacity, buffer, IntPtr.Zero);
+    if(length>=buffer.Capacity && length<32768) {
+      buffer=new StringBuilder((int)length+1);
+      length=GetFullPathNameW(native,(uint)buffer.Capacity,buffer,IntPtr.Zero);
+    }
     if (length == 0) throw Error("Resolve path", path, Marshal.GetLastWin32Error());
-    if (length >= buffer.Capacity) throw new PathTooLongException("Update path exceeds the Windows extended path limit.");
+    if (length >= buffer.Capacity || length>=32768) throw new PathTooLongException("Update path exceeds the Windows extended path limit.");
     string result = buffer.ToString();
     return result.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase) ? @"\\" + result.Substring(8) : result.Substring(4);
   }
