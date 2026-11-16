@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
@@ -23,7 +23,8 @@ async function fixture() {
 
 it('finds an interrupted transaction even while the install directory is missing', async () => {
   const f = await fixture()
-  expect(await readPendingPortableTransaction(f.install, f.userData)).toMatchObject({ state: 'original_move_pending', planPath: f.planPath })
+  // Recovery returns a canonical path; Windows TEMP may use an 8.3 alias.
+  expect(await readPendingPortableTransaction(f.install, f.userData)).toMatchObject({ state: 'original_move_pending', planPath: await realpath(f.planPath) })
   f.record.state = 'restored'; await f.save()
   expect(await readPendingPortableTransaction(f.install, f.userData)).toBeUndefined()
 })
