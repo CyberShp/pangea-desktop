@@ -11,26 +11,26 @@ import { patchName } from '../scripts/historical-release-lib.mjs'
 const script = fileURLToPath(new URL('../scripts/list-release-patch-assets.mjs', import.meta.url))
 const digest = value => createHash('sha256').update(value).digest('hex')
 
-async function fixture(t, { base = '2.1.17', badChecksum = false, badReportDigest = false } = {}) {
+async function fixture(t, { base = '2.1.23', badChecksum = false, badReportDigest = false } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'pangea-release-assets-'))
   t.after(() => rm(root, { recursive: true, force: true }))
-  const patch = patchName('2.1.20', base)
+  const patch = patchName('2.1.26', base)
   const patchBytes = 'verified patch fixture'
   await writeFile(path.join(root, patch), patchBytes)
   await writeFile(path.join(root, `${patch}.sha256`), `${badChecksum ? 'b'.repeat(64) : digest(patchBytes)}  ${patch}\n`)
   const report = JSON.stringify({
-    target: '2.1.20', discovery_complete: true,
+    target: '2.1.26', discovery_complete: true,
     bases: [{ version: base, status: 'verified', patch, patch_sha256: digest(patchBytes) }]
   })
-  const reportName = `pangea-desktop-2.1.20-patch-report-${badReportDigest ? '0'.repeat(12) : digest(report).slice(0, 12)}.json`
+  const reportName = `pangea-desktop-2.1.26-patch-report-${badReportDigest ? '0'.repeat(12) : digest(report).slice(0, 12)}.json`
   await writeFile(path.join(root, reportName), report)
-  return { root, patch, reportName, run: () => spawnSync(process.execPath, [script, '--version', '2.1.20', '--directory', root], { encoding: 'utf8' }) }
+  return { root, patch, reportName, run: () => spawnSync(process.execPath, [script, '--version', '2.1.26', '--directory', root], { encoding: 'utf8' }) }
 }
 
 test('new-release asset listing omits stale retired and unreported patches without modifying files', async t => {
   const f = await fixture(t)
-  const stale = patchName('2.1.20', '2.1.16')
-  const unreported = patchName('2.1.20', '2.1.18')
+  const stale = patchName('2.1.26', '2.1.22')
+  const unreported = patchName('2.1.26', '2.1.24')
   await writeFile(path.join(f.root, stale), 'old build output')
   await writeFile(path.join(f.root, unreported), 'not verified')
   const result = f.run()
@@ -40,9 +40,9 @@ test('new-release asset listing omits stale retired and unreported patches witho
 })
 
 for (const [name, options, error] of [
-  ['retired verified baseline', { base: '2.1.16' }, /Invalid verified patch record/],
-  ['future verified baseline', { base: '2.1.21' }, /Invalid verified patch record/],
-  ['cross-channel baseline', { base: '2.1.17-test.1.abcdef0' }, /Invalid verified patch record/],
+  ['retired verified baseline', { base: '2.1.22' }, /Invalid verified patch record/],
+  ['future verified baseline', { base: '2.1.27' }, /Invalid verified patch record/],
+  ['cross-channel baseline', { base: '2.1.23-test.1.abcdef0' }, /Invalid verified patch record/],
   ['changed patch checksum', { badChecksum: true }, /Checksum mismatch/],
   ['changed report bytes', { badReportDigest: true }, /Report filename digest mismatch/]
 ]) {
