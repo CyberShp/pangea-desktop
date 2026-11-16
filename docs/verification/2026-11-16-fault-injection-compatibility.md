@@ -1,5 +1,9 @@
 # Fault injection compatibility delivery gate
 
+This document preserves the original test-branch evidence. For the subsequent
+mainline integration, corrections and acceptance, see
+[post-merge verification](2026-11-16-windows-compatibility-post-merge.md).
+
 ## Scope
 
 The same verifier runs against the locked companion source on native Windows and
