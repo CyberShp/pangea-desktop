@@ -55,7 +55,7 @@ try {
   $Recovered=@(Get-UpdateLockHolders 'C:\recovered')
   if ($script:Starts -ne 2 -or $Recovered[0].Path -cne 'C:\recovered') { throw 'Fresh worker did not recover after timeout' }
   $Failed=$false
-  try { $null=Get-UpdateLockHolders 'error' } catch { $Failed=$true }
+  try { $null=Get-UpdateLockHolders 'error' } catch { $Failed=$_.Exception.Message -like '*fixture scan failure*' }
   if (-not $Failed -or $script:HandleServerState) { throw 'Scan failure must fail closed and discard worker' }
   Write-Output 'PASS: scan errors fail closed; next request uses a new worker'
 } finally { Stop-UpdateHandleServer }

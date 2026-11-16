@@ -970,7 +970,8 @@ function Get-UpdateLockHolders {
     if (-not $Read.Wait([int]$Remaining)) { throw 'Local handle inspection timed out; no occupying processes were stopped.' }
     if ($null -eq $Read.Result) { throw 'Local handle inspector closed its response pipe.' }
     $Reply=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Read.Result)) | ConvertFrom-Json
-    if ($Reply.error -or [long]$Reply.sequence -ne $State.Sequence) { throw 'Local handle inspection failed or returned a stale response; no occupying processes were stopped.' }
+    if ($Reply.error) { throw "Local handle inspection failed; no occupying processes were stopped. $($Reply.error)" }
+    if ([long]$Reply.sequence -ne $State.Sequence) { throw "Local handle inspection returned a stale response: expected=$($State.Sequence); actual=$($Reply.sequence); no occupying processes were stopped." }
     # Enumerate explicitly for Windows PowerShell 5.1 JSON array semantics.
     foreach ($Holder in $Reply.holders) { $Holder }
     Write-UpdateLog "resident handle scan: sequence=$($State.Sequence); elapsed_ms=$($Timer.ElapsedMilliseconds)"
