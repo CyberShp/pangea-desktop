@@ -129,7 +129,7 @@ public static class MigrationFixture {
 }
 '@
   $f=Fixture (Join-Path $Root 'held');$receipt=Initialize-PortableDataMigration $f.Context
-  $Held=[MigrationFixture]::CreateFileW((Join-Path $f.Install 'launch-root'),0x80000000,1,[IntPtr]::Zero,3,0x02000000,[IntPtr]::Zero)
+  $Held=[MigrationFixture]::CreateFileW((Join-Path $f.Install 'launch-root'),([uint32]2147483648),1,[IntPtr]::Zero,3,0x02000000,[IntPtr]::Zero)
   if($Held.IsInvalid){throw 'Could not hold migration fixture directory'}
   try {
     $Rejected=$false;try{Resume-PortableDataMigration $f.Context $f.Install}catch{$Rejected=$true}

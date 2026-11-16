@@ -2,6 +2,11 @@ name: Release pipeline regression
 on:
   workflow_dispatch:
     inputs:
+      native_zero_copy_only:
+        description: Run only native zero-copy migration, lifecycle and benchmark tests
+        required: false
+        type: boolean
+        default: false
       build_unsigned:
         description: Assemble an unsigned win-unpacked test instance from the component lock and validate it; never sign or publish
         required: false
@@ -93,6 +98,7 @@ permissions:
   actions: read
 jobs:
   windows-components:
+    if: inputs.native_zero_copy_only != true
     # Run the plugin checks that gate release assembly on the release OS,
     # using the exact component lock, without signing or publishing a package.
     runs-on: windows-2022
@@ -212,6 +218,7 @@ jobs:
           path: .pangea-build/verification/
           if-no-files-found: warn
   tooling:
+    if: inputs.native_zero_copy_only != true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -232,6 +239,7 @@ jobs:
       - name: Verify existing package and patch contracts
         run: npx --no-install vitest run test/release.test.ts test/semantic-staging.test.ts test/fault-injection-compat-gate.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts test/portable-upgrade-policy.test.ts
   windows-updater:
+    if: inputs.native_zero_copy_only != true
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -252,8 +260,6 @@ jobs:
             'scripts/verify-portable-profile-rollback.ps1',
             'scripts/verify-portable-batch-cleanup.ps1',
             'scripts/verify-portable-handle-server.ps1',
-            'scripts/verify-portable-zero-copy.ps1',
-            'scripts/verify-portable-update-lifecycle.ps1',
             'scripts/verify-portable-update-locks.ps1',
             'scripts/verify-portable-patch-apply.ps1',
             'scripts/verify-portable-handle-resolution.ps1',
@@ -267,6 +273,20 @@ jobs:
           }
           & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/verify-portable-update-progress.ps1 -FunctionsOnly
           if ($LASTEXITCODE -ne 0) { throw 'Updater progress ownership regression failed.' }
+      - name: Verify import, health, recovery and task admission
+        run: npx --no-install vitest run test/portable-update-health.test.ts test/portable-package-io.test.ts test/portable-update-recovery.test.ts test/portable-update-admission.test.ts test/portable-upgrade-policy.test.ts
+  windows-zero-copy:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify real process crashes and data identity boundaries
+        shell: powershell
+        run: ./scripts/verify-portable-zero-copy.ps1
+      - name: Verify production supervisor lifecycle with a native application fixture
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: ./scripts/verify-portable-update-lifecycle.ps1
       - name: Measure native 100k-file patch and 1 GiB user-data migration
         if: ${{ !cancelled() }}
         shell: powershell
@@ -280,5 +300,3 @@ jobs:
           name: windows-zero-copy-evidence
           path: .pangea-build/verification/portable-zero-copy*.json
           if-no-files-found: warn
-      - name: Verify import, health, recovery and task admission
-        run: npx --no-install vitest run test/portable-update-health.test.ts test/portable-package-io.test.ts test/portable-update-recovery.test.ts test/portable-update-admission.test.ts test/portable-upgrade-policy.test.ts
