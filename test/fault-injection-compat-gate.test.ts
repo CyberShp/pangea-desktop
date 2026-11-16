@@ -39,8 +39,13 @@ describe('fault injection delivery acceptance', () => {
     expect(verify['continue-on-error']).toBeUndefined()
     expect(verify.run).toContain('--require-windows')
     expect(verify.run).toContain("if ($LASTEXITCODE -ne 0) { throw")
-    const evidence = job.steps.find((step: { uses?: string }) => step.uses === 'actions/upload-artifact@v4')
+    const evidence = job.steps.find((step: { with?: { name?: string } }) => step.with?.name === 'windows-fault-injection-compatibility')
     expect(evidence.if).toBe('always()')
+    const assembly = job.steps.find((step: { name?: string }) => step.name === 'Assemble unsigned Windows test instance')
+    expect(assembly.run).toContain('build-pangea-desktop.ps1 -SkipPackage')
+    expect(assembly.run).toContain('npm run package:dir')
+    expect(assembly.run).not.toContain('-SkipTests')
+    expect(assembly.run).not.toContain('create-signed')
   })
 
   it('rejects skipped tests for delivery and validates packaged runtime before signing', async () => {
