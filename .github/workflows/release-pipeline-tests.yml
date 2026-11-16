@@ -2,6 +2,11 @@ name: Release pipeline regression
 on:
   workflow_dispatch:
     inputs:
+      benchmark_file_count:
+        description: Native fixture size (100000 for acceptance; smaller values only diagnose the fixture)
+        required: false
+        type: string
+        default: '100000'
       benchmark_native:
         description: Include the 100000-file and 1 GiB native performance comparison
         required: false
@@ -295,13 +300,20 @@ jobs:
       - name: Measure native 100k-file patch and 1 GiB user-data migration
         if: ${{ !cancelled() && inputs.benchmark_native != false }}
         shell: powershell
+        env:
+          BENCHMARK_FILE_COUNT: ${{ inputs.benchmark_file_count || '100000' }}
         run: |
-          ./scripts/measure-portable-zero-copy.ps1
+          if ($env:BENCHMARK_FILE_COUNT -notmatch '^\d+$' -or [int]$env:BENCHMARK_FILE_COUNT -lt 1 -or [int]$env:BENCHMARK_FILE_COUNT -gt 100000) { throw 'Invalid benchmark file count.' }
+          ./scripts/measure-portable-zero-copy.ps1 -FileCount ([int]$env:BENCHMARK_FILE_COUNT)
           if ($LASTEXITCODE -ne 0) { throw 'Native zero-copy benchmark failed.' }
       - name: Measure complete native supervisor on 100k files and 1 GiB data
         if: ${{ !cancelled() && inputs.benchmark_native != false }}
         shell: powershell
-        run: ./scripts/verify-portable-update-lifecycle.ps1 -FileCount 100000 -UserBytes 1073741824 -ReportPath .pangea-build/verification/portable-zero-copy-whole-supervisor.json
+        env:
+          BENCHMARK_FILE_COUNT: ${{ inputs.benchmark_file_count || '100000' }}
+        run: |
+          if ($env:BENCHMARK_FILE_COUNT -notmatch '^\d+$' -or [int]$env:BENCHMARK_FILE_COUNT -lt 1 -or [int]$env:BENCHMARK_FILE_COUNT -gt 100000) { throw 'Invalid benchmark file count.' }
+          ./scripts/verify-portable-update-lifecycle.ps1 -FileCount ([int]$env:BENCHMARK_FILE_COUNT) -UserBytes 1073741824 -ReportPath .pangea-build/verification/portable-zero-copy-whole-supervisor.json
       - name: Retain native updater evidence
         if: always()
         uses: actions/upload-artifact@v4
