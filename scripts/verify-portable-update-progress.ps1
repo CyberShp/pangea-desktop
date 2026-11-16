@@ -168,16 +168,20 @@ function Read-FixtureJson {
 function New-ProgressFixture {
   param([string]$Name, [switch]$NoProgress)
   $Directory = Join-Path $Root $Name
-  New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+  # Match update-manager's profile/updates/<run>/plan layout and shared result
+  # location so the real monitor validates the same contract as a Desktop launch.
+  $UpdatesRoot = Join-Path $Directory 'profile\updates'
+  $RunDirectory = Join-Path $UpdatesRoot 'run-fixture'
+  New-Item -ItemType Directory -Path $RunDirectory -Force | Out-Null
   $Worker = Start-Process $PowerShell -ArgumentList '-NoProfile -NonInteractive -Command "Start-Sleep -Seconds 180"' -WindowStyle Hidden -PassThru
   $null = $Worker.Handle
   $null = $Processes.Add($Worker)
-  $PlanPath = Join-Path $Directory 'plan.json'
+  $PlanPath = Join-Path $RunDirectory 'update-plan.json'
   $Plan = @{
-    schema_version = 2; install_root = (Join-Path $Directory 'installed'); package_path = (Join-Path $Directory 'unused.zip')
+    schema_version = 2; install_root = (Join-Path $Directory 'installed'); package_path = (Join-Path $RunDirectory 'unused.zip')
     executable_name = 'PANGEA Desktop.exe'; expected_version = '9.9.9'; expected_base_version = '9.9.8'; package_type = 'patch'
-    expected_size = 1; expected_sha256 = ('0' * 64); health_marker = (Join-Path $Directory 'healthy.json')
-    result_path = (Join-Path $Directory 'result.json'); log_path = (Join-Path $Directory 'update.log'); parent_pid = 0
+    expected_size = 1; expected_sha256 = ('0' * 64); health_marker = (Join-Path $RunDirectory 'healthy.json')
+    result_path = (Join-Path $UpdatesRoot 'last-update-result.json'); log_path = (Join-Path $RunDirectory 'update.log'); parent_pid = 0
   }
   Write-FixtureJson $PlanPath $Plan
   New-Item -ItemType Directory -Path $Plan.install_root -Force | Out-Null
@@ -192,7 +196,7 @@ function New-ProgressFixture {
   }
   if (-not $NoProgress) { Write-FixtureJson "$PlanPath.progress.json" $Progress }
   $Arguments = '-NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File "' + $Updater + '" -WatchUpdate -PlanPath "' + $PlanPath + '"'
-  $Monitor = Start-Process $PowerShell -ArgumentList $Arguments -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $Directory 'monitor-error.log')
+  $Monitor = Start-Process $PowerShell -ArgumentList $Arguments -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $RunDirectory 'monitor-error.log')
   $null = $Monitor.Handle
   $null = $Processes.Add($Monitor)
   return @{ PlanPath=$PlanPath; Plan=$Plan; Progress=$Progress; Worker=$Worker; Monitor=$Monitor }

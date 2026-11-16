@@ -74,8 +74,14 @@ try {
   $Linked = $false
   try { New-Item -ItemType SymbolicLink -Path $LinkedUser -Target $UserData -ErrorAction Stop | Out-Null; $Linked=$true } catch { Write-Output 'SKIP: symbolic-link fixture requires Windows link privilege.' }
   if ($Linked) {
-    Assert-Rejected 'linked profile root cannot redirect snapshot operations' { New-UpdateProfileSnapshot $LinkedUser (Join-Path $Root 'linked-snapshot') } 'linked path'
-    Remove-Item -LiteralPath $LinkedUser -Force
+    try {
+      Assert-Rejected 'linked profile root cannot redirect snapshot operations' { New-UpdateProfileSnapshot $LinkedUser (Join-Path $Root 'linked-snapshot') } 'linked path'
+    } finally {
+      # PS 5.1 Remove-Item can throw on a directory symlink. Delete only the
+      # link itself, without recursively touching the profile it points to.
+      [IO.Directory]::Delete($LinkedUser)
+    }
+    Assert-Text (Join-Path $UserData 'harness/credentials.json') 'credential must survive'
   }
 
   $LargeUser = Join-Path $Root 'large-user'
