@@ -59,3 +59,12 @@ it('Escape closes the dialog and restores focus', async () => {
   expect(root().querySelector('dialog')).toBeNull()
   expect(document.activeElement).toBe(opener)
 })
+it('aligns toast and dialog styling with light product shell and clears topbar height', async () => {
+  const view = createUpdateReleaseView({ claim: async () => true, download: async () => {} })
+  await view.update(status)
+  const css = root().querySelector('style')?.textContent ?? ''
+  expect(css).toContain('color-scheme: light')
+  expect(css).not.toContain('color-scheme:light dark')
+  expect(css).toContain('#b62836')
+  expect(css).toContain('top: 66px')
+})
