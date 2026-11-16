@@ -73,7 +73,14 @@ try {
   if (process.platform === 'win32') {
     const control = path.join(root, 'negative-control')
     rawGit(root, ['clone', '--no-checkout', '--', source, control])
-    assert.throws(() => rawGit(control, ['-c', 'core.longpaths=false', 'checkout', '--detach', base]), /Filename too long|filename.*long/i)
+    rawGit(control, ['config', '--local', 'core.longpaths', 'false'])
+    report.negativeControl = {
+      config: rawGit(control, ['config', '--show-origin', '--get', 'core.longpaths']),
+      tracked: rawGit(control, ['ls-tree', '-r', '--name-only', base, '--', relative]),
+    }
+    assert.equal(report.negativeControl.tracked, relative)
+    assert.throws(() => execFileSync('git', ['-c', 'core.longpaths=false', '-C', control, 'checkout', '--detach', base],
+      { encoding: 'utf8', windowsHide: true, timeout: 30000 }), /Filename too long|filename.*long/i)
     report.checks.push('unfixed Windows checkout fails on the same deep file')
   }
   for (const [name, git] of [['sourceGit', sourceGit], ['injectionGit', injectionGit]]) {
