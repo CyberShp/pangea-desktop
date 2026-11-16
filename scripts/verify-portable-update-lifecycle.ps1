@@ -2,7 +2,7 @@
 # monitor is substituted because CI has no interactive desktop. The executable
 # is a native health fixture, not Electron; signature admission has separate tests.
 [CmdletBinding()]
-param([string]$ReportPath='.pangea-build/verification/portable-zero-copy-lifecycle.json')
+param([int]$FileCount=0,[long]$UserBytes=0,[string]$ReportPath='.pangea-build/verification/portable-zero-copy-lifecycle.json')
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
 $Source=Join-Path $PSScriptRoot '../build/apply-portable-update.ps1'
 $Root=Join-Path ([IO.Path]::GetTempPath()) ('pangea-lifecycle-'+[guid]::NewGuid().ToString('N'))
@@ -35,17 +35,18 @@ public class DesktopFixture {
       string path=arg.Substring("--pangea-update-health=".Length);
       File.WriteAllText(path,"{\"schema_version\":1,\"pid\":"+Process.GetCurrentProcess().Id+",\"version\":\""+version+"\",\"healthy_at\":\""+DateTime.UtcNow.ToString("o")+"\"}");
     }
-    Thread.Sleep(120000);return 0;
+    Thread.Sleep(1200000);return 0;
   }
 }
 '@
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Checks=[Collections.Generic.List[string]]::new()
-$Report=@{status='running';checks=$Checks;scope='Production main supervisor with UI monitor substitution; real native fixture executable and real worker processes, health and rollback. No Electron business acceptance.'}
+$Report=@{status='running';checks=$Checks;extra_package_files=$FileCount;user_payload_bytes=$UserBytes;supervisor_ms=@{};scope='Production main supervisor with UI monitor substitution; real native fixture executable and real worker processes, health and rollback. No Electron business acceptance.'}
 function Json([string]$Path,$Value){[IO.File]::WriteAllText($Path,($Value|ConvertTo-Json -Depth 8 -Compress),(New-Object Text.UTF8Encoding($false)))}
 function Entry([string]$Base,[string]$Relative){$p=Join-Path $Base $Relative;return @{path=$Relative;size=(Get-Item -LiteralPath $p).Length;sha256=(Get-FileHash -LiteralPath $p).Hash.ToLowerInvariant()}}
 try {
-  foreach($Mode in @('healthy','failed-start')) {
+  $Modes=if($FileCount -gt 0){@('healthy')}else{@('healthy','failed-start')}
+  foreach($Mode in $Modes) {
     $Case=Join-Path $Root $Mode;$Install=Join-Path $Case 'installed [native]';$ArchiveRoot=Join-Path $Case 'archive'
     $Updates=Join-Path $Case 'profile/updates';$Run=Join-Path $Updates 'one';$PlanPath=Join-Path $Run 'plan.json'
     foreach($Dir in @('resources/update','launch-root','local-skills')){[IO.Directory]::CreateDirectory((Join-Path $Install $Dir))|Out-Null}
@@ -56,6 +57,21 @@ try {
     [IO.File]::WriteAllText((Join-Path $Install 'local-skills/keep.txt'),'private skill')
     Json (Join-Path $Install 'resources/pangea-manifest.json') @{product=@{version='2.1.25'}}
     $Files=@((Entry $Install 'PANGEA Desktop.exe'),(Entry $Install 'same.txt'),(Entry $Install 'resources/pangea-manifest.json'))
+    if($FileCount -gt 0) {
+      $Inventory=[Collections.Generic.List[object]]::new();foreach($File in $Files){$Inventory.Add($File)}
+      $Bytes=[Text.Encoding]::UTF8.GetBytes(('fixture'+('x'*505)));$Sha=[Security.Cryptography.SHA256]::Create();try{$Hash=([BitConverter]::ToString($Sha.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant()}finally{$Sha.Dispose()}
+      for($i=0;$i -lt $FileCount;$i++){
+        $Relative=('resources/fixture/d{0:000}/f{1:000000}.js' -f [int][Math]::Floor($i/1000),$i);$Path=Join-Path $Install $Relative
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path))|Out-Null;[IO.File]::WriteAllBytes($Path,$Bytes)
+        $Inventory.Add(@{path=$Relative;size=$Bytes.Length;sha256=$Hash})
+      }
+      $Files=$Inventory.ToArray()
+    }
+    if($UserBytes -gt 0) {
+      $Stream=[IO.File]::Create((Join-Path $Install 'launch-root/repository.bin'))
+      try{$Block=New-Object byte[] 1048576;$Block[0]=19;$Left=$UserBytes;while($Left -gt 0){$Count=[int][Math]::Min($Left,$Block.Length);$Stream.Write($Block,0,$Count);$Left-=$Count};$Stream.Flush($true)}finally{$Stream.Dispose()}
+      $DataHash=(Get-FileHash -LiteralPath (Join-Path $Install 'launch-root/repository.bin')).Hash
+    }
     Json (Join-Path $Install 'resources/update/pangea-package-manifest.json') @{version='2.1.25';channel='stable';files=$Files}
     [IO.File]::WriteAllText((Join-Path $Install 'resources/update/pangea-package-manifest.json.sig'),'fixture-signature')
     [IO.Directory]::CreateDirectory((Join-Path $ArchiveRoot 'payload/resources'))|Out-Null
@@ -63,16 +79,18 @@ try {
     $Product=@{product=@{version='2.1.26'}};if($Mode -eq 'failed-start'){$Product.fail_start=$true}
     Json (Join-Path $ArchiveRoot 'payload/resources/pangea-manifest.json') $Product
     $Changed=Entry (Join-Path $ArchiveRoot 'payload') 'resources/pangea-manifest.json'
-    Json (Join-Path $ArchiveRoot 'target/resources/update/pangea-package-manifest.json') @{version='2.1.26';channel='stable';files=@($Files[0],$Files[1],$Changed)}
+    Json (Join-Path $ArchiveRoot 'target/resources/update/pangea-package-manifest.json') @{version='2.1.26';channel='stable';files=(@($Files|Where-Object {$_.path -ne 'resources/pangea-manifest.json'})+@($Changed))}
     [IO.File]::WriteAllText((Join-Path $ArchiveRoot 'target/resources/update/pangea-package-manifest.json.sig'),'fixture-signature')
     Json (Join-Path $ArchiveRoot 'pangea-patch-manifest.json') @{schema_version=1;product='PANGEA Desktop';from_version='2.1.25';to_version='2.1.26';files=@($Changed)}
     $Archive=Join-Path $Run 'patch.zip';[IO.Compression.ZipFile]::CreateFromDirectory($ArchiveRoot,$Archive)
     $Plan=@{schema_version=2;install_root=$Install;package_path=$Archive;executable_name='PANGEA Desktop.exe';expected_version='2.1.26';expected_base_version='2.1.25';package_type='patch';package_channel='stable';expected_size=(Get-Item $Archive).Length;expected_sha256=(Get-FileHash $Archive).Hash.ToLowerInvariant();health_marker=(Join-Path $Run 'healthy.json');result_path=(Join-Path $Updates 'last-update-result.json');log_path=(Join-Path $Run 'update.log');parent_pid=0;startup_health_timeout_seconds=30;allow_owned_process_cleanup=$false}
     Json $PlanPath $Plan
     $Info=New-Object Diagnostics.ProcessStartInfo;$Info.FileName=Join-Path $PSHOME 'powershell.exe';$Info.Arguments='-NoProfile -ExecutionPolicy Bypass -File "'+$Helper+'" -PlanPath "'+$PlanPath+'"';$Info.UseShellExecute=$false;$Info.RedirectStandardError=$true
+    $Timer=[Diagnostics.Stopwatch]::StartNew()
     $Process=[Diagnostics.Process]::Start($Info);$Errors=$Process.StandardError.ReadToEndAsync()
     try {
-      if(-not $Process.WaitForExit(90000)){throw 'Lifecycle supervisor timed out'}
+      if(-not $Process.WaitForExit(900000)){throw 'Lifecycle supervisor timed out'}
+      $Timer.Stop();$Report.supervisor_ms[$Mode]=$Timer.ElapsedMilliseconds;Write-Output ('SUPERVISOR '+$Mode+'='+$Timer.ElapsedMilliseconds+'ms')
       if(-not [IO.File]::Exists($Plan.result_path)){throw ('No supervisor result: '+$Errors.Result)}
       $Result=[IO.File]::ReadAllText($Plan.result_path)|ConvertFrom-Json
       $ExpectedStatus=if($Mode -eq 'healthy'){'success'}else{'failed'};$ExpectedVersion=if($Mode -eq 'healthy'){'2.1.26'}else{'2.1.25'}
@@ -81,6 +99,7 @@ try {
       foreach($Pair in @(@('launch-root/keep.txt','user data'),@('local-skills/keep.txt','private skill'),@('launch-root/new-edit.txt','new version data'))){if([IO.File]::ReadAllText((Join-Path $Install $Pair[0])) -ne $Pair[1]){throw 'Supervisor lost user bytes'}}
       $Health=if($Mode -eq 'healthy'){$Plan.health_marker}else{"$PlanPath.rollback-healthy.json"}
       if(-not [IO.File]::Exists($Health)){throw 'Expected healthy native process was not observed'}
+      if($UserBytes -gt 0 -and (Get-FileHash -LiteralPath (Join-Path $Install 'launch-root/repository.bin')).Hash -ne $DataHash){throw 'Whole supervisor changed user payload'}
       $Context=Get-PortableTransactionContext $Install;$Receipt=Read-PortableDataReceipt $Context
       if(-not $Receipt){throw 'Supervisor omitted durable data receipt'}
       $Message="main supervisor ${Mode}: real patch workers, native launch, health, program version and new user edits verified"

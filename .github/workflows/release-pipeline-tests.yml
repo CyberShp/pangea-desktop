@@ -282,7 +282,7 @@ jobs:
         run: npx --no-install vitest run test/portable-update-health.test.ts test/portable-package-io.test.ts test/portable-update-recovery.test.ts test/portable-update-admission.test.ts test/portable-upgrade-policy.test.ts
   windows-zero-copy:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Verify real process crashes and data identity boundaries
@@ -298,6 +298,10 @@ jobs:
         run: |
           ./scripts/measure-portable-zero-copy.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Native zero-copy benchmark failed.' }
+      - name: Measure complete native supervisor on 100k files and 1 GiB data
+        if: ${{ !cancelled() && inputs.benchmark_native != false }}
+        shell: powershell
+        run: ./scripts/verify-portable-update-lifecycle.ps1 -FileCount 100000 -UserBytes 1073741824 -ReportPath .pangea-build/verification/portable-zero-copy-whole-supervisor.json
       - name: Retain native updater evidence
         if: always()
         uses: actions/upload-artifact@v4
