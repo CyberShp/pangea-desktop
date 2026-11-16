@@ -1,0 +1,38 @@
+{
+  "tested_commit": "051bfea2fbbfa60bef27051a347df40babbe74be",
+  "run_id": 43912637060,
+  "url": "https://github.com/CyberShp/pangea-desktop/actions/runs/43912637060",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "id": 133458343191,
+      "name": "tooling",
+      "conclusion": "success"
+    },
+    {
+      "id": 133458343488,
+      "name": "windows-components",
+      "conclusion": "success"
+    },
+    {
+      "id": 133458343706,
+      "name": "windows-updater",
+      "conclusion": "success"
+    }
+  ],
+  "build_unsigned": false,
+  "native_handle_scan_ms": [
+    807,
+    112,
+    93,
+    81,
+    81,
+    78,
+    80,
+    78
+  ],
+  "native_handle_helper_process_count": 1,
+  "large_tree_upgrade_benchmark": "not_run",
+  "packaged_acceptance_this_run": "not_run"
+}

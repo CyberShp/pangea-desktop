@@ -1,0 +1,51 @@
+{
+  "conclusion": "success",
+  "headSha": "62325d7fbf915ad34384b2f2a3f52b2c113c8195",
+  "jobs": [
+    {
+      "name": "windows-agent-contracts",
+      "conclusion": "success",
+      "url": "https://github.com/CyberShp/pangea-desktop/actions/runs/43927014750/job/133509057531",
+      "startedAt": "2026-11-16T18:16:07Z",
+      "completedAt": "2026-11-16T18:17:26Z"
+    },
+    {
+      "name": "windows-updater",
+      "conclusion": "success",
+      "url": "https://github.com/CyberShp/pangea-desktop/actions/runs/43927014750/job/133509057570",
+      "startedAt": "2026-11-16T18:16:08Z",
+      "completedAt": "2026-11-16T18:18:42Z"
+    },
+    {
+      "name": "windows-components",
+      "conclusion": "success",
+      "url": "https://github.com/CyberShp/pangea-desktop/actions/runs/43927014750/job/133509057672",
+      "startedAt": "2026-11-16T18:16:07Z",
+      "completedAt": "2026-11-16T18:26:59Z"
+    },
+    {
+      "name": "windows-zero-copy",
+      "conclusion": "success",
+      "url": "https://github.com/CyberShp/pangea-desktop/actions/runs/43927014750/job/133509057788",
+      "startedAt": "2026-11-16T18:16:07Z",
+      "completedAt": "2026-11-16T18:24:59Z"
+    },
+    {
+      "name": "tooling",
+      "conclusion": "success",
+      "url": "https://github.com/CyberShp/pangea-desktop/actions/runs/43927014750/job/133509057790",
+      "startedAt": "2026-11-16T18:16:07Z",
+      "completedAt": "2026-11-16T18:16:40Z"
+    }
+  ],
+  "url": "https://github.com/CyberShp/pangea-desktop/actions/runs/43927014750",
+  "updater_sha256": "14b27be664bb2c6975fe98872fd5e810dad4f2909d5644ccd705470f75b82591",
+  "agent_commit": "96f572106c685ce6b3070b7c97128a35f10988fb",
+  "unsigned_artifact": {
+    "id": 14256873686,
+    "url": "https://github.com/CyberShp/pangea-desktop/actions/runs/43927014750/artifacts/14256873686",
+    "size_bytes": 327684698,
+    "sha256": "6cb0168a2dbfedf7d963d57db2f27c6a890f0147402d86c7249cbcdd1c6e3c90",
+    "retention_days": 7
+  }
+}

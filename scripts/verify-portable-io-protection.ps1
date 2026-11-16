@@ -278,6 +278,7 @@ try {
   }
   Write-Output 'PASS: kill-on-job-close stops file writers after abrupt supervisor exit'
 } finally {
+  Stop-UpdateHandleServer
   if (Test-Path Function:\Start-Process) { Remove-Item Function:\Start-Process }
   Set-Item Function:\Publish-PortableIOProgress -Value $ProgressDefinition
   try {

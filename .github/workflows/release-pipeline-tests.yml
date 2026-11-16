@@ -2,6 +2,21 @@ name: Release pipeline regression
 on:
   workflow_dispatch:
     inputs:
+      benchmark_file_count:
+        description: Native fixture size (100000 for acceptance; smaller values only diagnose the fixture)
+        required: false
+        type: string
+        default: '100000'
+      benchmark_native:
+        description: Include the 100000-file and 1 GiB native performance comparison
+        required: false
+        type: boolean
+        default: true
+      native_zero_copy_only:
+        description: Run only native zero-copy migration, lifecycle and benchmark tests
+        required: false
+        type: boolean
+        default: false
       build_unsigned:
         description: Assemble an unsigned win-unpacked test instance from the component lock and validate it; never sign or publish
         required: false
@@ -93,6 +108,7 @@ permissions:
   actions: read
 jobs:
   windows-components:
+    if: inputs.native_zero_copy_only != true
     # Run the plugin checks that gate release assembly on the release OS,
     # using the exact component lock, without signing or publishing a package.
     runs-on: windows-2022
@@ -212,6 +228,7 @@ jobs:
           path: .pangea-build/verification/
           if-no-files-found: warn
   tooling:
+    if: inputs.native_zero_copy_only != true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -232,6 +249,7 @@ jobs:
       - name: Verify existing package and patch contracts
         run: npx --no-install vitest run test/release.test.ts test/semantic-staging.test.ts test/fault-injection-compat-gate.test.ts test/portable-patch.test.ts test/portable-patch-generation.test.ts test/portable-upgrade-policy.test.ts
   windows-updater:
+    if: inputs.native_zero_copy_only != true
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -251,6 +269,7 @@ jobs:
             'scripts/verify-portable-io-protection.ps1',
             'scripts/verify-portable-profile-rollback.ps1',
             'scripts/verify-portable-batch-cleanup.ps1',
+            'scripts/verify-portable-handle-server.ps1',
             'scripts/verify-portable-update-locks.ps1',
             'scripts/verify-portable-patch-apply.ps1',
             'scripts/verify-portable-handle-resolution.ps1',
@@ -266,3 +285,76 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Updater progress ownership regression failed.' }
       - name: Verify import, health, recovery and task admission
         run: npx --no-install vitest run test/portable-update-health.test.ts test/portable-package-io.test.ts test/portable-update-recovery.test.ts test/portable-update-admission.test.ts test/portable-upgrade-policy.test.ts
+  windows-zero-copy:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify real process crashes and data identity boundaries
+        shell: powershell
+        run: ./scripts/verify-portable-zero-copy.ps1
+      - name: Verify production supervisor lifecycle with a native application fixture
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: ./scripts/verify-portable-update-lifecycle.ps1
+      - name: Measure native 100k-file patch and 1 GiB user-data migration
+        if: ${{ !cancelled() && inputs.benchmark_native != false }}
+        shell: powershell
+        env:
+          BENCHMARK_FILE_COUNT: ${{ inputs.benchmark_file_count || '100000' }}
+        run: |
+          if ($env:BENCHMARK_FILE_COUNT -notmatch '^\d+$' -or [int]$env:BENCHMARK_FILE_COUNT -lt 1 -or [int]$env:BENCHMARK_FILE_COUNT -gt 100000) { throw 'Invalid benchmark file count.' }
+          ./scripts/measure-portable-zero-copy.ps1 -FileCount ([int]$env:BENCHMARK_FILE_COUNT)
+          if ($LASTEXITCODE -ne 0) { throw 'Native zero-copy benchmark failed.' }
+      - name: Measure complete native supervisor on 100k files and 1 GiB data
+        if: ${{ !cancelled() && inputs.benchmark_native != false }}
+        shell: powershell
+        env:
+          BENCHMARK_FILE_COUNT: ${{ inputs.benchmark_file_count || '100000' }}
+        run: |
+          if ($env:BENCHMARK_FILE_COUNT -notmatch '^\d+$' -or [int]$env:BENCHMARK_FILE_COUNT -lt 1 -or [int]$env:BENCHMARK_FILE_COUNT -gt 100000) { throw 'Invalid benchmark file count.' }
+          ./scripts/verify-portable-update-lifecycle.ps1 -FileCount ([int]$env:BENCHMARK_FILE_COUNT) -UserBytes 1073741824 -ReportPath .pangea-build/verification/portable-zero-copy-whole-supervisor.json
+      - name: Retain native updater evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-zero-copy-evidence
+          path: .pangea-build/verification/portable-zero-copy*.json
+          if-no-files-found: warn
+  windows-agent-contracts:
+    if: inputs.native_zero_copy_only != true
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the exact Agent candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Component = (Get-Content pangea.components.json -Raw | ConvertFrom-Json).pangeaAgent
+          if ($Component.commit -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid Agent commit lock.' }
+          git clone --no-checkout $Component.repository .pangea-build/agent-source
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch Agent source.' }
+          git -C .pangea-build/agent-source checkout --detach $Component.commit
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check out Agent lock.' }
+          $Actual = git -C .pangea-build/agent-source rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $Actual -cne $Component.commit) { throw 'Agent checkout differs from lock.' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: .pangea-build/agent-source/pyproject.toml
+      - name: Install the pinned Agent candidate
+        run: python -m pip install ./.pangea-build/agent-source
+      - name: Verify evidence contracts and historical workflow compatibility
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PANGEA_RUNTIME_ROOT = (Resolve-Path '.pangea-build/agent-source').Path
+          $env:PYTHONPATH = (Resolve-Path '.pangea-build/agent-source/src').Path
+          foreach ($Script in @('backend_evidence_contracts.py', 'coverage_reference_diagnostics.py', 'flow_path_diagnostics.py', 'model_review_removed.py', 'report_delivery_smoke.py')) {
+            python ".pangea-build/agent-source/verification/$Script"
+            if ($LASTEXITCODE -ne 0) { throw "Agent contract regression failed: $Script" }
+          }

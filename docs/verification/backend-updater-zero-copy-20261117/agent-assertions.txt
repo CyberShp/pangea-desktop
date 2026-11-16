@@ -1,0 +1,9 @@
+2026-11-16T18:17:12.5913276Z Ran 11 tests in 0.021s
+2026-11-16T18:17:12.5913533Z OK
+2026-11-16T18:17:12.8542685Z Ran 6 tests in 0.070s
+2026-11-16T18:17:12.8542866Z OK
+2026-11-16T18:17:13.0943659Z Ran 3 tests in 0.056s
+2026-11-16T18:17:13.0943955Z OK
+2026-11-16T18:17:23.3188846Z Ran 7 tests in 8.002s
+2026-11-16T18:17:23.3189029Z OK
+2026-11-16T18:17:23.9982871Z PASS: duplicate IDs, entry loop, shortcut rank, permutations(30), multi-main, static SVG escaping/full labels, ledger malformed/unknown, supersession, closure, variant anchors and legacy flow

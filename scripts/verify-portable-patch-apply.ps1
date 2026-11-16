@@ -21,6 +21,7 @@ try {
   New-Item -ItemType Directory -Path $Base,$ArchiveRoot -Force | Out-Null
   [System.IO.File]::WriteAllText((Join-Path $Base '[Content_Types].xml'), 'unchanged bracket file')
   [System.IO.File]::WriteAllText((Join-Path $Base 'obsolete.txt'), 'removed in target')
+  [System.IO.File]::WriteAllText((Join-Path $Base 'new [file].txt'), 'old payload bytes')
   New-Item -ItemType Directory -Path (Join-Path $ArchiveRoot 'payload'),(Join-Path $ArchiveRoot 'target/resources/update') -Force | Out-Null
   [System.IO.File]::WriteAllText((Join-Path $ArchiveRoot 'payload/new [file].txt'), 'new payload')
   $Files = @(
@@ -38,7 +39,8 @@ try {
     if ((Get-FileHash -LiteralPath (Join-Path $Candidate $File.path)).Hash.ToLowerInvariant() -ne $File.sha256) { throw 'Reconstructed file mismatch' }
   }
   if (Test-Path -LiteralPath (Join-Path $Candidate 'obsolete.txt')) { throw 'Deleted file survived' }
-  Write-Output 'PASS: bracket paths and patch reconstruction'
+  if ([IO.File]::ReadAllText((Join-Path $Base 'new [file].txt')) -ne 'old payload bytes') { throw 'Changed payload modified the rollback source' }
+  Write-Output 'PASS: bracket paths, patch reconstruction and changed payload leaves rollback bytes intact'
   New-Item -ItemType Directory -Path (Join-Path $Base 'launch-root/pangea-data/runs'),(Join-Path $Base 'local-skills/private') -Force | Out-Null
   'report' | Set-Content -LiteralPath (Join-Path $Base 'launch-root/pangea-data/runs/report.md')
   'skill' | Set-Content -LiteralPath (Join-Path $Base 'local-skills/private/SKILL.md')
