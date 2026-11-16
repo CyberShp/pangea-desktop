@@ -109,6 +109,12 @@ jobs:
         run: |
           node scripts/verify-fault-injection-compat.mjs --companion .pangea-build/plugin-source/plugins/dsh-pangea-companion --require-windows --report .pangea-build/verification/fault-injection-source.json
           if ($LASTEXITCODE -ne 0) { throw 'Windows fault injection compatibility failed.' }
+      - name: Verify HTTP compatibility with longpaths already enabled
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          node scripts/verify-fault-injection-compat.mjs --companion .pangea-build/plugin-source/plugins/dsh-pangea-companion --require-windows --git-longpaths-default true --report .pangea-build/verification/fault-injection-source-enabled.json
+          if ($LASTEXITCODE -ne 0) { throw 'Enabled-default Windows compatibility failed.' }
       - name: Verify the release plugin suites on Windows
         shell: pwsh
         run: |
@@ -143,6 +149,14 @@ jobs:
           if ($Manifests.Count -ne 1) { throw 'Expected exactly one component manifest.' }
           $PackageRoot = Split-Path -Parent (Split-Path -Parent $Manifests[0].FullName)
           ./scripts/test-packaged-fault-injection.ps1 -PackageDirectory $PackageRoot -ReportPath .pangea-build/verification/fault-injection-packaged.json
+      - name: Verify packaged HTTP compatibility with longpaths already enabled
+        if: ${{ !cancelled() && inputs.package_run_id != '' }}
+        shell: powershell
+        run: |
+          $Manifests = @(Get-ChildItem .pangea-build/acceptance-package -Recurse -Filter pangea-manifest.json)
+          if ($Manifests.Count -ne 1) { throw 'Expected exactly one component manifest.' }
+          $PackageRoot = Split-Path -Parent (Split-Path -Parent $Manifests[0].FullName)
+          ./scripts/test-packaged-fault-injection.ps1 -PackageDirectory $PackageRoot -GitLongpathsDefault true -ReportPath .pangea-build/verification/fault-injection-packaged-enabled.json
       - name: Retain compatibility evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -12,6 +12,7 @@ import { parseArgs } from 'node:util'
 
 const { values } = parseArgs({ options: {
   companion: { type: 'string' }, report: { type: 'string' },
+  'git-longpaths-default': { type: 'string', default: 'false' },
   'require-windows': { type: 'boolean', default: false },
 } })
 const report = { schemaVersion: 1, status: 'failed', platform: process.platform,
@@ -21,6 +22,8 @@ const savedEnv = { ...process.env }
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const deadline = setTimeout(() => { console.error('Compatibility verification timed out'); process.exit(1) }, 180000)
 try {
+  assert.ok(['false', 'true'].includes(values['git-longpaths-default']), 'Invalid Git longpaths default')
+  report.gitLongpathsDefault = values['git-longpaths-default']
   if (values['require-windows']) assert.equal(process.platform, 'win32', 'Native Windows is required; a non-Windows pass is not acceptance')
   assert.ok(values.companion, '--companion <installed companion directory> is required')
   const companion = await realpath(values.companion)
@@ -36,7 +39,7 @@ try {
   root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'pfi-')))
   // Never inherit credentials, signing, autocrlf or longpaths from the developer/runner.
   const gitconfig = path.join(root, 'gitconfig')
-  await writeFile(gitconfig, '[core]\n longpaths = false\n autocrlf = true\n[commit]\n gpgsign = false\n[user]\n name = Compatibility fixture\n email = fixture@example.test\n')
+  await writeFile(gitconfig, `[core]\n longpaths = ${values['git-longpaths-default']}\n autocrlf = true\n[commit]\n gpgsign = false\n[user]\n name = Compatibility fixture\n email = fixture@example.test\n`)
   for (const key of Object.keys(process.env)) if (key.startsWith('GIT_CONFIG_') || ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR'].includes(key)) delete process.env[key]
   Object.assign(process.env, { GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' })
   const rawGit = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', windowsHide: true, timeout: 30000 }).trimEnd()
@@ -76,7 +79,7 @@ try {
   await sourceGit(root, ['clone', '--bare', '--', source, remote])
   await sourceGit(source, ['remote', 'add', 'origin', remote])
   // A negative control proves this fixture triggers the Windows failure without the fix.
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' && values['git-longpaths-default'] === 'false') {
     const control = path.join(root, 'negative-control')
     rawGit(root, ['clone', '--no-checkout', '--', source, control])
     rawGit(control, ['config', '--local', 'core.longpaths', 'false'])
@@ -128,7 +131,7 @@ try {
     assert.equal(await git(target, ['status', '--porcelain']), '')
     assert.equal(await git(target, ['branch', '--show-current']), '')
     assert.equal(await readFile(path.join(target, relative), 'utf8'), original)
-    assert.equal(rawGit(target, ['config', '--get', 'core.longpaths']), 'false')
+    assert.equal(rawGit(target, ['config', '--get', 'core.longpaths']), values['git-longpaths-default'])
     report.checks.push(`${name}: deep-file clone and detached checkout, config unchanged`)
   }
   const run = { run_id: 'compat-run', repositories: ['target'], details: { test_cases: [{ projection_id: 'case/A', title: 'compatibility' }] } }

@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$PackageDirectory,
-  [Parameter(Mandatory = $true)][string]$ReportPath
+  [Parameter(Mandatory = $true)][string]$ReportPath,
+  [ValidateSet('false', 'true')][string]$GitLongpathsDefault = 'false'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -18,5 +19,5 @@ $Node = Join-Path $AppRoot 'node_modules/node/bin/node.exe'
 $Companion = Join-Path $AppRoot 'node_modules/dsh-pangea-companion'
 if (-not (Test-Path $Node -PathType Leaf)) { throw "Packaged Node is missing: $Node" }
 & $Node (Join-Path $PSScriptRoot 'verify-fault-injection-compat.mjs') `
-  --companion $Companion --require-windows --report $ReportPath
+  --companion $Companion --require-windows --report $ReportPath --git-longpaths-default $GitLongpathsDefault
 if ($LASTEXITCODE -ne 0) { throw "Packaged fault injection compatibility failed: $LASTEXITCODE" }
