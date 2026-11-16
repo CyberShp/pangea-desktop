@@ -102,8 +102,14 @@ try {
   $Report.copy_total_ms=$Report.timings_ms.copy_patch+$Report.timings_ms.copy_user_data_and_five_fingerprints
   $Report.zero_copy_total_ms=$Report.timings_ms.hardlink_patch+$Report.timings_ms.zero_copy_data+$Report.timings_ms.switch
   $Report.target_under_60_seconds=($Report.zero_copy_total_ms -lt 60000)
-  $Report.patch_counts=@(Get-Content -LiteralPath $LogPath|Where-Object {$_ -like '*patch reconstruction:*'})
-  if(-not ($Report.patch_counts -match "linked=$FileCount; copied=0; payload=1")){throw 'Native fixture did not hardlink every unchanged file'}
+  # PS 5.1 Get-Content strings carry provider/drive metadata. Persist only
+  # numeric counters, never recursively serialize those provider objects.
+  $Report.patch_counts=@(foreach($Line in [IO.File]::ReadAllLines($LogPath)) {
+    if($Line -match 'patch reconstruction: linked=(\d+); copied=(\d+); payload=(\d+)') {
+      @{linked=[int]$Matches[1];copied=[int]$Matches[2];payload=[int]$Matches[3]}
+    }
+  })
+  if(-not @($Report.patch_counts|Where-Object {$_.linked -eq $FileCount -and $_.copied -eq 0 -and $_.payload -eq 1}).Count){throw 'Native fixture did not hardlink every unchanged file'}
   $Report.status='passed'
 } catch {$Report.status='failed';$Report.error=$_.Exception.Message;throw}
 finally {
