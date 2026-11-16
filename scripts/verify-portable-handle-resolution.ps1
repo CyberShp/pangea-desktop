@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $Updater = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\build\apply-portable-update.ps1'))
 $Tokens=$null; $Errors=$null
@@ -52,8 +52,14 @@ function Assert-ScalarHolderRecords {
 New-Item -ItemType Directory -Path $Installation -Force | Out-Null
 try {
   Initialize-HandleInspector
+  $ControlDirectory=Join-Path $Root 'disposable-control'
+  [IO.Directory]::CreateDirectory($ControlDirectory) | Out-Null
+  $PlanPath=Join-Path $ControlDirectory 'plan.json'
   $Holders=@(Get-UpdateLockHolders $Installation)
   Assert-ScalarHolderRecords $Holders @()
+  [IO.Directory]::Delete($ControlDirectory)
+  $PlanPath=Join-Path $Root 'plan.json'
+  Write-Output 'PASS: resident helper does not retain a CWD handle on the control directory'
   Write-Output 'PASS: zero holders return an empty pipeline, not a nested empty JSON array'
   $InspectorPid=$script:HandleServerState.Process.Id
   # This PowerShell executable is outside the installation, but its native CWD

@@ -902,7 +902,10 @@ function Stop-UpdateHandleServer {
   if (-not $State) { return }
   # Only our diagnostic process tree is owned by this job. Closing the job also
   # ends a scan blocked in a native filesystem call, including on parent death.
-  try { $State.Job.Dispose() } finally { $State.Process.Dispose() }
+  try {
+    $State.Job.Dispose()
+    if (-not $State.Process.WaitForExit(5000)) { throw 'Local handle inspector did not exit after its job closed.' }
+  } finally { $State.Process.Dispose() }
 }
 
 function Start-UpdateHandleServer {
@@ -913,7 +916,8 @@ function Start-UpdateHandleServer {
   $Info=New-Object Diagnostics.ProcessStartInfo
   $Info.FileName="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
   $Info.Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $Encoded"
-  $Info.WorkingDirectory=[IO.Path]::GetDirectoryName($PlanPath)
+  # A resident scanner must not keep a CWD handle on the update workspace.
+  $Info.WorkingDirectory=$env:SystemRoot
   $Info.UseShellExecute=$false; $Info.CreateNoWindow=$true
   $Info.RedirectStandardInput=$true; $Info.RedirectStandardOutput=$true; $Info.RedirectStandardError=$true
   $Worker=New-Object Diagnostics.Process
@@ -2660,7 +2664,7 @@ try {
   Write-UpdateProgress -State failed -Stage 'failed' -Message $FailureMessage -Percent 35 -Rollback $Rollback
   exit 1
 } finally {
-  Stop-UpdateHandleServer
+  try { Stop-UpdateHandleServer } catch { Write-UpdateLog "Handle inspector final cleanup: $($_.Exception.Message)" }
   # Best effort only: failures here must not erase the true terminal outcome.
   try { Complete-ExplorerRecovery } catch { Write-UpdateLog "Explorer recovery final check: $($_.Exception.Message)" }
   if ($InstallLock) { $InstallLock.Dispose() }
