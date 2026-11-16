@@ -2113,11 +2113,18 @@ public static class PangeaPortableFileIO {
       if(paths.Length!=sizes.Length || paths.Length!=hashes.Length) throw new IOException("Invalid reuse batch lengths.");
       int linked=0;
       var options=new System.Threading.Tasks.ParallelOptions(); options.MaxDegreeOfParallelism=copyOnly ? 1 : 4;
-      System.Threading.Tasks.Parallel.For(0,paths.Length,options,delegate(int index) {
-        string source=Child(baseRoot,paths[index]), target=Child(destination,paths[index]);
-        if(copyOnly) { Copy(source,target); Verify(target,sizes[index],hashes[index],paths[index]); }
-        else if(Reuse(source,target,sizes[index],hashes[index],paths[index])) System.Threading.Interlocked.Increment(ref linked);
-      });
+      try {
+        System.Threading.Tasks.Parallel.For(0,paths.Length,options,delegate(int index) {
+          string source=Child(baseRoot,paths[index]), target=Child(destination,paths[index]);
+          if(!IsFile(source)) throw new IOException("Base package is missing unchanged file: "+paths[index]);
+          if(copyOnly) { Copy(source,target); Verify(target,sizes[index],hashes[index],paths[index]); }
+          else if(Reuse(source,target,sizes[index],hashes[index],paths[index])) System.Threading.Interlocked.Increment(ref linked);
+        });
+      } catch(AggregateException failure) {
+        var messages=new List<string>();
+        foreach(var error in failure.Flatten().InnerExceptions) messages.Add(error.Message);
+        throw new IOException("Patch batch failed: "+String.Join("; ",messages.ToArray()),failure);
+      }
       return linked;
     }
     public void Dispose() {
