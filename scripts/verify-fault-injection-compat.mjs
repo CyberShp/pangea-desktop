@@ -94,7 +94,25 @@ try {
     assert.equal(rawGit(source, ['config', '--local', '--get', 'core.longpaths']), 'false')
     const target = path.join(root, name)
     await git(root, ['clone', '--no-checkout', '--', source, target])
-    await git(target, ['checkout', '--detach', base])
+    try {
+      await git(target, ['checkout', '--detach', base])
+    } catch (error) {
+      // Retain native diagnostics when a fixed wrapper still fails. These probes
+      // operate only on this disposable checkout and never turn a failed gate green.
+      report.checkoutDiagnostics = []
+      const variants = [
+        ['cwd', ['-c', 'core.longpaths=true', 'checkout', '-f', '--detach', base], { cwd: target }],
+        ['dash-C', ['-c', 'core.longpaths=true', '-C', target, 'checkout', '-f', '--detach', base], {}],
+        ['environment-config', ['-C', target, 'checkout', '-f', '--detach', base], { env: { ...process.env, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.longpaths', GIT_CONFIG_VALUE_0: 'true' } }],
+      ]
+      for (const [mode, args, options] of variants) {
+        try {
+          execFileSync('git', args, { encoding: 'utf8', windowsHide: true, timeout: 30000, ...options })
+          report.checkoutDiagnostics.push({ mode, success: true, content: await readFile(path.join(target, relative), 'utf8') })
+        } catch (probe) { report.checkoutDiagnostics.push({ mode, success: false, error: String(probe.stderr || probe.message) }) }
+      }
+      throw error
+    }
     assert.equal(await git(target, ['status', '--porcelain']), '')
     assert.equal(await git(target, ['branch', '--show-current']), '')
     assert.equal(await readFile(path.join(target, relative), 'utf8'), original)
