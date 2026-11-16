@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { execFileSync, spawn } from 'node:child_process'
 const mode = process.env.PANGEA_FIXTURE_MODE ?? 'ok'
@@ -26,6 +27,7 @@ createInterface({ input: process.stdin }).on('line', line => {
       reply({})
     }
   }
+  if (request.method === 'session/set_model') { reply({}); return }
   if (request.method === 'session/new') reply({ sessionId: 'remote-fixture', ...(mode === 'no-model' ? {} : { models: { currentModelId: 'fixture/model', availableModels: [{ modelId: 'fixture/model', name: 'Fixture' }] } }) })
   if (request.method === 'session/cancel' && mode === 'transcript-cancel' && pendingPrompt) {
     send({ id: pendingPrompt.id, result: { stopReason: 'cancelled' } })
@@ -39,6 +41,21 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (request.method !== 'session/prompt') return
   if (mode === 'hang') return
+  if (mode === 'connection-error') {
+    send({ id: request.id, error: { code: -32000, message: 'Unable to connect: ConnectionRefused' } })
+    return
+  }
+  if (mode === 'injection-result' || mode === 'injection-invalid-json') {
+    writeFileSync(process.env.PANGEA_FIXTURE_OUTPUT, mode === 'injection-result' ? JSON.stringify({ summary: 'fixture delivery', edits: [] }) : '{invalid')
+    reply({ stopReason: 'end_turn' })
+    return
+  }
+  if (mode === 'silent-session-error') {
+    process.stderr.write('session.error ConnectionRefused\n')
+    reply({ stopReason: 'end_turn' })
+    return
+  }
+  if (mode === 'max_tokens' || mode === 'cancelled') { reply({ stopReason: mode }); return }
   if (mode === 'error') {
     process.stderr.write('provider request failed api_key="private-key"\n')
     send({ id: request.id, error: { code: -32001, message: 'request rejected token=private-token' } })

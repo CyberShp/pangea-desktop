@@ -7,9 +7,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), getPath: vi.fn(), launch: vi.fn(), quit: vi.fn(), admission: vi.fn(), messages: [] as any[] }))
+const mocks = vi.hoisted(() => ({ currentVersion: '2.1.23', fetch: vi.fn(), getPath: vi.fn(), launch: vi.fn(), quit: vi.fn(), admission: vi.fn(), messages: [] as any[] }))
 vi.mock('electron', () => ({
-  app: { getVersion: () => '2.1.23', getPath: mocks.getPath, isPackaged: true, quit: mocks.quit },
+  app: { getVersion: () => mocks.currentVersion, getPath: mocks.getPath, isPackaged: true, quit: mocks.quit },
   BrowserWindow: { fromWebContents: () => ({}), getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: (_: string, status: unknown) => mocks.messages.push(status) } }] },
   dialog: {}, ipcMain: { handle: vi.fn() }, net: { fetch: mocks.fetch }
 }))
@@ -17,6 +17,9 @@ vi.mock('../src/main/update/update-network', async importOriginal => ({ ...(awai
 vi.mock('../src/main/update/update-capability', () => ({ canImportPortableUpdate: () => true }))
 vi.mock('../src/main/update/launch-portable-helper', () => ({ launchPortableHelper: mocks.launch }))
 
+describe.each(['stable', 'test'] as const)('Desktop %s signed update pipeline', channel => {
+const baseVersion = channel === 'test' ? '2.1.26-test.9.abcdef0' : '2.1.23'
+const storageChannel = channel === 'test' ? 'beta' : 'stable'
 let root: string
 let resourcesDescriptor: PropertyDescriptor | undefined
 let manager: typeof import('../src/main/update/update-manager')
@@ -25,11 +28,12 @@ let intranetIndex: any
 let intranetUrl: string
 const intranetResponses = new Map<string, Buffer>()
 const responses = new Map<string, Buffer>()
-const version = '2.1.24'
+const version = channel === 'test' ? '2.1.26-test.10.abcdef0' : '2.1.24'
 const name = `pangea-desktop-${version}-windows-x64-portable.zip`
 const prefix = 'fixture:'
 
 beforeAll(async () => {
+  mocks.currentVersion = baseVersion
   root = await mkdtemp(join(tmpdir(), 'online-integration-'))
   const app = join(root, 'app')
   const resources = join(app, 'resources')
@@ -45,7 +49,7 @@ beforeAll(async () => {
   // Real signed helper from the repository; staging must extract the signed copy.
   await writeFile(join(resources, 'update', 'apply-portable-update.ps1'), await readFile(resolve('build/apply-portable-update.ps1')))
   execFileSync(process.execPath, ['scripts/create-signed-portable-package.mjs', '--app-dir', app,
-    '--private-key', join(root, 'private.pem'), '--output', join(root, 'dist', name), '--version', version], { cwd: resolve('.') })
+    '--private-key', join(root, 'private.pem'), '--output', join(root, 'dist', name), '--version', version, '--channel', channel], { cwd: resolve('.') })
   for (const file of [name, 'pangea-desktop-update.json', 'pangea-desktop-update.json.sig']) {
     responses.set(prefix + file, await readFile(join(root, 'dist', file)))
   }
@@ -53,19 +57,19 @@ beforeAll(async () => {
   const base = join(root, 'base')
   await cp(app, base, { recursive: true })
   await writeFile(join(base, 'PANGEA Desktop.exe'), 'baseline executable')
-  await writeFile(join(base, 'resources', 'pangea-manifest.json'), JSON.stringify({ product: { version: '2.1.23' }, components: { agent: { commit: 'a'.repeat(40) } } }))
+  await writeFile(join(base, 'resources', 'pangea-manifest.json'), JSON.stringify({ product: { version: baseVersion }, components: { agent: { commit: 'a'.repeat(40) } } }))
   await mkdir(join(root, 'base-dist'))
   execFileSync(process.execPath, ['scripts/create-signed-portable-package.mjs', '--app-dir', base,
-    '--private-key', join(root, 'private.pem'), '--output', join(root, 'base-dist', 'pangea-desktop-2.1.23-windows-x64-portable.zip'), '--version', '2.1.23'])
+    '--private-key', join(root, 'private.pem'), '--output', join(root, 'base-dist', `pangea-desktop-${baseVersion}-windows-x64-portable.zip`), '--version', baseVersion, '--channel', channel])
   execFileSync(process.execPath, ['scripts/create-signed-portable-patch.mjs', '--base-dir', base, '--target-dir', app,
-    '--private-key', join(root, 'private.pem'), '--output', join(root, 'dist', 'patch.zip'), '--from-version', '2.1.23', '--to-version', version, '--channel', 'stable'])
+    '--private-key', join(root, 'private.pem'), '--output', join(root, 'dist', 'patch.zip'), '--from-version', baseVersion, '--to-version', version, '--channel', channel])
   await writeFile(join(root, 'notes.json'), JSON.stringify({ [version]: { features: ['更方便地查看更新说明'], fixes: [], notices: [] } }))
   execFileSync(process.execPath, ['scripts/create-intranet-update-index.mjs', '--directory', join(root, 'dist'),
     '--public-key', join(resources, 'update', 'pangea-update-public-key.pem'), '--full-remote-name', 'pangea-desktop.zip', '--release-notes', join(root, 'notes.json')])
   intranetIndex = JSON.parse(await readFile(join(root, 'dist', 'latest.json'), 'utf8'))
   const uploadList = JSON.parse(await readFile(join(root, 'dist', 'intranet-upload-list.json'), 'utf8'))
-  expect(new URL(intranetIndex.full_url, 'https://pangea.rnd.huawei.com/api/tools/27/files/download').searchParams.get('path')).toBe(`stable/${version}/pangea-desktop.zip`)
-  expect(uploadList.upload_first.find((file: any) => file.local === name).path).toBe(`stable/${version}/pangea-desktop.zip`)
+  expect(new URL(intranetIndex.full_url, 'https://pangea.rnd.huawei.com/api/tools/27/files/download').searchParams.get('path')).toBe(`${storageChannel}/${version}/pangea-desktop.zip`)
+  expect(uploadList.upload_first.find((file: any) => file.local === name).path).toBe(`${storageChannel}/${version}/pangea-desktop.zip`)
   intranetUrl = new URL(uploadList.publish_last.url, 'https://pangea.rnd.huawei.com/api/tools/27/files/download').href
   expect(intranetIndex.full_url.startsWith('?path=')).toBe(true)
   expect(JSON.stringify(intranetIndex)).not.toContain('https://')
@@ -115,7 +119,7 @@ describe('online update production pipeline with simulated intranet and Windows 
     mocks.launch.mockImplementation(async (helper: string, planPath: string) => {
       expect(await readFile(helper)).toEqual(await readFile(resolve('build/apply-portable-update.ps1')))
       const plan = JSON.parse(await readFile(planPath, 'utf8'))
-      expect(plan).toMatchObject({ expected_version: version, handoff_required: true, package_type: 'full', package_channel: 'stable', startup_health_timeout_seconds: 300 })
+      expect(plan).toMatchObject({ expected_version: version, handoff_required: true, package_type: 'full', package_channel: channel, startup_health_timeout_seconds: 300 })
       expect(plan.health_marker).toMatch(/healthy.json$/)
       expect(plan.result_path).toMatch(/last-update-result.json$/)
       expect(await readFile(plan.package_path)).toEqual(responses.get(prefix + name))
@@ -187,10 +191,10 @@ it('generates query URLs and uses a real signed patch through the online install
   await enableIntranet()
   expect(await manager.checkForOnlineUpdate()).toMatchObject({ phase: 'available', source: 'intranet' })
   expect(mocks.fetch).toHaveBeenCalledTimes(3)
-  expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'downloaded', source: 'intranet', packageType: 'patch', baseVersion: '2.1.23', availableVersion: version })
+  expect(await manager.downloadOnlineUpdate()).toMatchObject({ phase: 'downloaded', source: 'intranet', packageType: 'patch', baseVersion, availableVersion: version })
   expect(mocks.fetch.mock.calls.every(([url]) => url.startsWith('https://pangea.rnd.huawei.com/'))).toBe(true)
   mocks.launch.mockImplementation(async (_: string, planPath: string) => {
-    expect(JSON.parse(await readFile(planPath, 'utf8'))).toMatchObject({ package_type: 'patch', expected_version: version, expected_base_version: '2.1.23' })
+    expect(JSON.parse(await readFile(planPath, 'utf8'))).toMatchObject({ package_type: 'patch', expected_version: version, expected_base_version: baseVersion })
   })
   vi.useFakeTimers()
   expect(await manager.installImportedUpdate()).toEqual({ helperLaunched: true })
@@ -273,4 +277,6 @@ it('persists one automatic reminder per version while allowing manual viewing', 
   const restarted = vi.mocked(restartedIpc.handle).mock.calls.filter(([name]) => name === 'updates:claim-notice').at(-1)![1]
   expect(restarted({} as any, version)).toBe(false)
   expect(await manager.checkForOnlineUpdate(true)).toMatchObject({ phase: 'available', manual: true, releaseNotes: { features: ['更方便地查看更新说明'] } })
+})
+
 })

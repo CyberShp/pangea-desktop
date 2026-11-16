@@ -81,3 +81,36 @@ it('does not offer the installed or an older version', async () => {
   expect(await f.client.check('2.1.24', pem)).toBeUndefined()
   expect(await f.client.check('2.1.25', pem)).toBeUndefined()
 })
+
+function testFixture() {
+  const f = fixture()
+  const version = '2.1.26-test.10.abcdef0'
+  f.index.channel = f.manifest.channel = 'test'
+  f.index.version = f.manifest.version = version
+  f.manifest.package.name = `pangea-desktop-${version}-windows-x64-portable.zip`
+  f.index.patches[0]!.from_version = '2.1.26-test.9.abcdef0'
+  f.index.patches[0]!.to_version = version
+  f.resign()
+  return f
+}
+it('Desktop test upgrades compare numeric builds and require the exact patch source', async () => {
+  const f = testFixture()
+  expect(await f.client.check('2.1.26-test.9.abcdef0', pem)).toMatchObject({ version: '2.1.26-test.10.abcdef0', packageType: 'patch' })
+  expect(await f.client.check('2.1.26-test.9.1234567', pem)).toMatchObject({ packageType: 'full' })
+  expect(await f.client.check('2.1.25-test.99.abcdef0', pem)).toMatchObject({ packageType: 'full' })
+  expect(await f.client.check('2.1.26-test.10.abcdef0', pem)).toBeUndefined()
+  expect(await f.client.check('2.1.26-test.11.abcdef0', pem)).toBeUndefined()
+  await expect(f.client.check('2.1.25', pem)).rejects.toThrow('通道')
+  await expect(f.client.check('2.1.22-test.999.abcdef0', pem)).rejects.toThrow('最低支持')
+})
+it('Desktop test full-package fallback downloads and verifies bytes', async () => {
+  const f = testFixture()
+  f.index.patches = []
+  const update = (await f.client.check('2.1.25-test.2.abcdef0', pem))!
+  expect(update.packageType).toBe('full')
+  const root = await mkdtemp(join(tmpdir(), 'test-upgrade-'))
+  try {
+    await f.client.download(update, join(root, 'full.zip'), () => {})
+    expect((await readFile(join(root, 'full.zip'))).toString()).toBe('full package fixture')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

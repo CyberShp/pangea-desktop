@@ -41,6 +41,10 @@ export function isSupportedPatchBase(version) {
   }
   return true
 }
+export function assertUpgradeableTarget(version) {
+  if (!parseVersion(version) || !isSupportedPatchBase(version)) throw new Error(`Target ${version} is below the supported Desktop upgrade baseline ${MINIMUM_PATCH_BASE_VERSION}`)
+  return version
+}
 export function classifyRelease(release, target, channel) {
   const version = release.tag_name?.replace(/^v/, '')
   if (!release.tag_name?.startsWith('v')) return { version, status: 'unsupported', reason: 'noncanonical release tag (expected v<version>)' }

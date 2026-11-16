@@ -337,6 +337,13 @@ if (-not $SkipTests) {
   foreach ($Plugin in @('dsh-pangea', 'dsh-pangea-companion', 'dsh-pangea-asset-catalog')) {
     Invoke-Checked 'npm' @('--prefix', (Join-Path $PluginRoot $Plugin), 'test')
   }
+  $PreviousCompanionTestRoot = $env:PANGEA_TEST_COMPANION_ROOT
+  try {
+    $env:PANGEA_TEST_COMPANION_ROOT = Join-Path $PluginRoot 'dsh-pangea-companion'
+    Invoke-Checked 'node' @('--test', 'test/acp-injection-delivery.test.mjs')
+  } finally {
+    $env:PANGEA_TEST_COMPANION_ROOT = $PreviousCompanionTestRoot
+  }
   Invoke-Checked 'npm' @('run', 'typecheck')
   Invoke-Checked 'npm' @(
     'test', '--', '--run',

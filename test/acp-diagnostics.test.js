@@ -464,3 +464,19 @@ it('a compact usage update unlocks the original chain without replaying rejected
  expect(events.filter(e=>e.type==='prompt').map(e=>e.prompt[0].text)).toEqual(['initial','explicit-resume'])
  },{},{onSessionEvent:e=>events.push(e)})
 })
+
+// A CLI's private stderr is not a terminal protocol error. This regression
+// captures why missing-delivery validation is needed in the companion.
+it('preserves protocol semantics when CLI hides a session error behind end_turn', async () => {
+  await fixtureRun('silent-session-error', 'ping', (run, result) => {
+    expect(result).toMatchObject({ stopReason: 'completed', protocolStopReason: 'end_turn' })
+    expect(run.readDiagnostics().errorSummary).toBeFalsy()
+  })
+})
+for (const [mode, expected] of [['max_tokens', 'max-tokens'], ['cancelled', 'aborted']]) {
+  it(`preserves ${mode} terminal mapping`, async () => {
+    await fixtureRun(mode, 'ping', (run, result) => {
+      expect(result).toMatchObject({ stopReason: expected, protocolStopReason: mode })
+    })
+  })
+}
