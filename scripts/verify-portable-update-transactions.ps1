@@ -169,7 +169,17 @@ try {
         $Rejected=$false
         try { Read-PortableUpdateTransaction $Context $Fixture.Data | Out-Null } catch { $Rejected=$true }
         if (-not $Rejected) { throw 'Terminal journal accepted a changed installation.' }
-        Write-Output "PASS: $Terminal tolerates missing $Cleanup but rejects a changed installation"
+        $Before=[IO.File]::ReadAllText($Context.Journal)
+        $History=Read-PortableUpdateTransaction $Context $Fixture.Data -ForNewUpgrade
+        if ($History.state -ne $Terminal -or [IO.File]::ReadAllText($Context.Journal) -ne $Before) { throw 'New-upgrade history check mutated the completed transaction.' }
+        $Base=Assert-PortableUpgradeSourceVersion -Root $Fixture.Install -PackageKind full -ExpectedBase ''
+        if ($Base.version -ne '9.9.9') { throw 'New upgrade did not use current installation identity.' }
+        $Rejected=$false
+        try { Assert-PortableUpgradeSourceVersion -Root $Fixture.Install -PackageKind patch -ExpectedBase '2.1.9' | Out-Null } catch { $Rejected=$true }
+        if (-not $Rejected) { throw 'Historical journal bypassed current patch base validation.' }
+        if ([IO.File]::ReadAllText((Join-Path $Fixture.Install 'user-work.txt')) -ne 'unrelated installation') { throw 'New upgrade history check changed current installation.' }
+        Write-Output "PASS: $Terminal remains strict for recovery but permits a new upgrade with independently validated current installation"
+
       } finally { $Lock.Dispose() }
     }
   }

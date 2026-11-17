@@ -385,7 +385,10 @@ function Stop-PortableOwnedWriters {
     if ($Fresh.Created -ne $Owned.Created -or $Fresh.Executable -ine $Owned.Executable) { continue }
     $Services=@(Get-CimInstance Win32_Service -Filter "State='Running'" -OperationTimeoutSec (Get-UpdateServiceBudget $Deadline) -ErrorAction Stop | ForEach-Object { [int]$_.ProcessId })
     $Policy=Get-UpdateHolderPolicy $Fresh $script:OwnedUpdateProcesses $Services $script:ProtectedUpdateProcesses
-    if ($Policy -ne 'owned') { throw "Cannot quiesce protected Desktop descendant before data copy: $($Fresh.Name) (PID $($Fresh.Id)); policy=$Policy. Original data is retained." }
+    if ($Policy -ne 'owned') {
+      Write-UpdateLog "preserved non-runtime Desktop descendant: $($Fresh.Name); pid=$($Fresh.Id); policy=$Policy"
+      continue
+    }
     if (($Deadline-[DateTime]::UtcNow).TotalSeconds -lt 5 -or -not (Stop-UpdateHolder $Fresh)) { throw "Could not stop verified Desktop writer before data copy: $($Fresh.Name) (PID $($Fresh.Id)). Original data is retained." }
     $Stopped[[int]$Fresh.Id]=$true
     Write-UpdateLog "stopped verified Desktop descendant before data copy: $($Fresh.Name); pid=$($Fresh.Id); executable=$($Fresh.Executable)"
@@ -1151,14 +1154,13 @@ function Get-UpdateHolderPolicy {
     if (Test-TortoiseGitCacheExecutable ([string]$Holder.Executable)) { return 'tortoisegit' }
     return 'protected'
   }
-  # Exact descendant identity, not a short executable-name allowlist: Electron
-  # helpers and shell wrappers can also retain this installation's handles.
-  if (@($Owned | Where-Object { $_.Id -eq $Holder.Id -and $_.Created -eq $Holder.Created -and $_.Executable -ieq $Holder.Executable }).Count) { return 'owned' }
-  # This policy is applied only to verified holders of this installation.
-  # Include Agent launchers and terminal hosts so their remaining handles do
-  # not require a separate user action after the runtime has been stopped.
-  $RuntimeNames = @('node','python','pythonw','opencode','nga','codeagent','codeagentcli','claude','uv','uvx',
+  # Parentage alone is not application ownership: IME/accessibility helpers
+  # can be spawned beneath Electron and must not be terminated as runtimes.
+  $RuntimeNames = @('node','bun','python','pythonw','opencode','nga','codeagent','codeagentcli','claude','uv','uvx',
     'powershell','pwsh','cmd','WindowsTerminal','OpenConsole')
+  $OwnedRuntime = $Holder.Name -in ($RuntimeNames + @('PANGEA Desktop','electron'))
+  if ($OwnedRuntime -and @($Owned | Where-Object { $_.Id -eq $Holder.Id -and $_.Created -eq $Holder.Created -and $_.Executable -ieq $Holder.Executable }).Count) { return 'owned' }
+  # External runtime cleanup still requires an actual installation handle.
   if ($Holder.Name -in $RuntimeNames) { return 'automatic' }
   return 'protected'
 }
@@ -2591,7 +2593,7 @@ function Set-PortableTransactionState {
 }
 
 function Read-PortableUpdateTransaction {
-  param($Context, [string]$UserDataRoot)
+  param($Context, [string]$UserDataRoot, [switch]$ForNewUpgrade)
   Assert-PortableTransactionPath $Context.Journal
   if (-not [IO.File]::Exists($Context.Journal)) { return $null }
   $Transaction = [IO.File]::ReadAllText($Context.Journal) | ConvertFrom-Json
@@ -2608,6 +2610,14 @@ function Read-PortableUpdateTransaction {
   # Confirm the installed version before accepting a terminal journal; never
   # recreate an ownership receipt or mutate an unowned workspace.
   if ($Transaction.state -in @('restored','committed')) {
+    # A finished journal is historical for a NEW upgrade. Manual replacement
+    # or a manifest edit after completion does not reopen that old transaction.
+    # The new attempt validates the CURRENT installation and patch base below.
+    # Explicit recovery and in-flight rollback never use this exception.
+    if ($ForNewUpgrade) {
+      Write-UpdateLog "completed transaction retained as history for new upgrade: id=$($Transaction.id); state=$($Transaction.state)"
+      return $Transaction
+    }
     $Identity=if ($Transaction.state -eq 'committed') { $Transaction.target_identity } else { $Transaction.base_identity }
     if (-not (Test-PortableRootIdentity $Context.InstallRoot $Identity)) { throw 'Completed update installation identity is missing or changed; no files were moved.' }
     return $Transaction
@@ -2771,7 +2781,7 @@ try {
   # Recover first: the install path may be temporarily absent between renames.
   # A new package is never applied in the same invocation as crash recovery.
   $RecoveryBlocked=$true
-  $PriorTransaction = Read-PortableUpdateTransaction $TransactionContext $UserDataRoot
+  $PriorTransaction = Read-PortableUpdateTransaction $TransactionContext $UserDataRoot -ForNewUpgrade:(-not $RecoverOnly)
   if ($RecoverOnly -or ($PriorTransaction -and $PriorTransaction.state -notin @('restored','committed'))) {
     if (-not $PriorTransaction) { throw '没有找到可恢复的升级事务；安装文件未改动。' }
     $Transaction=$PriorTransaction

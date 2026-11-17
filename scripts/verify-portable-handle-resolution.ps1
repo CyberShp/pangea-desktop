@@ -115,6 +115,8 @@ try {
   if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'owned') { throw 'Owned runtime not recognized.' }
   $Fake.Name='PANGEA Desktop'
   if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'owned') { throw 'Owned Electron helper not recognized.' }
+  $Fake.Name='SGTool'
+  if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'protected') { throw 'IME descendant was authorized for termination.' }
   $Fake.Name='node'
   $Owned[0].Created++
   if ((Get-UpdateHolderPolicy $Fake $Owned @() @()) -ne 'automatic') { throw 'Stale ownership must not classify a known runtime as owned.' }
