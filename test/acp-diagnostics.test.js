@@ -97,7 +97,8 @@ for (const mode of ['lifecycle-codeagent-edit-pending', 'lifecycle-codeagent-edi
         received_update_count: 1, accepted_update_count: 1 })
       const descendantPid = mode.includes('-tree') ? JSON.parse(result.output[0].text).descendant_pid : null
       if (descendantPid) expect(() => process.kill(descendantPid, 0)).not.toThrow()
-      expect(await run.quiesceForRecovery()).toMatchObject({ confirmed: true, processTreeStopped: true })
+      const stopProof = await run.quiesceForRecovery()
+      expect(stopProof, JSON.stringify({ stopProof, diagnostics: run.readDiagnostics() })).toMatchObject({ confirmed: true, processTreeStopped: true })
       expect(run.readDiagnostics()).toMatchObject({ processExited: true, activeToolCount: 4 })
       expect(run.readDiagnostics().toolLifecycle.tools).toEqual(before.tools)
       expect(events.some(event => event.type === 'process_exit')).toBe(true)
