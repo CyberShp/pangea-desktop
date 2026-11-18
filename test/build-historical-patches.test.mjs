@@ -62,7 +62,7 @@ async function packageZip(destination, version, options = {}) {
   return { file: destination, sha256: digest, manifestBytes, files }
 }
 
-async function harness(t, { targetVersion = '3.0.4', targetPublished = true, target = {}, bases = [{ version: '3.0.3' }] } = {}) {
+async function harness(t, { targetVersion = '3.0.5', targetPublished = true, target = {}, bases = [{ version: '3.0.4' }] } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'pangea-history-integration-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const bin = path.join(root, 'bin')
@@ -119,7 +119,7 @@ function assetsFor(file) {
   return [file, `${file}.sha256`].map((source, index) => ({ id: index + 1, name: path.basename(source), source }))
 }
 
-async function inspectPatch(fixture, result, baseVersion = '3.0.3') {
+async function inspectPatch(fixture, result, baseVersion = '3.0.4') {
   const name = patchName(fixture.targetVersion, baseVersion)
   const patch = path.join(result.directory, name)
   const extracted = path.join(fixture.root, `inspect-${path.basename(result.directory)}`)
@@ -145,13 +145,13 @@ test('backfill downloads the immutable signed target and invokes the Windows ver
   assert.equal(result.status, 0, result.stderr)
   assert.equal(result.report.complete, true)
   assert.equal(result.report.full_fallback.sha256, fixture.targetPackage.sha256)
-  assert.equal(result.report.bases.find(base => base.version === '3.0.3').status, 'verified')
-  assert.ok(result.calls.some(call => call.command === 'gh' && call.args[1] === 'download' && call.args[2] === 'v3.0.4' && call.args.includes(fullName('3.0.4'))))
+  assert.equal(result.report.bases.find(base => base.version === '3.0.4').status, 'verified')
+  assert.ok(result.calls.some(call => call.command === 'gh' && call.args[1] === 'download' && call.args[2] === 'v3.0.5' && call.args.includes(fullName('3.0.5'))))
   const verifier = result.calls.filter(call => call.command === 'pwsh')
   assert.equal(verifier.length, 1)
   assert.ok(verifier[0].args.some(value => value.endsWith('verify-release-patch.ps1')))
-  assert.equal(verifier[0].targetVersion, '3.0.4')
-  assert.equal(verifier[0].baseVersion, '3.0.3')
+  assert.equal(verifier[0].targetVersion, '3.0.5')
+  assert.equal(verifier[0].baseVersion, '3.0.4')
   await inspectPatch(fixture, result)
   assert.equal(await readFile(localFull, 'utf8'), 'untrusted local build must never become the backfill target')
 })
@@ -165,19 +165,19 @@ test('build mode verifies the shipped local target ZIP without downloading a tar
   assert.equal(result.status, 0, result.stderr)
   assert.equal(result.report.complete, true)
   assert.equal(result.report.full_fallback.sha256, fixture.targetPackage.sha256)
-  assert.ok(!result.calls.some(call => call.command === 'gh' && call.args[1] === 'download' && call.args[2] === 'v3.0.4'))
+  assert.ok(!result.calls.some(call => call.command === 'gh' && call.args[1] === 'download' && call.args[2] === 'v3.0.5'))
   assert.equal(result.calls.filter(call => call.command === 'pwsh').length, 1)
   await inspectPatch(fixture, result)
 })
 
 test('missing packages, unsigned history, trusted unsupported schemas, and legacy updaters remain explicit gaps', integration, async t => {
   const fixture = await harness(t, {
-    targetVersion: '3.0.7',
+    targetVersion: '3.0.8',
     bases: [
-      { version: '3.0.6', missing: true },
-      { version: '3.0.5', unsigned: true },
-      { version: '3.0.4', schema: 2 },
-      { version: '3.0.3', legacyUpdater: true }
+      { version: '3.0.7', missing: true },
+      { version: '3.0.6', unsigned: true },
+      { version: '3.0.5', schema: 2 },
+      { version: '3.0.4', legacyUpdater: true }
     ]
   })
   const result = await fixture.run()
@@ -196,13 +196,13 @@ test('missing packages, unsigned history, trusted unsupported schemas, and legac
 })
 
 test('an untrusted baseline signature fails closed and removes stale patch output', integration, async t => {
-  const fixture = await harness(t, { bases: [{ version: '3.0.3', badSignature: true }] })
-  const name = patchName('3.0.4', '3.0.3')
+  const fixture = await harness(t, { bases: [{ version: '3.0.4', badSignature: true }] })
+  const name = patchName('3.0.5', '3.0.4')
   await writeFile(path.join(fixture.output, name), 'stale unverified patch')
   await writeFile(path.join(fixture.output, `${name}.sha256`), 'stale checksum')
   const result = await fixture.run()
   assert.equal(result.status, 1)
-  const row = result.report.bases.find(base => base.version === '3.0.3')
+  const row = result.report.bases.find(base => base.version === '3.0.4')
   assert.equal(row.status, 'failed')
   assert.match(row.reason, /signature/)
   assert.equal(result.report.complete, false)
@@ -214,7 +214,7 @@ test('a failed Windows verifier invocation removes the generated ZIP and checksu
   const fixture = await harness(t)
   const result = await fixture.run({ failVerifier: true })
   assert.equal(result.status, 1)
-  assert.equal(result.report.bases.find(base => base.version === '3.0.3').status, 'failed')
+  assert.equal(result.report.bases.find(base => base.version === '3.0.4').status, 'failed')
   assert.equal(result.calls.filter(call => call.command === 'pwsh').length, 1)
   assert.ok(!(await readdir(fixture.output)).some(name => name.includes('.patch.zip')))
 })
@@ -223,13 +223,13 @@ test('backfill recovers a published ZIP without its checksum, reuses its bytes, 
   const fixture = await harness(t)
   const initial = await fixture.run()
   assert.equal(initial.status, 0, initial.stderr)
-  const name = patchName('3.0.4', '3.0.3')
+  const name = patchName('3.0.5', '3.0.4')
   const original = path.join(fixture.output, name)
   fixture.config.assets[200].push({ id: 9, name, source: original })
   const retryDirectory = path.join(fixture.root, 'retry')
   const result = await fixture.run({ directory: retryDirectory })
   assert.equal(result.status, 0, result.stderr)
-  const row = result.report.bases.find(base => base.version === '3.0.3')
+  const row = result.report.bases.find(base => base.version === '3.0.4')
   assert.equal(row.status, 'verified')
   assert.equal(row.reused, true)
   assert.equal(await sha256(path.join(retryDirectory, name)), await sha256(original))
@@ -293,7 +293,7 @@ fs.appendFileSync(process.env.PANGEA_TEST_LOG, JSON.stringify({ command: 'pwsh',
 if (process.env.PANGEA_TEST_FAIL_VERIFIER === '1') process.exit(7)
 `
 
-test('retired pre-3.0.3 history is excluded before asset lookup, download, trust and Windows verification', integration, async t => {
+test('retired pre-3.0.4 history is excluded before asset lookup, download, trust and Windows verification', integration, async t => {
   const fixture = await harness(t, { bases: [
     { version: '1.0.9', badSignature: true },
     { version: '1.0.3', unsigned: true },
@@ -310,19 +310,21 @@ test('retired pre-3.0.3 history is excluded before asset lookup, download, trust
     { version: '3.0.1', unsigned: true },
     { version: '3.0.2', badSignature: true },
     { version: '3.0.2-test.99.abcdef0', missing: true },
-    { version: '3.0.3' }
+    { version: '3.0.3', badSignature: true },
+    { version: '3.0.3-test.99.abcdef0', missing: true },
+    { version: '3.0.4' }
   ] })
   const result = await fixture.run()
   assert.equal(result.status, 0, result.stderr)
-  for (const version of ['1.0.9', '1.0.3', '0.1.6', '2.0.0', '2.0.6', '2.0.6-test.99.abcdef0', '2.1.22', '2.1.22-test.99.abcdef0', '2.1.23', '2.99.99', '2.99.99-test.99.abcdef0', '3.0.0', '3.0.1', '3.0.2', '3.0.2-test.99.abcdef0']) {
+  for (const version of ['1.0.9', '1.0.3', '0.1.6', '2.0.0', '2.0.6', '2.0.6-test.99.abcdef0', '2.1.22', '2.1.22-test.99.abcdef0', '2.1.23', '2.99.99', '2.99.99-test.99.abcdef0', '3.0.0', '3.0.1', '3.0.2', '3.0.2-test.99.abcdef0', '3.0.3', '3.0.3-test.99.abcdef0']) {
     const row = result.report.bases.find(base => base.version === version)
     assert.equal(row.status, 'unsupported')
     assert.equal(row.eligible, false)
-    assert.match(row.reason, /minimum supported patch baseline 3.0.3/)
+    assert.match(row.reason, /minimum supported patch baseline 3.0.4/)
     assert.ok(!result.calls.some(call => call.command === 'gh' && call.args.includes(`v${version}`)))
   }
-  for (const id of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) assert.ok(!result.calls.some(call => call.command === 'gh' && call.args.some(arg => arg.includes(`/releases/${id}/assets`))))
+  for (const id of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]) assert.ok(!result.calls.some(call => call.command === 'gh' && call.args.some(arg => arg.includes(`/releases/${id}/assets`))))
   assert.equal(result.calls.filter(call => call.command === 'pwsh').length, 1)
-  assert.equal(result.report.bases.find(base => base.version === '3.0.3').status, 'verified')
+  assert.equal(result.report.bases.find(base => base.version === '3.0.4').status, 'verified')
   assert.ok(!(await readdir(fixture.output)).some(name => name.includes('-from-1.') || name.includes('-from-3.0.2')))
 })

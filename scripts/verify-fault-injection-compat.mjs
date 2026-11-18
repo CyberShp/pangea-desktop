@@ -172,8 +172,9 @@ try {
     assert.ok(path.join(checkout, relative).length > 280)
     assert.equal(await injectionGit(checkout, ['branch', '--show-current']), '')
     report.paths = { checkoutLength: checkout.length, fileLength: path.join(checkout, relative).length }
-    return { points: [{ id: 'p', repo_id: 'target', path: relative }],
-      profiles: [{ case_key: 'case/A', point_ids: ['p'], steps: ['deterministic compatibility fixture'] }],
+    return { points: [{ id: 'p', repo_id: 'target', path: relative, trigger_scope: { current_input: 'compatibility fixture current operation', excluded_inputs: ['historical input'] } }],
+      profiles: [{ case_key: 'case/A', point_ids: ['p'], steps: [': deterministic compatibility fixture'],
+        safety: { setup: [': isolated fixture'], negative_steps: [': fixture contract only; no business execution claimed'], negative_point_ids: ['p'], cleanup: [': owned by fixture finally'], cleanup_verify: [': verified by fixture after generation'] } }],
       edits: [{ repo_id: 'target', path: relative, before: 'return 0;', after: 'return -1;' }] }
   } })
   server = createServer((req, res) => {

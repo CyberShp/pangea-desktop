@@ -26,6 +26,10 @@ $RuntimeRoot = Join-Path $StageRoot 'runtime'
 $CacheRoot = Join-Path $StageRoot 'cache'
 $UpdateRoot = Join-Path $StageRoot 'update'
 $Components = Get-Content (Join-Path $ProjectRoot 'pangea.components.json') -Raw | ConvertFrom-Json
+$Requirements = Join-Path $ProjectRoot $Components.pythonRequirements.file
+if ((Get-FileHash -LiteralPath $Requirements -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Components.pythonRequirements.sha256) {
+  throw 'Python dependency lock hash does not match pangea.components.json.'
+}
 
 if (-not $PackageChannel) {
   $PackageChannel = if ($env:PANGEA_PACKAGE_CHANNEL) { $env:PANGEA_PACKAGE_CHANNEL } else { 'stable' }
@@ -260,13 +264,12 @@ foreach ($File in @('package.json', 'package-lock.json')) {
 Copy-Item (Join-Path $PangeaAgent 'pyproject.toml') $AgentRuntime -Force
 
 $Python = Join-Path $PythonRoot 'python.exe'
-$Requirements = Join-Path $ProjectRoot 'build/pangea-runtime-requirements.txt'
 $SitePackages = Join-Path $PythonRoot 'Lib/site-packages'
 $PipBootstrap = "import sys; sys.path.insert(0, sys.argv.pop(1)); from pip._internal.cli.main import main; raise SystemExit(main())"
 Invoke-Checked $Python @(
   '-X', 'utf8',
   '-c', $PipBootstrap, $PipWheel, 'install', '--disable-pip-version-check', '--no-compile',
-  '--only-binary=:all:', '--target', $SitePackages, '-r', $Requirements
+  '--require-hashes', '--only-binary=:all:', '--target', $SitePackages, '-r', $Requirements
 )
 
 $SmokeData = Join-Path $StageRoot 'smoke-data'
@@ -347,7 +350,7 @@ $Manifest = [ordered]@{
     }
     dsh_pangea = [ordered]@{ branch = $Components.dshPangea.branch; commit = $Components.dshPangea.commit }
     pangea_agent = [ordered]@{ branch = $Components.pangeaAgent.branch; commit = $Components.pangeaAgent.commit }
-    python = [ordered]@{ version = $Components.python.version; sha256 = $Components.python.sha256 }
+    python = [ordered]@{ version = $Components.python.version; sha256 = $Components.python.sha256; requirements_sha256 = $Components.pythonRequirements.sha256 }
   }
 }
 $Manifest | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $StageRoot 'manifest.json') -Encoding UTF8

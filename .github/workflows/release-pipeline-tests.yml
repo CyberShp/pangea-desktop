@@ -29,6 +29,8 @@ on:
   pull_request:
     paths:
       - pangea.components.json
+      - build/pangea-runtime-requirements.txt
+      - build/pangea-runtime-windows.lock
       - test/acp-injection-delivery.test.mjs
       - scripts/fixtures/acp-diagnostic-agent.mjs
       - scripts/build-pangea-desktop.ps1
@@ -69,6 +71,8 @@ on:
     branches: [langgraph]
     paths:
       - pangea.components.json
+      - build/pangea-runtime-requirements.txt
+      - build/pangea-runtime-windows.lock
       - test/acp-injection-delivery.test.mjs
       - scripts/fixtures/acp-diagnostic-agent.mjs
       - scripts/build-pangea-desktop.ps1
@@ -175,7 +179,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Could not check out locked Agent commit.' }
           $Actual = git -C .pangea-build/agent-source rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or $Actual -cne $Component.commit) { throw 'Agent checkout differs from component lock.' }
-          python -m pip install ./.pangea-build/agent-source
+          python -m pip install --require-hashes -r build/pangea-runtime-windows.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install locked Python dependencies.' }
+          python -m pip install --no-deps ./.pangea-build/agent-source
           if ($LASTEXITCODE -ne 0) { throw 'Could not install locked Agent dependencies.' }
           npx --no-install patch-package
           if ($LASTEXITCODE -ne 0) { throw 'Could not apply Cordis/ACP runtime patches.' }
@@ -408,7 +414,12 @@ jobs:
           cache: pip
           cache-dependency-path: .pangea-build/agent-source/pyproject.toml
       - name: Install the pinned Agent candidate
-        run: python -m pip install ./.pangea-build/agent-source
+        shell: pwsh
+        run: |
+          python -m pip install --require-hashes -r build/pangea-runtime-windows.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install locked Python dependencies.' }
+          python -m pip install --no-deps ./.pangea-build/agent-source
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install pinned Agent.' }
       - name: Verify evidence contracts and historical workflow compatibility
         shell: pwsh
         env:
