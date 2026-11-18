@@ -27,12 +27,18 @@ try {
   }
   & $Node --version
   if ($LASTEXITCODE -ne 0) { throw 'Packaged Node failed.' }
-  & $Python -X utf8 -c 'import sys,pangea_agent; print(sys.executable); print(pangea_agent.__file__)'
+  & $Python -X utf8 -c 'import pathlib,sys,pangea_agent; actual=pathlib.Path(pangea_agent.__file__).resolve(); expected=pathlib.Path(sys.argv[1]).resolve(); assert actual.is_relative_to(expected), (actual,expected); print(sys.executable); print(actual)' $Agent
   if ($LASTEXITCODE -ne 0) { throw 'Packaged Python cannot import the Agent.' }
   foreach ($Plugin in @('dsh-pangea-companion', 'dsh-pangea-asset-catalog')) {
     Push-Location -LiteralPath (Join-Path $App "node_modules/$Plugin")
     try {
-      & $Node --test 'tests/*.test.mjs'
+      # The complete source suite also injects fake modules via PYTHONPATH.
+      # Embedded Python deliberately ignores that path; exercise the real Agent here.
+      if ($Plugin -eq 'dsh-pangea-companion') {
+        & $Node --test 'tests/source-scope-engine.test.mjs' 'tests/test-tool-reference.test.mjs' 'tests/repository-local-integration.test.mjs' 'tests/source-first-acp.test.mjs' 'tests/semantic-runtime.test.mjs' 'tests/runtime-view.test.mjs'
+      } else {
+        & $Node --test 'tests/*.test.mjs'
+      }
       if ($LASTEXITCODE -ne 0) { throw "Packaged Python/plugin integration failed: $Plugin" }
       if ($Plugin -eq 'dsh-pangea-companion') {
         & $Node --test 'tests/cordis-launch.integration.mjs'

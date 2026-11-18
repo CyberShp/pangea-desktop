@@ -47,6 +47,8 @@ describe('fault injection delivery acceptance', () => {
     expect(assembly.run).toContain('npm run package:dir')
     expect(assembly.run).not.toContain('-SkipTests')
     expect(assembly.run).not.toContain('create-signed')
+    const artifact = job.steps.find((step: { name?: string }) => step.name === 'Retain unsigned Windows test instance')
+    expect(artifact.with['include-hidden-files']).toBe(true)
   })
 
   it('runs Python and Cordis with locked source and bundled runtimes', async () => {

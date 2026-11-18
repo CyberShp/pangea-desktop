@@ -226,6 +226,7 @@ jobs:
         with:
           name: unsigned-win-unpacked-compatibility-${{ github.run_id }}
           path: dist/win-unpacked/
+          include-hidden-files: true
           retention-days: 7
           if-no-files-found: error
       - name: Download existing portable artifact for acceptance
