@@ -34,6 +34,7 @@ on:
       - scripts/build-pangea-desktop.ps1
       - scripts/verify-fault-injection-compat.mjs
       - scripts/test-packaged-fault-injection.ps1
+      - scripts/test-packaged-python-cordis.ps1
       - scripts/verify-pangea-staging.mjs
       - test/semantic-staging.test.ts
       - test/fault-injection-compat-gate.test.ts
@@ -73,6 +74,7 @@ on:
       - scripts/build-pangea-desktop.ps1
       - scripts/verify-fault-injection-compat.mjs
       - scripts/test-packaged-fault-injection.ps1
+      - scripts/test-packaged-python-cordis.ps1
       - scripts/verify-pangea-staging.mjs
       - test/semantic-staging.test.ts
       - test/fault-injection-compat-gate.test.ts
@@ -113,6 +115,10 @@ jobs:
     # using the exact component lock, without signing or publishing a package.
     runs-on: windows-2022
     timeout-minutes: 60
+    env:
+      GIT_LFS_SKIP_SMUDGE: '1'
+      PANGEA_REQUIRE_DOM_TESTS: '1'
+      PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -133,6 +139,34 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Could not check out locked plugin commit.' }
           $Actual = git -C .pangea-build/plugin-source rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or $Actual -cne $Component.commit) { throw 'Plugin checkout differs from component lock.' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare locked Python and Cordis integration environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Component = (Get-Content -LiteralPath 'pangea.components.json' -Raw | ConvertFrom-Json).pangeaAgent
+          if ($Component.commit -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid Agent commit lock.' }
+          git clone --no-checkout $Component.repository .pangea-build/agent-source
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch locked Agent source.' }
+          git -C .pangea-build/agent-source checkout --detach $Component.commit
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check out locked Agent commit.' }
+          $Actual = git -C .pangea-build/agent-source rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $Actual -cne $Component.commit) { throw 'Agent checkout differs from component lock.' }
+          python -m pip install ./.pangea-build/agent-source
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install locked Agent dependencies.' }
+          npx --no-install patch-package
+          if ($LASTEXITCODE -ne 0) { throw 'Could not apply Cordis/ACP runtime patches.' }
+          $Python = (Get-Command python).Source
+          $Agent = (Resolve-Path -LiteralPath '.pangea-build/agent-source').Path
+          $App = (Get-Location).Path
+          @(
+            "PANGEA_PYTHON=$Python", "PANGEA_TEST_PYTHON=$Python",
+            "PANGEA_AGENT_ROOT=$Agent", "PANGEA_INTEGRATION_RUNTIME=$Agent",
+            "PANGEA_RUNTIME_ROOT=$Agent", "PYTHONPATH=$Agent/src",
+            "PANGEA_TEST_APP_ROOT=$App"
+          ) | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Verify Windows fault injection compatibility through HTTP
         shell: pwsh
         run: |
@@ -165,7 +199,10 @@ jobs:
         if: inputs.build_unsigned == true
         shell: powershell
         run: |
-          ./scripts/build-pangea-desktop.ps1 -SkipPackage
+          $Version = "3.0.5-test.$env:GITHUB_RUN_NUMBER.$($env:GITHUB_SHA.Substring(0, 7))"
+          npm version $Version --no-git-tag-version --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw 'Could not set unsigned acceptance version.' }
+          ./scripts/build-pangea-desktop.ps1 -SkipPackage -DshPangeaSource '.pangea-build/plugin-source' -PangeaAgentSource '.pangea-build/agent-source'
           if ($LASTEXITCODE -ne 0) { throw 'Unsigned test staging failed.' }
           npm run package:dir
           if ($LASTEXITCODE -ne 0) { throw 'Unsigned win-unpacked assembly failed.' }
@@ -179,6 +216,10 @@ jobs:
         shell: powershell
         run: |
           ./scripts/test-packaged-fault-injection.ps1 -PackageDirectory dist/win-unpacked -GitLongpathsDefault true -ReportPath .pangea-build/verification/fault-injection-packaged-enabled.json
+      - name: Verify packaged Python and Cordis integration
+        if: inputs.build_unsigned == true
+        shell: powershell
+        run: ./scripts/test-packaged-python-cordis.ps1 -PackageDirectory 'dist/win-unpacked'
       - name: Retain unsigned Windows test instance
         if: inputs.build_unsigned == true
         uses: actions/upload-artifact@v4

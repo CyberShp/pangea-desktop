@@ -27,7 +27,7 @@ describe('fault injection delivery acceptance', () => {
     const workflow = parse(await read('.github/workflows/release-pipeline-tests.yml'))
     for (const event of ['push', 'pull_request']) {
       for (const file of ['pangea.components.json', 'scripts/verify-fault-injection-compat.mjs',
-        'scripts/test-packaged-fault-injection.ps1', 'scripts/build-pangea-desktop.ps1',
+        'scripts/test-packaged-fault-injection.ps1', 'scripts/test-packaged-python-cordis.ps1', 'scripts/build-pangea-desktop.ps1',
         'scripts/verify-pangea-staging.mjs', 'test/semantic-staging.test.ts']) {
         expect(workflow.on[event].paths).toContain(file)
       }
@@ -47,6 +47,27 @@ describe('fault injection delivery acceptance', () => {
     expect(assembly.run).toContain('npm run package:dir')
     expect(assembly.run).not.toContain('-SkipTests')
     expect(assembly.run).not.toContain('create-signed')
+  })
+
+  it('runs Python and Cordis with locked source and bundled runtimes', async () => {
+    const workflow = parse(await read('.github/workflows/release-pipeline-tests.yml'))
+    const steps = workflow.jobs['windows-components'].steps
+    const prepare = steps.find((step: { name?: string }) => step.name === 'Prepare locked Python and Cordis integration environment')
+    expect(prepare.run).toContain('$Actual -cne $Component.commit')
+    for (const variable of ['PANGEA_PYTHON', 'PANGEA_TEST_PYTHON', 'PANGEA_AGENT_ROOT', 'PANGEA_TEST_APP_ROOT']) {
+      expect(prepare.run).toContain(variable + '=')
+    }
+    const packaged = steps.find((step: { name?: string }) => step.name === 'Verify packaged Python and Cordis integration')
+    expect(packaged.if).toBe('inputs.build_unsigned == true')
+    expect(packaged['continue-on-error']).toBeUndefined()
+    expect(packaged.run).toContain('test-packaged-python-cordis.ps1')
+    const helper = await read('scripts/test-packaged-python-cordis.ps1')
+    for (const runtime of ['node_modules/node/bin/node.exe', 'resources/pangea-python/python.exe', 'resources/pangea-runtime']) {
+      expect(helper).toContain(runtime)
+    }
+    expect(helper).toContain('& $Node --test')
+    expect(helper).toContain('cordis-launch.integration.mjs')
+    expect(helper).toContain("if ($LASTEXITCODE -ne 0) { throw")
   })
 
   it('rejects skipped tests for delivery and validates packaged runtime before signing', async () => {
