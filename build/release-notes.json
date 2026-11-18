@@ -54,6 +54,7 @@
   "3.0.5": {
     "fixes": [
       "修复 Windows PowerShell 5.1 启动独立升级脚本时因缺少 UTF-8 BOM 导致解析报错、无法完成应用内升级的问题。",
+      "修复升级后拉起工作台时因 Add-Type 临时 DLL（CREATE_SUSPENDED）被终端安全软件隔离导致报 Temp\\*.dll 缺失的问题。",
       "在构建与发布预检中增加 UTF-8 BOM 与 Windows PowerShell 5.1 语法门禁，包含 3.0.4 打桩生成加速与候选挂点改进。"
     ],
     "notices": [

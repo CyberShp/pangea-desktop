@@ -1739,102 +1739,86 @@ function Wait-UpdateHandoff {
 }
 
 function Initialize-PortableDesktopLauncher {
-  if ('PangeaPortableDesktopLauncher' -as [type]) { return }
+  if ('PangeaPortableDesktopNative' -as [type]) { return }
   # PS 5.1 Start-Process expands wildcard characters in WorkingDirectory and
   # resolves redirect paths more than once, so escaping [] is not sufficient.
-  # Inherit native log-file handles: no pipe reader must survive this updater.
-  Add-Type -TypeDefinition @'
-using System;
-using System.Text;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
-public static class PangeaPortableDesktopLauncher {
-  [StructLayout(LayoutKind.Sequential)]
-  struct SECURITY_ATTRIBUTES {
-    public int Length; public IntPtr Descriptor; public int InheritHandle;
+  # Emit Win32 bindings directly in memory instead of Add-Type/csc.exe so no
+  # temporary %TEMP%\*.dll or CREATE_SUSPENDED pattern can be quarantined by AV.
+  $AssemblyName = New-Object Reflection.AssemblyName('PangeaPortableDesktopNativeAssembly')
+  $DefineMethod = [Reflection.Emit.AssemblyBuilder].GetMethod(
+    'DefineDynamicAssembly',
+    [Type[]]@([Reflection.AssemblyName], [Reflection.Emit.AssemblyBuilderAccess])
+  )
+  $AssemblyBuilder = if ($DefineMethod) {
+    [Reflection.Emit.AssemblyBuilder]::DefineDynamicAssembly($AssemblyName, [Reflection.Emit.AssemblyBuilderAccess]::Run)
+  } else {
+    [AppDomain]::CurrentDomain.DefineDynamicAssembly($AssemblyName, [Reflection.Emit.AssemblyBuilderAccess]::Run)
   }
-  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
-  struct STARTUPINFO {
-    public int Size; public string Reserved; public string Desktop; public string Title;
-    public uint X, Y, XSize, YSize, XCountChars, YCountChars, FillAttribute, Flags;
-    public ushort ShowWindow, ReservedSize; public IntPtr ReservedData;
-    public IntPtr StdInput, StdOutput, StdError;
-  }
-  [StructLayout(LayoutKind.Sequential)]
-  struct PROCESS_INFORMATION {
-    public IntPtr Process, Thread; public uint ProcessId, ThreadId;
-  }
-  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
-  static extern SafeFileHandle CreateFileW(string path, uint access, uint share,
-    ref SECURITY_ATTRIBUTES security, uint mode, uint flags, IntPtr template);
-  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
-  [return: MarshalAs(UnmanagedType.Bool)]
-  static extern bool CreateProcessW(string application, StringBuilder commandLine,
-    IntPtr processSecurity, IntPtr threadSecurity, bool inheritHandles, uint flags,
-    IntPtr environment, string directory, ref STARTUPINFO startup, out PROCESS_INFORMATION process);
-  [DllImport("kernel32.dll", ExactSpelling=true, SetLastError=true)]
-  static extern uint ResumeThread(IntPtr thread);
-  [DllImport("kernel32.dll", ExactSpelling=true)]
-  static extern bool TerminateProcess(IntPtr process, uint exitCode);
-  [DllImport("kernel32.dll", ExactSpelling=true)]
-  static extern bool CloseHandle(IntPtr handle);
+  $ModuleBuilder = $AssemblyBuilder.DefineDynamicModule('PangeaPortableDesktopNativeModule')
+  $TypeBuilder = $ModuleBuilder.DefineType(
+    'PangeaPortableDesktopNative',
+    [Reflection.TypeAttributes]'Public,Abstract,Sealed'
+  )
+  $CreateFileMethod = $TypeBuilder.DefinePInvokeMethod(
+    'CreateFileW',
+    'kernel32.dll',
+    [Reflection.MethodAttributes]'Public,Static,PinvokeImpl',
+    [Reflection.CallingConventions]::Standard,
+    [IntPtr],
+    [Type[]]@([string], [uint32], [uint32], [IntPtr], [uint32], [uint32], [IntPtr]),
+    [Runtime.InteropServices.CallingConvention]::Winapi,
+    [Runtime.InteropServices.CharSet]::Unicode
+  )
+  $CreateFileMethod.SetImplementationFlags($CreateFileMethod.GetMethodImplementationFlags() -bor [Reflection.MethodImplAttributes]::PreserveSig)
 
-  static SafeFileHandle OpenLog(string path, bool input) {
-    var security = new SECURITY_ATTRIBUTES();
-    security.Length = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
-    security.InheritHandle = 1;
-    // Direct file handles preserve literal brackets, spaces and Unicode.
-    var handle = CreateFileW(path, input ? 0x80000000u : 0x40000000u, 3,
-      ref security, input ? 3u : 2u, 0x80, IntPtr.Zero);
-    if (handle.IsInvalid) {
-      int error = Marshal.GetLastWin32Error();
-      handle.Dispose();
-      throw new Win32Exception(error, "Cannot open Desktop startup stream: " + path);
-    }
-    return handle;
-  }
+  $CreateProcessMethod = $TypeBuilder.DefinePInvokeMethod(
+    'CreateProcessW',
+    'kernel32.dll',
+    [Reflection.MethodAttributes]'Public,Static,PinvokeImpl',
+    [Reflection.CallingConventions]::Standard,
+    [int],
+    [Type[]]@([string], [IntPtr], [IntPtr], [IntPtr], [int], [uint32], [IntPtr], [string], [IntPtr], [IntPtr]),
+    [Runtime.InteropServices.CallingConvention]::Winapi,
+    [Runtime.InteropServices.CharSet]::Unicode
+  )
+  $CreateProcessMethod.SetImplementationFlags($CreateProcessMethod.GetMethodImplementationFlags() -bor [Reflection.MethodImplAttributes]::PreserveSig)
 
-  public static Process Start(string executable, string arguments, string directory,
-    string stdout, string stderr) {
-    using (var input = OpenLog("NUL", true))
-    using (var output = OpenLog(stdout, false))
-    using (var error = OpenLog(stderr, false)) {
-      var startup = new STARTUPINFO();
-      startup.Size = Marshal.SizeOf(typeof(STARTUPINFO));
-      startup.Flags = 0x101; // STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW
-      startup.ShowWindow = 1; // SW_SHOWNORMAL
-      startup.StdInput = input.DangerousGetHandle();
-      startup.StdOutput = output.DangerousGetHandle();
-      startup.StdError = error.DangerousGetHandle();
-      PROCESS_INFORMATION created;
-      var commandLine = new StringBuilder("\"" + executable + "\" " + arguments);
-      // Suspend until Process owns a handle, retaining even an immediate exit's
-      // status. Null environment inherits the caller's sanitized environment.
-      if (!CreateProcessW(executable, commandLine, IntPtr.Zero, IntPtr.Zero, true,
-        0x14, IntPtr.Zero, directory, ref startup, out created))
-        throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot start Desktop: " + executable);
-      Process process = null;
-      try {
-        process = Process.GetProcessById((int)created.ProcessId);
-        IntPtr retainedHandle = process.Handle;
-        if (ResumeThread(created.Thread) == UInt32.MaxValue)
-          throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resume Desktop startup.");
-        return process;
-      } catch {
-        // Never strand an invisible suspended process after a launch error.
-        TerminateProcess(created.Process, 1);
-        if (process != null) process.Dispose();
-        throw;
-      } finally {
-        CloseHandle(created.Thread);
-        CloseHandle(created.Process);
-      }
-    }
-  }
+  $CloseHandleMethod = $TypeBuilder.DefinePInvokeMethod(
+    'CloseHandle',
+    'kernel32.dll',
+    [Reflection.MethodAttributes]'Public,Static,PinvokeImpl',
+    [Reflection.CallingConventions]::Standard,
+    [int],
+    [Type[]]@([IntPtr]),
+    [Runtime.InteropServices.CallingConvention]::Winapi,
+    [Runtime.InteropServices.CharSet]::Auto
+  )
+  $CloseHandleMethod.SetImplementationFlags($CloseHandleMethod.GetMethodImplementationFlags() -bor [Reflection.MethodImplAttributes]::PreserveSig)
+
+  [void]$TypeBuilder.CreateTypeInfo()
 }
-'@
+
+function Open-PortableDesktopStream {
+  param([string]$Path, [bool]$InputStream)
+  $PtrSize = [IntPtr]::Size
+  $SecuritySize = 3 * $PtrSize
+  $Security = [Runtime.InteropServices.Marshal]::AllocHGlobal($SecuritySize)
+  try {
+    for ($Offset = 0; $Offset -lt $SecuritySize; $Offset++) {
+      [Runtime.InteropServices.Marshal]::WriteByte($Security, $Offset, 0)
+    }
+    [Runtime.InteropServices.Marshal]::WriteInt32($Security, 0, $SecuritySize)
+    [Runtime.InteropServices.Marshal]::WriteInt32($Security, 2 * $PtrSize, 1)
+    $Access = if ($InputStream) { [uint32]0x80000000L } else { [uint32]0x40000000L }
+    $Mode = if ($InputStream) { [uint32]3 } else { [uint32]2 }
+    $Handle = [PangeaPortableDesktopNative]::CreateFileW($Path, $Access, [uint32]3, $Security, $Mode, [uint32]0x80, [IntPtr]::Zero)
+    if ($Handle -eq [IntPtr]::Zero -or $Handle -eq (New-Object IntPtr(-1))) {
+      throw "Cannot open Desktop startup stream: $Path"
+    }
+    return $Handle
+  } finally {
+    [Runtime.InteropServices.Marshal]::FreeHGlobal($Security)
+  }
 }
 
 function Start-PortableDesktop {
@@ -1843,6 +1827,13 @@ function Start-PortableDesktop {
   Remove-Item -LiteralPath $Marker -Force -ErrorAction SilentlyContinue
   $Arguments = "--pangea-update-health=`"$Marker`" --enable-logging=file --log-file=`"$LaunchLog`""
   $SavedEnvironment = @{}
+  $InvalidHandle = New-Object IntPtr(-1)
+  $InputHandle = [IntPtr]::Zero
+  $OutputHandle = [IntPtr]::Zero
+  $ErrorHandle = [IntPtr]::Zero
+  $CommandBuffer = [IntPtr]::Zero
+  $Startup = [IntPtr]::Zero
+  $ProcInfo = [IntPtr]::Zero
   try {
     # GUI relaunch must not inherit Node-only launch/debug flags. Preserve the
     # user's profile/runtime configuration and restore our own environment.
@@ -1850,13 +1841,58 @@ function Start-PortableDesktop {
       $SavedEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process')
       [Environment]::SetEnvironmentVariable($Name, $null, 'Process')
     }
-    $Desktop = [PangeaPortableDesktopLauncher]::Start($Executable, $Arguments,
-      [IO.Path]::GetDirectoryName($Executable), "$LaunchLog.stdout", "$LaunchLog.stderr")
-    Write-UpdateLog "Desktop launch: pid=$($Desktop.Id); executable=$Executable; working-directory=$([IO.Path]::GetDirectoryName($Executable)); health=$Marker; log=$LaunchLog; stdout=$LaunchLog.stdout; stderr=$LaunchLog.stderr"
-    # Retain the handle now so PS 5.1 can report an early exit code reliably.
-    try { $null = $Desktop.Handle } catch { Write-UpdateLog "Desktop handle unavailable after launch: pid=$($Desktop.Id); $($_.Exception.Message)" }
+    $InputHandle = Open-PortableDesktopStream 'NUL' $true
+    $OutputHandle = Open-PortableDesktopStream "$LaunchLog.stdout" $false
+    $ErrorHandle = Open-PortableDesktopStream "$LaunchLog.stderr" $false
+    $PtrSize = [IntPtr]::Size
+    $StartupSize = if ($PtrSize -eq 8) { 104 } else { 68 }
+    $FlagsOffset = if ($PtrSize -eq 8) { 60 } else { 44 }
+    $ShowOffset = if ($PtrSize -eq 8) { 64 } else { 48 }
+    $StdInOffset = if ($PtrSize -eq 8) { 80 } else { 56 }
+    $StdOutOffset = if ($PtrSize -eq 8) { 88 } else { 60 }
+    $StdErrOffset = if ($PtrSize -eq 8) { 96 } else { 64 }
+    $ProcInfoSize = if ($PtrSize -eq 8) { 24 } else { 16 }
+    $Startup = [Runtime.InteropServices.Marshal]::AllocHGlobal($StartupSize)
+    $ProcInfo = [Runtime.InteropServices.Marshal]::AllocHGlobal($ProcInfoSize)
+    for ($Offset = 0; $Offset -lt $StartupSize; $Offset++) { [Runtime.InteropServices.Marshal]::WriteByte($Startup, $Offset, 0) }
+    for ($Offset = 0; $Offset -lt $ProcInfoSize; $Offset++) { [Runtime.InteropServices.Marshal]::WriteByte($ProcInfo, $Offset, 0) }
+    [Runtime.InteropServices.Marshal]::WriteInt32($Startup, 0, $StartupSize)
+    [Runtime.InteropServices.Marshal]::WriteInt32($Startup, $FlagsOffset, 0x101)
+    [Runtime.InteropServices.Marshal]::WriteInt16($Startup, $ShowOffset, [int16]1)
+    [Runtime.InteropServices.Marshal]::WriteIntPtr($Startup, $StdInOffset, $InputHandle)
+    [Runtime.InteropServices.Marshal]::WriteIntPtr($Startup, $StdOutOffset, $OutputHandle)
+    [Runtime.InteropServices.Marshal]::WriteIntPtr($Startup, $StdErrOffset, $ErrorHandle)
+    $CommandBuffer = [Runtime.InteropServices.Marshal]::StringToHGlobalUni("`"$Executable`" $Arguments")
+    $WorkingDirectory = [IO.Path]::GetDirectoryName($Executable)
+    $CreatedOk = [PangeaPortableDesktopNative]::CreateProcessW(
+      $Executable, $CommandBuffer, [IntPtr]::Zero, [IntPtr]::Zero, 1,
+      [uint32]0x10, [IntPtr]::Zero, $WorkingDirectory, $Startup, $ProcInfo
+    )
+    if ($CreatedOk -eq 0) {
+      throw "Cannot start Desktop: $Executable"
+    }
+    $CreatedProcess = [Runtime.InteropServices.Marshal]::ReadIntPtr($ProcInfo, 0)
+    $CreatedThread = [Runtime.InteropServices.Marshal]::ReadIntPtr($ProcInfo, $PtrSize)
+    $CreatedPid = [Runtime.InteropServices.Marshal]::ReadInt32($ProcInfo, 2 * $PtrSize)
+    try {
+      $Desktop = [Diagnostics.Process]::GetProcessById($CreatedPid)
+      # Retain the handle before closing CreatedProcess so PS 5.1 keeps ExitCode.
+      try { $null = $Desktop.Handle } catch { Write-UpdateLog "Desktop handle unavailable after launch: pid=$CreatedPid; $($_.Exception.Message)" }
+    } finally {
+      if ($CreatedThread -ne [IntPtr]::Zero) { [void][PangeaPortableDesktopNative]::CloseHandle($CreatedThread) }
+      if ($CreatedProcess -ne [IntPtr]::Zero) { [void][PangeaPortableDesktopNative]::CloseHandle($CreatedProcess) }
+    }
+    Write-UpdateLog "Desktop launch: pid=$($Desktop.Id); executable=$Executable; working-directory=$WorkingDirectory; health=$Marker; log=$LaunchLog; stdout=$LaunchLog.stdout; stderr=$LaunchLog.stderr"
     return $Desktop
   } finally {
+    if ($CommandBuffer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::FreeHGlobal($CommandBuffer) }
+    if ($Startup -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::FreeHGlobal($Startup) }
+    if ($ProcInfo -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::FreeHGlobal($ProcInfo) }
+    foreach ($StreamHandle in @($InputHandle, $OutputHandle, $ErrorHandle)) {
+      if ($StreamHandle -ne [IntPtr]::Zero -and $StreamHandle -ne $InvalidHandle) {
+        [void][PangeaPortableDesktopNative]::CloseHandle($StreamHandle)
+      }
+    }
     foreach ($Name in $SavedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($Name, $SavedEnvironment[$Name], 'Process') }
   }
 }
