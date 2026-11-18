@@ -1,4 +1,6 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿[CmdletBinding()]
+param([string]$PrecompiledFixture, [string]$CompileFixtureTo)
+$ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
   throw 'Run this regression with Windows PowerShell 5.1 (powershell.exe).'
 }
@@ -77,6 +79,12 @@ public static class RollbackDesktopFixture {
 }
 '@
 
+# Compile outside the observed TEMP window when used by the DLL observation gate.
+if ($CompileFixtureTo) {
+  Add-Type -TypeDefinition $FixtureSource -Language CSharp -ReferencedAssemblies 'System.dll','System.Core.dll','System.Web.Extensions.dll' -OutputAssembly $CompileFixtureTo -OutputType ConsoleApplication
+  exit 0
+}
+
 function Start-DesktopFixture {
   param([string]$Scenario)
   foreach ($Path in @($Marker, $EvidencePath, $LaunchLog, "$PlanPath.progress.json")) {
@@ -138,7 +146,11 @@ try {
   # Add-Type resolves OutputAssembly as a wildcard path in Windows PowerShell 5.1.
   # Compile at a plain path, then move literally to retain bracket-path coverage.
   $CompiledFixture = Join-Path $Root 'desktop-fixture.exe'
-  Add-Type -TypeDefinition $FixtureSource -Language CSharp -ReferencedAssemblies 'System.dll','System.Core.dll','System.Web.Extensions.dll' -OutputAssembly $CompiledFixture -OutputType ConsoleApplication
+  if ($PrecompiledFixture) {
+    [IO.File]::Copy((Resolve-Path -LiteralPath $PrecompiledFixture).Path, $CompiledFixture)
+  } else {
+    Add-Type -TypeDefinition $FixtureSource -Language CSharp -ReferencedAssemblies 'System.dll','System.Core.dll','System.Web.Extensions.dll' -OutputAssembly $CompiledFixture -OutputType ConsoleApplication
+  }
   [IO.File]::Move($CompiledFixture, $Executable)
   foreach ($Name in $DirtyEnvironment.Keys) {
     $SavedEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process')

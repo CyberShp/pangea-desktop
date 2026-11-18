@@ -109,6 +109,27 @@ permissions:
   contents: read
   actions: read
 jobs:
+  windows-native-observation:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every tracked PowerShell source with Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/verify-portable-ps51-ast.ps1
+      - name: Observe temporary DLLs during real native launch regression
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: ./scripts/verify-portable-launch-temp-dll.ps1
+      - name: Retain native syntax and DLL observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-observation
+          path: |
+            .pangea-build/verification/portable-ps51-ast.json
+            .pangea-build/verification/portable-launch-temp-dll.json
+          if-no-files-found: error
   windows-components:
     if: inputs.native_zero_copy_only != true
     # Run the plugin checks that gate release assembly on the release OS,
