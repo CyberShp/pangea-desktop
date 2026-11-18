@@ -17,14 +17,17 @@ afterEach(async () => {
 })
 
 describe('portable upgrade source policy', () => {
-  it('keeps the standalone signed helper aligned with the shared source boundary', async () => {
-    const helper = await readFile(path.join(process.cwd(), 'build/apply-portable-update.ps1'), 'utf8')
+  it('keeps the standalone signed helper aligned with the shared source boundary and UTF-8 BOM', async () => {
+    const helperBytes = await readFile(path.join(process.cwd(), 'build/apply-portable-update.ps1'))
+    expect([...helperBytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
+    const helper = helperBytes.toString('utf8')
     expect(helper.match(/\$MinimumSourceVersion\s*=\s*'([^']+)'/)?.[1]).toBe(MINIMUM_PORTABLE_UPGRADE_SOURCE)
   })
 
-  it('checks the shared policy against the standalone helper before local build staging', async () => {
+  it('checks the shared policy and UTF-8 BOM against the standalone helper before local build staging', async () => {
     const build = await readFile(path.join(process.cwd(), 'scripts/build-pangea-desktop.ps1'), 'utf8')
     expect(build).toContain("'build/portable-update-policy.json'")
+    expect(build).toContain("throw 'Portable updater script must keep UTF-8 BOM for Windows PowerShell 5.1.'")
     expect(build).toContain('$HelperMinimum.Groups[1].Value -ne $MinimumUpgradeSource')
     expect(build).toContain("throw 'Portable updater minimum source version does not match the shared upgrade policy.'")
     expect(build.indexOf('$HelperMinimum =')).toBeLessThan(build.indexOf('function Get-ExactSource'))

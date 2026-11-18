@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([string]$ChildRoot, [string]$CrashPoint)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest

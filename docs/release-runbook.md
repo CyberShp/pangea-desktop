@@ -23,7 +23,7 @@ Start `Build Windows package` (`release.yml`) on the approved source branch with
 
 The minimum supported patch baseline is **3.0.3** (including test builds with a base SemVer of 3.0.3 or newer). **3.0.2 and older upgrade paths are retired.** They are excluded before asset lookup, download, trust checks, or patch generation. Historical Releases and installers are retained; this policy does not delete them. Direct patch generation, new-release publication, and backfill publication also reject sources older than 3.0.3. The shared policy is `build/portable-update-policy.json`; the standalone PowerShell helper independently enforces the same minimum. Release publication uses the validated report whitelist, not a ZIP wildcard.
 
-The workflow default target is **3.0.4**. Test builds use `3.0.4-test.<run>.<sha>` and remain in the test update channel. Older command examples below are historical, not current upgrade paths.
+The workflow default target is **3.0.5**. Test builds use `3.0.5-test.<run>.<sha>` and remain in the test update channel. Older command examples below are historical, not current upgrade paths.
 
 There is no manual `patch_from_version` input. Both modes discover release history automatically and produce a direct patch from each compatible historical base to the target. No intermediate release needs to be installed when a verified patch exists for the user's exact installed version.
 

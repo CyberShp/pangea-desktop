@@ -1,4 +1,4 @@
-# Production supervisor/IO-worker/launch/health/rollback integration. The UI
+﻿# Production supervisor/IO-worker/launch/health/rollback integration. The UI
 # monitor is substituted because CI has no interactive desktop. The executable
 # is a native health fixture, not Electron; signature admission has separate tests.
 [CmdletBinding()]

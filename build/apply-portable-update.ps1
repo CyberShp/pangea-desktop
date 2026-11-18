@@ -1,4 +1,4 @@
-# PANGEA_UPDATE_MONITOR_PROTOCOL=1
+﻿# PANGEA_UPDATE_MONITOR_PROTOCOL=1
 [CmdletBinding()]
 param([string]$PlanPath, [switch]$ScanLocks, [switch]$HandleServer, [string]$ScanRoot, [string]$ScanOutput, [string]$WatchExplorer, [switch]$WatchUpdate, [switch]$RecoverOnly, [string]$IOWorker)
 

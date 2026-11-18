@@ -40,7 +40,12 @@ $MinimumUpgradeSource = [string]$UpgradePolicy.minimum_source_version
 if ($MinimumUpgradeSource -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
   throw "Invalid minimum upgrade source version: $MinimumUpgradeSource"
 }
-$UpdaterSource = Get-Content (Join-Path $ProjectRoot 'build/apply-portable-update.ps1') -Raw
+$UpdaterScriptPath = Join-Path $ProjectRoot 'build/apply-portable-update.ps1'
+$UpdaterBytes = [System.IO.File]::ReadAllBytes($UpdaterScriptPath)
+if ($UpdaterBytes.Length -lt 3 -or $UpdaterBytes[0] -ne 0xEF -or $UpdaterBytes[1] -ne 0xBB -or $UpdaterBytes[2] -ne 0xBF) {
+  throw 'Portable updater script must keep UTF-8 BOM for Windows PowerShell 5.1.'
+}
+$UpdaterSource = Get-Content $UpdaterScriptPath -Raw
 $HelperMinimum = [regex]::Match($UpdaterSource, '\$MinimumSourceVersion\s*=\s*''([^'']+)''')
 if (-not $HelperMinimum.Success -or $HelperMinimum.Groups[1].Value -ne $MinimumUpgradeSource) {
   throw 'Portable updater minimum source version does not match the shared upgrade policy.'
@@ -50,12 +55,27 @@ Write-Host "Minimum supported upgrade source: $MinimumUpgradeSource"
 $UpdaterTokens = $null
 $UpdaterErrors = $null
 [void][System.Management.Automation.Language.Parser]::ParseFile(
-  (Join-Path $ProjectRoot 'build/apply-portable-update.ps1'),
+  $UpdaterScriptPath,
   [ref]$UpdaterTokens,
   [ref]$UpdaterErrors
 )
 if ($UpdaterErrors.Count -gt 0) {
   throw "Portable updater script is invalid: $($UpdaterErrors[0].Message)"
+}
+if ($env:OS -eq 'Windows_NT') {
+  $WinPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  if (Test-Path -LiteralPath $WinPowerShell -PathType Leaf) {
+    $PreviousUpdaterPath = $env:PANGEA_UPDATER_SCRIPT_PATH
+    try {
+      $env:PANGEA_UPDATER_SCRIPT_PATH = $UpdaterScriptPath
+      & $WinPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command '$t=$null;$e=$null;[void][System.Management.Automation.Language.Parser]::ParseFile($env:PANGEA_UPDATER_SCRIPT_PATH,[ref]$t,[ref]$e);if($e.Count -gt 0){throw $e[0].Message}' | Out-Host
+      if ($LASTEXITCODE -ne 0) {
+        throw "Windows PowerShell 5.1 rejected build/apply-portable-update.ps1 (exit $LASTEXITCODE)."
+      }
+    } finally {
+      $env:PANGEA_UPDATER_SCRIPT_PATH = $PreviousUpdaterPath
+    }
+  }
 }
 
 function Invoke-Checked {
