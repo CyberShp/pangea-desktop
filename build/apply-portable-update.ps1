@@ -1,4 +1,4 @@
-﻿# PANGEA_UPDATE_MONITOR_PROTOCOL=1
+# PANGEA_UPDATE_MONITOR_PROTOCOL=1
 [CmdletBinding()]
 param([string]$PlanPath, [switch]$ScanLocks, [switch]$HandleServer, [string]$ScanRoot, [string]$ScanOutput, [string]$WatchExplorer, [switch]$WatchUpdate, [switch]$RecoverOnly, [string]$IOWorker)
 
@@ -2550,7 +2550,7 @@ function Assert-PortableUpgradeSourceVersion {
   param([string]$Root, [string]$PackageKind, [string]$ExpectedBase)
   # Keep in sync with build/portable-update-policy.json; the signed helper is a
   # standalone file and cannot trust a separate policy file supplied at runtime.
-  $MinimumSourceVersion = '3.0.0'
+  $MinimumSourceVersion = '3.0.3'
   $Identity = Get-PortableRootIdentity $Root
   if ($Identity.version -notmatch '^(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?$' -or [version]$Matches[1] -lt [version]$MinimumSourceVersion) {
     throw "当前版本 $($Identity.version) 低于最低可升级版本 $MinimumSourceVersion。请使用完整安装包迁移。"

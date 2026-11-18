@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ currentVersion: '3.0.0', fetch: vi.fn(), getPath: vi.fn(), launch: vi.fn(), quit: vi.fn(), admission: vi.fn(), messages: [] as any[] }))
+const mocks = vi.hoisted(() => ({ currentVersion: '3.0.3', fetch: vi.fn(), getPath: vi.fn(), launch: vi.fn(), quit: vi.fn(), admission: vi.fn(), messages: [] as any[] }))
 vi.mock('electron', () => ({
   app: { getVersion: () => mocks.currentVersion, getPath: mocks.getPath, isPackaged: true, quit: mocks.quit },
   BrowserWindow: { fromWebContents: () => ({}), getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: (_: string, status: unknown) => mocks.messages.push(status) } }] },
@@ -18,7 +18,7 @@ vi.mock('../src/main/update/update-capability', () => ({ canImportPortableUpdate
 vi.mock('../src/main/update/launch-portable-helper', () => ({ launchPortableHelper: mocks.launch }))
 
 describe.each(['stable', 'test'] as const)('Desktop %s signed update pipeline', channel => {
-const baseVersion = channel === 'test' ? '3.0.3-test.9.abcdef0' : '3.0.0'
+const baseVersion = channel === 'test' ? '3.0.3-test.9.abcdef0' : '3.0.3'
 const storageChannel = channel === 'test' ? 'beta' : 'stable'
 let root: string
 let resourcesDescriptor: PropertyDescriptor | undefined
@@ -28,7 +28,7 @@ let intranetIndex: any
 let intranetUrl: string
 const intranetResponses = new Map<string, Buffer>()
 const responses = new Map<string, Buffer>()
-const version = channel === 'test' ? '3.0.3-test.10.abcdef0' : '3.0.1'
+const version = channel === 'test' ? '3.0.4-test.10.abcdef0' : '3.0.4'
 const name = `pangea-desktop-${version}-windows-x64-portable.zip`
 const prefix = 'fixture:'
 
