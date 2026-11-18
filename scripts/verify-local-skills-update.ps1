@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 # Parse only the helper; never execute the updater against a real installation.
 $Updater = Join-Path $PSScriptRoot '..\build\apply-portable-update.ps1'
 $Tokens = $null

@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)][string]$BaseDirectory,
   [Parameter(Mandatory = $true)][string]$TargetDirectory,
   [Parameter(Mandatory = $true)][string]$PatchPath

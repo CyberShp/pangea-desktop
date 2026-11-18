@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $Tokens = $null; $ParseErrors = $null
 $Ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '..\build\apply-portable-update.ps1'), [ref]$Tokens, [ref]$ParseErrors)

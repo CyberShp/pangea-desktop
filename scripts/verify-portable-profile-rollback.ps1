@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $Updater = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../build/apply-portable-update.ps1'))
 $Tokens=$null; $Errors=$null

@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $AppDirectory = Join-Path $ProjectRoot 'dist-dev/win-unpacked'
 $Executable = Join-Path $AppDirectory 'PANGEA Desktop Dev.exe'

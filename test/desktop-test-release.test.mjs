@@ -15,9 +15,7 @@ test('Desktop stable and test build targets can themselves be upgraded', async (
     for (const entry of await readdir(new URL(`../${dir}`, import.meta.url), { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith('.ps1')) continue
       const bytes = await readFile(new URL(`../${dir}/${entry.name}`, import.meta.url))
-      if (bytes.some(byte => byte > 0x7f)) {
-        assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], `${dir}/${entry.name} contains non-ASCII text and must keep UTF-8 BOM for Windows PowerShell 5.1`)
-      }
+      assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], `${dir}/${entry.name} must keep UTF-8 BOM for Windows PowerShell 5.1`)
     }
   }
 })

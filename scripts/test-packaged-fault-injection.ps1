@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$PackageDirectory,
   [Parameter(Mandatory = $true)][string]$ReportPath,

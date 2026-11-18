@@ -22,6 +22,7 @@ const baseVersion = channel === 'test' ? '3.0.3-test.9.abcdef0' : '3.0.3'
 const storageChannel = channel === 'test' ? 'beta' : 'stable'
 let root: string
 let resourcesDescriptor: PropertyDescriptor | undefined
+const archDescriptor = Object.getOwnPropertyDescriptor(process, 'arch')!
 let manager: typeof import('../src/main/update/update-manager')
 let activeIndex: any
 let intranetIndex: any
@@ -78,6 +79,8 @@ beforeAll(async () => {
   Object.defineProperty(process, 'resourcesPath', { value: resources, configurable: true })
 })
 beforeEach(async () => {
+  // This suite simulates the supported Windows x64 product, including on ARM hosts.
+  Object.defineProperty(process, 'arch', { ...archDescriptor, value: 'x64' })
   vi.resetModules(); vi.clearAllMocks(); mocks.messages.length = 0
   mocks.getPath.mockReturnValue(join(root, 'profile'))
   await rm(join(root, 'profile', 'update-network.json'), { force: true })
@@ -86,7 +89,11 @@ beforeEach(async () => {
   mocks.admission.mockResolvedValue(undefined)
   manager.startUpdateManager({ prepareToInstall: mocks.admission })
 })
-afterEach(() => { manager.stopUpdateManager(); vi.useRealTimers() })
+afterEach(() => {
+  manager?.stopUpdateManager()
+  vi.useRealTimers()
+  Object.defineProperty(process, 'arch', archDescriptor)
+})
 afterAll(async () => {
   if (resourcesDescriptor) Object.defineProperty(process, 'resourcesPath', resourcesDescriptor)
   else Reflect.deleteProperty(process, 'resourcesPath')
@@ -94,6 +101,12 @@ afterAll(async () => {
 })
 
 describe('online update production pipeline with simulated intranet and Windows launcher', () => {
+  it('rejects unsupported architecture before any download or installation', async () => {
+    Object.defineProperty(process, 'arch', { ...archDescriptor, value: 'arm64' })
+    expect(await manager.checkForOnlineUpdate()).toMatchObject({ phase: 'unsupported' })
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.launch).not.toHaveBeenCalled()
+  })
   it.each([false, true])('checks metadata without downloading or installing (manual=%s)', async manual => {
     expect(await manager.checkForOnlineUpdate(manual)).toMatchObject({ phase: 'available', availableVersion: version, manual })
     expect(mocks.fetch.mock.calls.map(([url]) => url)).not.toContain(new URL(intranetIndex.full_url, intranetUrl).href)
