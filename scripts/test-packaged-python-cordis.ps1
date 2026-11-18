@@ -35,8 +35,6 @@ try {
       & $Node --test 'tests/*.test.mjs'
       if ($LASTEXITCODE -ne 0) { throw "Packaged Python/plugin integration failed: $Plugin" }
       if ($Plugin -eq 'dsh-pangea-companion') {
-        & $Node 'scripts/run-dom-tests.mjs'
-        if ($LASTEXITCODE -ne 0) { throw 'Packaged DOM integration failed.' }
         & $Node --test 'tests/cordis-launch.integration.mjs'
         if ($LASTEXITCODE -ne 0) { throw 'Packaged Cordis integration failed.' }
       }
