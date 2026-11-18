@@ -1,0 +1,36 @@
+{
+    "status":  "passed",
+    "file_count":  100000,
+    "user_bytes":  1073741824,
+    "os":  "Microsoft Windows NT 10.0.26100.0",
+    "powershell":  "5.1.26100.33648",
+    "scope":  "Native NTFS fixture: production patch reconstruction, legacy data copy+five fingerprints, data migration, switch, recovery. Signature admission and Electron startup are separate tests.",
+    "timings_ms":  {
+                       "seed_package":  72042,
+                       "seed_user_data":  6886,
+                       "copy_patch":  84421,
+                       "copy_user_data_and_five_fingerprints":  5174,
+                       "copy_candidate_cleanup":  27895,
+                       "hardlink_patch":  50324,
+                       "zero_copy_data":  174,
+                       "switch":  180,
+                       "rollback":  271
+                   },
+    "handle_scans":  0,
+    "handle_worker_starts":  0,
+    "copy_total_ms":  89595,
+    "zero_copy_total_ms":  50678,
+    "target_under_60_seconds":  true,
+    "patch_counts":  [
+                         {
+                             "payload":  1,
+                             "linked":  0,
+                             "copied":  100000
+                         },
+                         {
+                             "payload":  1,
+                             "linked":  100000,
+                             "copied":  0
+                         }
+                     ]
+}

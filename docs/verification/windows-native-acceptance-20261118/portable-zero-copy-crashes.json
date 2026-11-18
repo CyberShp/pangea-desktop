@@ -1,0 +1,27 @@
+{
+    "checks":  [
+                   "real crash at intent restores program and identical data directories; cleanup retains external data",
+                   "real crash at first_move restores program and identical data directories; cleanup retains external data",
+                   "real crash at temporary_link restores program and identical data directories; cleanup retains external data",
+                   "real crash at migrated restores program and identical data directories; cleanup retains external data",
+                   "real crash at mounted restores program and identical data directories; cleanup retains external data",
+                   "real crash at original_rename restores program and identical data directories; cleanup retains external data",
+                   "real crash at activate_rename restores program and identical data directories; cleanup retains external data",
+                   "real crash at activated_write restores program and identical data directories; cleanup retains external data",
+                   "real crash at committed restores program and identical data directories; cleanup retains external data",
+                   "conflicting source and target remain untouched for explicit recovery",
+                   "locked first migration fails intact and resumes after the retained holder releases its handle",
+                   "live writer is preserved, both writes survive and migration resumes; native move blocked while open=True",
+                   "wrong-link is rejected while original and unrelated data remain intact",
+                   "changed-identity is rejected while original and unrelated data remain intact",
+                   "missing-receipt is rejected while original and unrelated data remain intact",
+                   "same-volume hard links verify bytes first; all updater overwrite paths reject shared targets",
+                   "reuse session pins parent identity, rejects reparse parents and releases every handle before switching",
+                   "bounded concurrent batch rejects a corrupt source, retains baseline bytes and releases directory handles on failure",
+                   "real cross-volume link failure falls back to a verified independent copy"
+               ],
+    "schema_version":  1,
+    "platform":  "Microsoft Windows NT 10.0.26100.0",
+    "powershell":  "5.1.26100.33648",
+    "status":  "passed"
+}

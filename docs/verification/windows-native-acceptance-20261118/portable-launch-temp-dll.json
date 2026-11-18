@@ -1,0 +1,46 @@
+{
+    "status":  "passed",
+    "powershell":  "5.1.20348.5773",
+    "scope":  "Desktop launch and rollback-launch health regression in fresh PS 5.1 with isolated TEMP/TMP; fixture compiled before observation. Not a global updater/GUI/antivirus trace.",
+    "observations":  [
+                         {
+                             "watcher_errors":  [
+
+                                                ],
+                             "pid":  2132,
+                             "exit_code":  0,
+                             "name":  "compiler-control",
+                             "stdout":  "",
+                             "remaining_dlls":  [
+
+                                                ],
+                             "stderr":  "",
+                             "dll_events":  [
+                                                {
+                                                    "type":  "Created",
+                                                    "path":  "c54osozo\\c54osozo.dll"
+                                                },
+                                                {
+                                                    "type":  "Created",
+                                                    "path":  "transient-control.dll"
+                                                }
+                                            ]
+                         },
+                         {
+                             "watcher_errors":  [
+
+                                                ],
+                             "pid":  5772,
+                             "exit_code":  0,
+                             "name":  "desktop-launch",
+                             "stdout":  "PASS: failed Desktop creation reports an error and preserves the parent environment\r\nPASS: literal working directory and output logs, clean child environment, intact arguments and correct live health identity\r\nPASS: exit17 does not pass Desktop health checks\r\nPASS: wrong-pid does not pass Desktop health checks\r\nPASS: wrong-version does not pass Desktop health checks\r\nPASS: wrong-schema does not pass Desktop health checks\r\nPASS: stale-time does not pass Desktop health checks\r\nPASS: no-marker does not pass Desktop health checks\r\nPASS: missing marker times out while refreshing persistent rollback progress\r\n",
+                             "remaining_dlls":  [
+
+                                                ],
+                             "stderr":  "",
+                             "dll_events":  [
+
+                                            ]
+                         }
+                     ]
+}

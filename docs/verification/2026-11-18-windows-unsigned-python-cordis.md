@@ -57,7 +57,14 @@ WinError. The full source suite still covers this test. Packaged acceptance
 selects the real-Agent integration suites and separately runs Cordis/catalog;
 no product behavior or embedded isolation was weakened to accommodate the fixture.
 
-## Still unverified
+## Follow-up
+
+The [native observation and benchmark report](2026-11-18-windows-native-observation-benchmark.md)
+subsequently covers the complete tracked PS 5.1 scan, scoped launcher DLL observation
+and 100k/1 GiB measurements. It retains the unmet full-supervisor timing target
+and separates launcher observations from global updater/antivirus claims.
+
+## Unverified at this report’s original checkpoint
 
 - Global zero temporary DLL and antivirus observations.
 - Combined real Electron/Windows Terminal directory-lock upgrade and rollback.

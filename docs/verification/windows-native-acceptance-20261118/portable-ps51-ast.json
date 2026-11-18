@@ -1,0 +1,256 @@
+{
+    "powershell":  "5.1.20348.5773",
+    "status":  "passed",
+    "scope":  "All Git-tracked PowerShell source files, recursively; no script execution",
+    "file_count":  31,
+    "files":  [
+                  {
+                      "path":  "build/apply-portable-update.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "04342db760d07ba6765313748f5302b1fb7f607af1c5e16a05bb0cc171925015",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/build-pangea-desktop.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "f1514b4f8162e68620290b4986290ad0591092fba27bea8dea71dc54095fafbf",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/diagnose-packaged-acp.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "d2c8a719c5fcf4ff6c446a55a3a811e35491e76dcc22a386b3d4856ce6a2991d",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/measure-portable-zero-copy.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "acf8f2677968876612af8da43eca266caf1c437bec0755387f1d5471e64e0144",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/resume-portable-update.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "682e3ec232c704832d2a0cc8ce87c60d8c4c73153ff82a921d5d9363583d3552",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/start-acp-dev.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "40de745943a548c509e8a075b5013f2324a385277c0c4a62747a1289c39bd980",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/test-legacy-portable-upgrade.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "8ba07ef20981f340ff474af5fa473850fa3d10e5fcef593e958e7c07ce62f491",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/test-packaged-acp-batch-launch.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "44baabefd4a48074436d6155a3d71964ee9b838aaf6fad04ee009a747b44f243",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/test-packaged-fault-injection.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "d1ec5aaa209aceb74ccebd50e236909dc8cff2da5adb24d5df3c0ad44872e650",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/test-packaged-harness-startup.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "529936cf941258bb658c2d0693a090c8694ba8933906f1ae78f649b20e121de4",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/test-packaged-python-cordis.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "bc1f52a56737af9824d17796f8f9aaf5d9e570a55cb83a7316c855ce83f7fd76",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/test-uiux-dev-instance.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "1ada9194b49b566a9ac93263c80756d31ef9fa2bce2d2ecdcac8ffb5a2cfd7f8",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-explorer-recovery.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "920fe3783976440b6d8c95cfc9fed4b2c765aa85966dd294ab4c07a90e8feb51",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-local-skills-update.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "110a0c02bfa190a440b860168bf3ef98c25047e389f449bd79eba045997b8a69",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-batch-cleanup.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "6799653d86527787e1346a5726ee9f7668a937dfdbb11c8b2eb117d1a0b13478",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-handle-resolution.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "973de254ae749994fa3049049f34f93ff44a7ce07e2df504f595118d5656942f",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-handle-server.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "bf6244a59c601ce349383a9e865b8d6531995e133f47bf687d413622c0cdde92",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-io-protection.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "09566ad9b8be8a25facd5eac5486c91b6bac885f5c69e8d12e7e25d35d7af7ff",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-launch-temp-dll.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "8eec5d28b3e458642a765f58787b84dee56996ffc785661929a9dfb41b6f36e8",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-long-paths.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "c7672c6e876f5ba3243bda93e94ba4b227a10278d1ecfee1aa6a6da7bd3f91a4",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-patch-apply.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "306c8b72b538d19fa58ccc21f8bfa44263e8bbab2b5dc0b819dd85ec98f22901",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-profile-rollback.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "1068ea56defc734b60e5fb697cd32638f0a99961ab31b40683fc60f89afca887",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-ps51-ast.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "89998af04287d4dbd148f82659cf74688563d0d064040b279552c661ae143010",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-rollback-start.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "f7fcb03ac1e5088f9c2ec7522a20a54dfbe20e21cf03c1985f11147d7a86f2af",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-update-lifecycle.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "5f2005b295e9ba44eebb7b9bcea7c4723f38733e72f057fd357a1ec7ae413660",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-update-locks.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "66280c8d79790e98a1793971c1aad6f5d1a861d8da3ed4a605300fa04f274082",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-update-progress.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "0eea92343700f60c172bddaaaa1d849b295729680208914d7cd8228d84527db1",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-update-transactions.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "05c85ad22e01ce6bda403b0a196c3fc01b70f82b12c0c3fa9ac2f808640d5a82",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-user-data.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "43752afe9a5f80db2c1eea92ef702005dfba75853480334411d9a05652f863d6",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-portable-zero-copy.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "c3339c2ecd0c3dced4f7adf602914863e5e9cdcbe28d818de9fb9e0b3aedb32e",
+                      "parse_errors":  [
+
+                                       ]
+                  },
+                  {
+                      "path":  "scripts/verify-release-patch.ps1",
+                      "utf8_bom":  true,
+                      "sha256":  "44c7e8a96b400b4407ba1862bf8aeddeec347f5e20786a121fead83d14eac2ae",
+                      "parse_errors":  [
+
+                                       ]
+                  }
+              ]
+}
