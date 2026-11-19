@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { extractPackage, sha256 } from '../scripts/release-package-trust.mjs'
 import { fullName, patchName } from '../scripts/historical-release-lib.mjs'
+import { localPublication } from '../scripts/publish-release-additions.mjs'
 
 // These orchestration tests use real signed ZIPs, hashing, extraction, and patch
 // generation, but fake gh and pwsh commands. They prove the Windows verifier is
@@ -90,11 +91,12 @@ async function harness(t, { targetVersion = '3.0.5', targetPublished = true, tar
   await writeFile(path.join(bin, 'pwsh'), fakePwsh)
   await chmod(path.join(bin, 'gh'), 0o755)
   await chmod(path.join(bin, 'pwsh'), 0o755)
-  async function run({ mode = 'backfill', directory = output, failVerifier = false } = {}) {
+  async function run({ mode = 'backfill', directory = output, failVerifier = false, fromVersion = '' } = {}) {
     await writeFile(configPath, JSON.stringify(config))
     const result = spawnSync(process.execPath, [
       script, '--mode', mode, '--target-version', targetVersion, '--channel', 'stable',
-      '--private-key', key, '--output-dir', directory
+      '--private-key', key, '--output-dir', directory,
+      ...(fromVersion ? ['--from-version', fromVersion] : [])
     ], {
       encoding: 'utf8',
       env: {
@@ -328,3 +330,44 @@ test('retired pre-3.0.4 history is excluded before asset lookup, download, trust
   assert.equal(result.report.bases.find(base => base.version === '3.0.4').status, 'verified')
   assert.ok(!(await readdir(fixture.output)).some(name => name.includes('-from-1.') || name.includes('-from-3.0.2')))
 })
+
+test('explicit --from-version 3.0.4 builds and publishes only 3.0.4 -> 3.0.6 without downloading 3.0.5', integration, async t => {
+  const fixture = await harness(t, {
+    targetVersion: '3.0.6',
+    targetPublished: false,
+    bases: [{ version: '3.0.5' }, { version: '3.0.4' }]
+  })
+  const localFull = path.join(fixture.output, fullName('3.0.6'))
+  await copyFile(fixture.targetPackage.file, localFull)
+  await copyFile(`${fixture.targetPackage.file}.sha256`, `${localFull}.sha256`)
+  const result = await fixture.run({ mode: 'build', fromVersion: '3.0.4' })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.report.requested_from_version, '3.0.4')
+  assert.equal(result.report.complete, true)
+  const skipped = result.report.bases.find(base => base.version === '3.0.5')
+  assert.equal(skipped.status, 'unsupported')
+  assert.equal(skipped.eligible, false)
+  assert.match(skipped.reason, /excluded by --from-version 3\.0\.4/)
+  assert.ok(!result.calls.some(call => call.command === 'gh' && call.args.some(arg => arg.includes('v3.0.5') || arg.includes('/releases/1/assets'))))
+  assert.equal(result.calls.filter(call => call.command === 'pwsh').length, 1)
+  await inspectPatch(fixture, result, '3.0.4')
+  const publication = await localPublication('3.0.6', result.directory)
+  assert.equal(publication.names.filter(name => name.endsWith('.patch.zip')).length, 1)
+  assert.ok(publication.names.includes(patchName('3.0.6', '3.0.4')))
+  assert.ok(!publication.names.some(name => name.includes('-from-3.0.5')))
+})
+
+test('explicit --from-version fails closed when the requested baseline is missing or absent', integration, async t => {
+  const fixture = await harness(t, {
+    targetVersion: '3.0.6',
+    targetPublished: false,
+    bases: [{ version: '3.0.5' }, { version: '3.0.4', missing: true }]
+  })
+  const localFull = path.join(fixture.output, fullName('3.0.6'))
+  await copyFile(fixture.targetPackage.file, localFull)
+  await copyFile(`${fixture.targetPackage.file}.sha256`, `${localFull}.sha256`)
+  const result = await fixture.run({ mode: 'build', fromVersion: '3.0.4' })
+  assert.notEqual(result.status, 0)
+  assert.match(result.report.error, /did not produce a verified patch/)
+})
+

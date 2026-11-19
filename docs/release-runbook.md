@@ -19,13 +19,14 @@ Start `Build Windows package` (`release.yml`) on the approved source branch with
 | --- | --- | --- |
 | `mode` | `build` (default) | `backfill` |
 | `channel` | `release` for stable, or `test` | Channel of the existing target release |
-| `version` | Base SemVer, such as `2.1.9` | Exact existing target version, such as `2.1.9` or `2.1.9-test.42.abcdef0` |
+| `version` | Base SemVer, such as `3.0.6` | Exact existing target version, such as `3.0.6` or `3.0.6-test.42.abcdef0` |
+| `from_version` | Optional exact supported base version (e.g. `3.0.4`); leave empty for all supported bases | Optional exact supported base version; leave empty for all supported bases |
 
 The minimum supported patch baseline is **3.0.4** (including test builds with a base SemVer of 3.0.4 or newer). **3.0.3 and older upgrade paths are retired.** They are excluded before asset lookup, download, trust checks, or patch generation. Historical Releases and installers are retained; this policy does not delete them. Direct patch generation, new-release publication, and backfill publication also reject sources older than 3.0.4. The shared policy is `build/portable-update-policy.json`; the standalone PowerShell helper independently enforces the same minimum. Release publication uses the validated report whitelist, not a ZIP wildcard.
 
-The workflow default target is **3.0.5**. Test builds use `3.0.5-test.<run>.<sha>` and remain in the test update channel. Older command examples below are historical, not current upgrade paths.
+The workflow default target is **3.0.6**. Test builds use `3.0.6-test.<run>.<sha>` and remain in the test update channel. Older command examples below are historical, not current upgrade paths.
 
-There is no manual `patch_from_version` input. Both modes discover release history automatically and produce a direct patch from each compatible historical base to the target. No intermediate release needs to be installed when a verified patch exists for the user's exact installed version.
+When `from_version` is omitted, both modes discover release history automatically and produce a direct patch from each compatible historical base to the target. When `from_version` is specified, only that exact older supported baseline in the same channel is built and verified (other baselines are recorded as excluded in the patch report).
 
 ### Build a new target
 

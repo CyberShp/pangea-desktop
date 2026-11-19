@@ -22,6 +22,10 @@ test('exact supported channel and numeric version ordering', () => {
 })
 test('every release receives explicit compatibility classification', () => {
   assert.equal(classifyRelease({tag_name:'v3.0.4'}, '3.0.5', 'stable').status, 'pending')
+  assert.equal(classifyRelease({tag_name:'v3.0.4'}, '3.0.6', 'stable', { onlyFromVersion: '3.0.4' }).status, 'pending')
+  const skipped = classifyRelease({tag_name:'v3.0.5'}, '3.0.6', 'stable', { onlyFromVersion: '3.0.4' })
+  assert.equal(skipped.status, 'unsupported')
+  assert.match(skipped.reason, /excluded by --from-version 3\.0\.4/)
   for (const release of [{tag_name:'v3.0.5'}, {tag_name:'v3.1.0'}, {tag_name:'v3.0.4',draft:true}, {tag_name:'bad'}, {tag_name:'3.0.4'}, {tag_name:'v3.0.4-test.1.abcdef0'}]) assert.equal(classifyRelease(release,'3.0.5','stable').status,'unsupported')
 })
 test('requires exact platform architecture ZIP and checksum pair', () => {

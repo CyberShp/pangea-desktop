@@ -1,5 +1,5 @@
 name: Build Windows package
-run-name: PANGEA Desktop ${{ inputs.mode || 'build' }} ${{ inputs.channel || 'test' }} ${{ inputs.version || '3.0.5' }}
+run-name: PANGEA Desktop ${{ inputs.mode || 'build' }} ${{ inputs.channel || 'test' }} ${{ inputs.version || '3.0.6' }}
 
 on:
   push:
@@ -30,7 +30,12 @@ on:
       version:
         description: Build mode uses a base SemVer; backfill requires the exact existing target version
         required: true
-        default: 3.0.5
+        default: 3.0.6
+        type: string
+      from_version:
+        description: Optional exact base version for single-baseline patch generation (empty builds all supported bases)
+        required: false
+        default: ''
         type: string
 
 permissions:
@@ -66,7 +71,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_VERSION: ${{ inputs.version || '3.0.5' }}
+          REQUESTED_VERSION: ${{ inputs.version || '3.0.6' }}
         run: |
           node scripts/assert-release-version-available.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Release preflight failed before building. See the version or API error above.' }
@@ -77,7 +82,8 @@ jobs:
         env:
           RELEASE_MODE: ${{ inputs.mode || 'build' }}
           BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
-          REQUESTED_VERSION: ${{ inputs.version || '3.0.5' }}
+          REQUESTED_VERSION: ${{ inputs.version || '3.0.6' }}
+          REQUESTED_FROM_VERSION: ${{ inputs.from_version || '' }}
         run: |
           $StableVersionPattern = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
           $TestVersionPattern = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-test\.(0|[1-9]\d*)\.[0-9a-f]{7}$'
@@ -109,12 +115,15 @@ jobs:
             }
           }
           $env:PANGEA_TARGET_VERSION = $ResolvedVersion
-          node --input-type=module -e "import { assertUpgradeableTarget } from './scripts/historical-release-lib.mjs'; assertUpgradeableTarget(process.env.PANGEA_TARGET_VERSION)"
-          if ($LASTEXITCODE -ne 0) { throw 'Target version cannot participate in Desktop upgrades.' }
+          $env:PANGEA_PACKAGE_CHANNEL_CHECK = $PackageChannel
+          node --input-type=module -e "import { assertUpgradeableTarget, parseVersion, olderVersion, isSupportedPatchBase } from './scripts/historical-release-lib.mjs'; assertUpgradeableTarget(process.env.PANGEA_TARGET_VERSION); const fromVer = (process.env.REQUESTED_FROM_VERSION || '').trim(); if (fromVer) { const p = parseVersion(fromVer); if (!p || p.channel !== process.env.PANGEA_PACKAGE_CHANNEL_CHECK || !isSupportedPatchBase(fromVer) || !olderVersion(fromVer, process.env.PANGEA_TARGET_VERSION)) throw new Error('Invalid from_version: ' + fromVer); }"
+          if ($LASTEXITCODE -ne 0) { throw 'Target or from_version cannot participate in Desktop upgrades.' }
+          $FromVersionTrimmed = ($env:REQUESTED_FROM_VERSION).Trim()
           $ReleaseTitle = if ($PackageChannel -eq 'test') { "PANGEA Desktop test $ResolvedVersion" } else { "PANGEA Desktop $ResolvedVersion" }
           "RELEASE_VERSION=$ResolvedVersion" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PANGEA_PACKAGE_CHANNEL=$PackageChannel" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "RELEASE_MODE=$env:RELEASE_MODE" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PATCH_FROM_VERSION=$FromVersionTrimmed" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "mode=$env:RELEASE_MODE" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "channel=$PackageChannel" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "version=$ResolvedVersion" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -202,12 +211,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          node scripts/build-historical-patches.mjs `
-            --target-version $env:RELEASE_VERSION `
-            --channel $env:PANGEA_PACKAGE_CHANNEL `
-            --private-key ./.pangea-keys/update-private.pem `
-            --mode $env:RELEASE_MODE `
-            --output-dir ./dist
+          $PatchArgs = @(
+            'scripts/build-historical-patches.mjs',
+            '--target-version', $env:RELEASE_VERSION,
+            '--channel', $env:PANGEA_PACKAGE_CHANNEL,
+            '--private-key', './.pangea-keys/update-private.pem',
+            '--mode', $env:RELEASE_MODE,
+            '--output-dir', './dist'
+          )
+          if (-not [string]::IsNullOrWhiteSpace($env:PATCH_FROM_VERSION)) {
+            $PatchArgs += @('--from-version', $env:PATCH_FROM_VERSION.Trim())
+          }
+          & node @PatchArgs
           if ($LASTEXITCODE -ne 0) { throw 'Historical patch generation or verification failed. See the patch report artifact; no release assets were published.' }
 
       - name: Upload historical patch report

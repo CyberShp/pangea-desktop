@@ -5,12 +5,19 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { verifyPackage, extractPackage, sha256 } from './release-package-trust.mjs'
-import { args, repository, paginate, gh, parseVersion, classifyRelease, fullName, patchName, assetPair, downloadPair, downloadAsset, uniqueReleases } from './historical-release-lib.mjs'
+import { args, repository, paginate, gh, parseVersion, olderVersion, isSupportedPatchBase, classifyRelease, fullName, patchName, assetPair, downloadPair, downloadAsset, uniqueReleases } from './historical-release-lib.mjs'
 
 const options = args()
 const version = options['target-version'], channel = options.channel, mode = options.mode
+const onlyFromVersion = (options['from-version'] ?? '').trim()
 if (!['build', 'backfill'].includes(mode)) throw new Error('--mode must be build or backfill')
 if (!parseVersion(version) || parseVersion(version).channel !== channel) throw new Error('Target version/channel mismatch')
+if (onlyFromVersion) {
+  const parsedFrom = parseVersion(onlyFromVersion)
+  if (!parsedFrom || parsedFrom.channel !== channel || !isSupportedPatchBase(onlyFromVersion) || !olderVersion(onlyFromVersion, version)) {
+    throw new Error(`--from-version ${onlyFromVersion} must be an older supported ${channel} baseline (>= 3.0.4) below ${version}`)
+  }
+}
 if (!options['private-key']) throw new Error('--private-key is required')
 const repo = repository()
 const output = path.resolve(options['output-dir'] ?? 'dist')
@@ -19,7 +26,7 @@ const key = createPrivateKey({ key: await readFile(options['private-key']), pass
 const publicKey = createPublicKey(key)
 const scratch = await mkdtemp(path.join(os.tmpdir(), 'pangea-history-'))
 await mkdir(output, { recursive: true })
-const report = { schema_version: 1, target: version, channel, platform: 'windows', arch: 'x64', mode, complete: false, discovery_complete: false, bases: [] }
+const report = { schema_version: 1, target: version, channel, platform: 'windows', arch: 'x64', mode, ...(onlyFromVersion ? { requested_from_version: onlyFromVersion } : {}), complete: false, discovery_complete: false, bases: [] }
 let reportPath
 async function saveReport(final = false) {
   const bytes = `${JSON.stringify(report, null, 2)}\n`
@@ -35,11 +42,14 @@ try {
   // Offset pagination can repeat a release when another job publishes between pages.
   const releases = uniqueReleases(discovered)
   report.bases = releases.map(release => {
-    const classification = classifyRelease(release, version, channel)
+    const classification = classifyRelease(release, version, channel, { onlyFromVersion })
     return { release_id: release.id, tag: release.tag_name, eligible: classification.status === 'pending', ...classification }
   })
   report.discovery_complete = true
   await saveReport()
+  if (onlyFromVersion && !report.bases.some(row => row.version === onlyFromVersion && row.eligible)) {
+    throw new Error(`Requested --from-version ${onlyFromVersion} was not found as an eligible published release`)
+  }
   const targetRelease = releases.find(release => release.tag_name === `v${version}`)
   let targetDirectory
   let targetArchive
@@ -109,6 +119,9 @@ try {
     }
   }
   report.complete = report.bases.filter(row => row.eligible).every(row => row.status === 'verified')
+  if (onlyFromVersion && !report.bases.some(row => row.version === onlyFromVersion && row.status === 'verified')) {
+    throw new Error(`Requested --from-version ${onlyFromVersion} did not produce a verified patch`)
+  }
   if (report.bases.some(row => row.status === 'failed')) process.exitCode = 1
 } catch (error) {
   report.error = error.message; process.exitCode = 1

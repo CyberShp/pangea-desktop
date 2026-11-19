@@ -45,7 +45,7 @@ export function assertUpgradeableTarget(version) {
   if (!parseVersion(version) || !isSupportedPatchBase(version)) throw new Error(`Target ${version} is below the supported Desktop upgrade baseline ${MINIMUM_PATCH_BASE_VERSION}`)
   return version
 }
-export function classifyRelease(release, target, channel) {
+export function classifyRelease(release, target, channel, { onlyFromVersion = '' } = {}) {
   const version = release.tag_name?.replace(/^v/, '')
   if (!release.tag_name?.startsWith('v')) return { version, status: 'unsupported', reason: 'noncanonical release tag (expected v<version>)' }
   if (release.draft) return { version, status: 'unsupported', reason: 'draft release' }
@@ -54,6 +54,7 @@ export function classifyRelease(release, target, channel) {
   if (!isSupportedPatchBase(version)) return { version, status: 'unsupported', reason: `below minimum supported patch baseline ${MINIMUM_PATCH_BASE_VERSION}; older upgrade paths are retired` }
   if (parsed.channel !== channel) return { version, status: 'unsupported', reason: 'different channel' }
   if (!olderVersion(version, target)) return { version, status: 'unsupported', reason: 'not older than target' }
+  if (onlyFromVersion && version !== onlyFromVersion) return { version, status: 'unsupported', reason: `excluded by --from-version ${onlyFromVersion}` }
   return { version, status: 'pending' }
 }
 export const fullName = (version) => `pangea-desktop-${version}-windows-x64-portable.zip`
