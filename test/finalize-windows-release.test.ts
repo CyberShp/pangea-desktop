@@ -15,12 +15,12 @@ afterEach(async () => {
 
 describe('signed portable Windows package', () => {
   it('uses one ZIP for extraction and in-app package import', async () => {
-    const packageVersion = process.env.RELEASE_VERSION ?? '3.0.5'
+    const packageVersion = process.env.RELEASE_VERSION ?? '3.0.7'
     const packageChannel = process.env.PANGEA_PACKAGE_CHANNEL ??
       (packageVersion.includes('-test.') ? 'test' : 'stable')
     const currentVersion = packageChannel === 'test'
-      ? '3.0.4-test.0.0000000'
-      : '3.0.4'
+      ? '3.0.6-test.0.0000000'
+      : '3.0.6'
     const root = await mkdtemp(path.join(tmpdir(), 'pangea-portable-package-'))
     temporaryRoots.push(root)
     const appDirectory = path.join(root, 'win-unpacked')
@@ -63,7 +63,7 @@ describe('signed portable Windows package', () => {
     ], { encoding: 'utf8' })
     expect(packaged.status, packaged.stderr).toBe(0)
     const discovery = JSON.parse(await readFile(path.join(root, 'pangea-desktop-update.json'), 'utf8'))
-    expect(discovery.minimum_source_version).toBe('3.0.4')
+    expect(discovery.minimum_source_version).toBe('3.0.6')
 
     let lastProgress = 0
     const staged = await stagePortablePackage({

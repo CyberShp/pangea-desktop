@@ -51,7 +51,7 @@ try {
   await mkdir(dataRoot, { recursive: true })
   await mkdir(path.join(root, '.agents', 'pangea'), { recursive: true })
   await writeFile(path.join(root, '.agents', 'pangea', 'dsh.md'), 'compatibility fixture')
-  await sourceGit(source, ['init', '-b', 'personal-A'])
+  await sourceGit(source, ['init', '-b', 'main'])
   await sourceGit(source, ['config', '--local', 'core.longpaths', 'false'])
   // Keep the repository root below MAX_PATH; put depth in tracked file names.
   const relative = [...Array.from({ length: 9 }, (_, i) => `layer-${i}-${'x'.repeat(25)}`), 'target.c'].join('/')
@@ -74,6 +74,7 @@ try {
     { input: original, encoding: 'utf8', windowsHide: true, timeout: 30000 }).trim()
   await sourceGit(source, ['update-index', '--add', '--cacheinfo', '100644', deepBlob, relative])
   await sourceGit(source, ['commit', '-m', 'compatibility baseline'])
+  await sourceGit(source, ['branch', 'personal-A'])
   assert.ok((await sourceGit(source, ['ls-tree', '-r', '--name-only', 'HEAD'])).split('\n').includes(relative), 'deep fixture must exist in the committed tree')
   const base = await sourceGit(source, ['rev-parse', 'HEAD'])
   await sourceGit(root, ['clone', '--bare', '--', source, remote])
@@ -206,7 +207,7 @@ try {
     throw new Error('HTTP task did not reach terminal state')
   }
   await request('repositories', { source_path: source, repository_name: 'target' })
-  await request('repositories', { action: 'configure-repository', repository_name: 'target', git_path: source, base_ref: 'personal-A', personal_branch: 'personal-A' })
+  await request('repositories', { action: 'configure-repository', repository_name: 'target', git_path: source, base_ref: 'main', personal_branch: 'personal-A' })
   const { defaults } = await request('fault-injection', {}, 'GET')
   assert.equal(defaults.repositories[0].comparison.changed_count, 0)
   assert.equal(defaults.repositories[0].comparison.eol_only_count, 212)
@@ -228,10 +229,27 @@ try {
   report.checks.push('HTTP generation failure remains visible; next generation recovers in a separate checkout')
   for (const [file, bytes] of frozen) assert.deepEqual(await readFile(path.join(snapshot, file)), bytes)
   assert.equal(await sourceGit(source, ['rev-parse', 'HEAD']), base)
-  assert.equal(await sourceGit(remote, ['for-each-ref', '--format=%(refname)', 'refs/heads/']), 'refs/heads/personal-A')
+  assert.equal(await sourceGit(remote, ['for-each-ref', '--format=%(refname)', 'refs/heads/']), 'refs/heads/main\nrefs/heads/personal-A')
   assert.equal(rawGit(source, ['config', '--local', '--get', 'core.longpaths']), 'false')
   assert.deepEqual(await readFile(gitconfig), configBefore)
   report.checks.push('snapshots, source HEAD, remote branches and Git config unchanged')
+  const startedBuild = await request('fault-injection', {
+    action: 'build',
+    items: [{ run_id: run.run_id, task_id: recovered.id }],
+    commit_config: { issue: 'DTS2026111111059', author: 'h00600350', reviewer: 'h00600350' },
+  })
+  let built = startedBuild.build
+  for (const until = Date.now() + 60000; ['composing', 'pushing'].includes(built.status); ) {
+    if (Date.now() >= until) throw new Error('HTTP build did not reach terminal state')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    ;({ build: built } = await request('fault-injection', { build_id: startedBuild.build.id, run_id: '' }, 'GET'))
+  }
+  assert.equal(built.status, 'pushed', built.error)
+  assert.equal(await sourceGit(source, ['rev-parse', 'HEAD']), base)
+  assert.equal(await sourceGit(source, ['rev-parse', 'refs/heads/personal-A']), base)
+  assert.notEqual(await sourceGit(remote, ['rev-parse', 'refs/heads/personal-A']), base)
+  assert.equal(rawGit(source, ['config', '--local', '--get', 'core.longpaths']), 'false')
+  report.checks.push('HTTP synthesis build pushes to remote personal branch while source checkout and local refs stay untouched')
   report.status = 'passed'
 } catch (error) {
   report.error = error.stack || String(error)

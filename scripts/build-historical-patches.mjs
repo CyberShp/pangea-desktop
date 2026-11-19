@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { verifyPackage, extractPackage, sha256 } from './release-package-trust.mjs'
-import { args, repository, paginate, gh, parseVersion, olderVersion, isSupportedPatchBase, classifyRelease, fullName, patchName, assetPair, downloadPair, downloadAsset, uniqueReleases } from './historical-release-lib.mjs'
+import { MINIMUM_PATCH_BASE_VERSION, args, repository, paginate, gh, parseVersion, olderVersion, isSupportedPatchBase, classifyRelease, fullName, patchName, assetPair, downloadPair, downloadAsset, uniqueReleases } from './historical-release-lib.mjs'
 
 const options = args()
 const version = options['target-version'], channel = options.channel, mode = options.mode
@@ -15,7 +15,7 @@ if (!parseVersion(version) || parseVersion(version).channel !== channel) throw n
 if (onlyFromVersion) {
   const parsedFrom = parseVersion(onlyFromVersion)
   if (!parsedFrom || parsedFrom.channel !== channel || !isSupportedPatchBase(onlyFromVersion) || !olderVersion(onlyFromVersion, version)) {
-    throw new Error(`--from-version ${onlyFromVersion} must be an older supported ${channel} baseline (>= 3.0.4) below ${version}`)
+    throw new Error(`--from-version ${onlyFromVersion} must be an older supported ${channel} baseline (>= ${MINIMUM_PATCH_BASE_VERSION}) below ${version}`)
   }
 }
 if (!options['private-key']) throw new Error('--private-key is required')
