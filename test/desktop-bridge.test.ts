@@ -34,6 +34,13 @@ function fakeIpc() {
 }
 
 describe('PANGEA Desktop renderer bridge', () => {
+  it('routes restart to the exact IPC channel and returns its result', async () => {
+    const ipc = fakeIpc()
+    const bridge = createDesktopBridge(ipc)
+    await expect(bridge.restartHarness()).resolves.toEqual({ ok: true })
+    expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith('harness:restart')
+  })
+
   it('routes settings actions to the portable update handlers', async () => {
     const ipc = fakeIpc()
     const bridge = createDesktopBridge(ipc)

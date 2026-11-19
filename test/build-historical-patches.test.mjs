@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, realpath, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -64,7 +64,8 @@ async function packageZip(destination, version, options = {}) {
 }
 
 async function harness(t, { targetVersion = '3.0.7', targetPublished = true, target = {}, bases = [{ version: '3.0.6' }] } = {}) {
-  const root = await mkdtemp(path.join(tmpdir(), 'pangea-history-integration-'))
+  // Canonicalize only the OS temp parent; package symlinks must still be rejected.
+  const root = await mkdtemp(path.join(await realpath(tmpdir()), 'pangea-history-integration-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const bin = path.join(root, 'bin')
   const output = path.join(root, 'output')
@@ -91,7 +92,7 @@ async function harness(t, { targetVersion = '3.0.7', targetPublished = true, tar
   await writeFile(path.join(bin, 'pwsh'), fakePwsh)
   await chmod(path.join(bin, 'gh'), 0o755)
   await chmod(path.join(bin, 'pwsh'), 0o755)
-  async function run({ mode = 'backfill', directory = output, failVerifier = false, fromVersion = '' } = {}) {
+  async function run({ mode = 'backfill', directory = output, failVerifier = false, fromVersion = '', tempDirectory } = {}) {
     await writeFile(configPath, JSON.stringify(config))
     const result = spawnSync(process.execPath, [
       script, '--mode', mode, '--target-version', targetVersion, '--channel', 'stable',
@@ -101,6 +102,7 @@ async function harness(t, { targetVersion = '3.0.7', targetPublished = true, tar
       encoding: 'utf8',
       env: {
         ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        ...(tempDirectory ? { TMPDIR: tempDirectory } : {}),
         GITHUB_REPOSITORY: 'fixture/project', GH_TOKEN: 'fixture-only-no-network',
         PANGEA_TEST_CONFIG: configPath, PANGEA_TEST_LOG: log,
         PANGEA_TEST_FAIL_VERIFIER: failVerifier ? '1' : '0'
@@ -138,6 +140,19 @@ async function inspectPatch(fixture, result, baseVersion = '3.0.6') {
   assert.equal(await readFile(`${patch}.sha256`, 'utf8'), `${await sha256(patch)}  ${name}\n`)
   return patch
 }
+
+test('uses a canonical private scratch directory when the OS temp parent is an alias', integration, async t => {
+  const fixture = await harness(t)
+  const temporary = path.join(fixture.root, 'temporary')
+  const alias = path.join(fixture.root, 'temporary-alias')
+  await mkdir(temporary)
+  await symlink(temporary, alias)
+  const result = await fixture.run({ tempDirectory: alias })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.report.complete, true)
+  await inspectPatch(fixture, result)
+  assert.deepEqual(await readdir(temporary), [], 'private scratch must be cleaned')
+})
 
 test('backfill downloads the immutable signed target and invokes the Windows verifier for a real generated patch', integration, async t => {
   const fixture = await harness(t)

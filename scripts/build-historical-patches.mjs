@@ -1,6 +1,6 @@
 import { createHash, createPrivateKey, createPublicKey } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { readFile, writeFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,7 +24,9 @@ const output = path.resolve(options['output-dir'] ?? 'dist')
 const scripts = path.dirname(fileURLToPath(import.meta.url))
 const key = createPrivateKey({ key: await readFile(options['private-key']), passphrase: process.env.PANGEA_UPDATE_KEY_PASSPHRASE })
 const publicKey = createPublicKey(key)
-const scratch = await mkdtemp(path.join(os.tmpdir(), 'pangea-history-'))
+// Resolve the OS temp alias before creating our own scratch directory. Do not
+// canonicalize package inputs: their symlink rejection remains a trust boundary.
+const scratch = await mkdtemp(path.join(await realpath(os.tmpdir()), 'pangea-history-'))
 await mkdir(output, { recursive: true })
 const report = { schema_version: 1, target: version, channel, platform: 'windows', arch: 'x64', mode, ...(onlyFromVersion ? { requested_from_version: onlyFromVersion } : {}), complete: false, discovery_complete: false, bases: [] }
 let reportPath

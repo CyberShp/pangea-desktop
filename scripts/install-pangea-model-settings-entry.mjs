@@ -442,8 +442,14 @@ function removeOfficialModelSetup(source) {
 }
 
 let source = await readFile(clientPath, 'utf8')
-if (source.includes('function pangeaModelProvider(entry)') && source.includes('pangea-model-conflict-state') && source.includes('pangea-model-advanced-provider-id')) process.exit(0)
 const before = source
+// Upgrade already installed views before the idempotent fast path.
+source = source.replace('children: allCandidatesPicked ? "取消全选" : "全选"',
+  'children: t(allCandidatesPicked ? "fetchDeselectAll" : "fetchSelectAll")')
+if (source.includes('function pangeaModelProvider(entry)') && source.includes('pangea-model-conflict-state') && source.includes('pangea-model-advanced-provider-id')) {
+  if (source !== before) await writeFile(clientPath, source, 'utf8')
+  process.exit(0)
+}
 source = installOverlay(source)
 source = source.replace('inset: 0, zIndex: 900, display: "grid"', 'inset: 0, zIndex: 20000, display: "grid"')
 source = source.replace('const onKeyDown = (event) => { if (event.key === "Escape") setOpen(false); };', `const onKeyDown = (event) => {

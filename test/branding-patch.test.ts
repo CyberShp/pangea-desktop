@@ -24,7 +24,7 @@ describe('DSH Desktop sidebar branding', () => {
     expect(main).toContain("height: '24px'")
   })
 
-  it('pairs the DSH logo with the original Harness wordmark in the expanded sidebar', async () => {
+  it('uses the combined brand image expanded and the compact mark collapsed', async () => {
     const patch = await readFile(
       patchPath('@deepseek-ai/dsh-client-ui-sidebar'),
       'utf8'
@@ -32,16 +32,14 @@ describe('DSH Desktop sidebar branding', () => {
 
     expect(patch).toContain('DshDesktopLogo')
     expect(patch).toContain('DshDesktopBrand')
-    expect(patch).toContain('BrandWordmark')
+    expect(patch).toContain('DshDesktopLogo, { height: 24 }')
+    expect(patch).toContain('compact ? "/dsh-desktop-logo-mark.png"')
     expect(patch).toContain('/dsh-desktop-logo-light.png')
     expect(patch).toContain('/dsh-desktop-logo-dark.png')
     expect(patch).toContain('brandWordmark')
-    expect(patch).toContain('gap:4px')
-    expect(patch).toContain('transform:translateX(-24px)')
     expect(patch).not.toContain('children: "DSH Desktop"')
     expect(patch).toContain('height = 18')
-    expect(patch).toContain('brandMark{width:27px;height:23.4px')
-    expect(patch).toMatch(/railFish,[\s\S]{0,80}height: 17/)
+    expect(patch).toMatch(/railFish,[\s\S]{0,80}height: 20/)
     expect(patch).toContain('.hHd-Xa_brand:hover')
     expect(patch).toContain('padding-top:32px')
     expect(patch).toContain('navigator.userAgent.includes("Macintosh")')

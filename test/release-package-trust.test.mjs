@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, realpath, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,7 +28,8 @@ async function dependencyAvailable(name) {
 }
 
 async function temporary(t) {
-  const root = await mkdtemp(path.join(tmpdir(), 'pangea-package-trust-'))
+  // Canonicalize only the OS temp parent; package symlinks must still be rejected.
+  const root = await mkdtemp(path.join(await realpath(tmpdir()), 'pangea-package-trust-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   return root
 }

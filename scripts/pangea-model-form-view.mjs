@@ -518,7 +518,7 @@ export function installModelCatalogView(source) {
     const candidateActions = 'className: ModelsSection_module_css_default["candidateActions"],\n\t\t\t\t\t\t\tchildren: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {';
     if (!body.includes(candidateActions)) throw new Error('Missing model candidate select-all action');
     const tableHead = `className: "pangea-model-candidate-table-head", children: [
-\t\t\t\t\t\t\t(0, react_jsx_runtime.jsxs)("span", { children: ["选择", (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", className: "pangea-model-candidate-select-all", onClick: toggleAllCandidates, children: allCandidatesPicked ? "取消全选" : "全选" })] }),
+\t\t\t\t\t\t\t(0, react_jsx_runtime.jsxs)("span", { children: ["选择", (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", className: "pangea-model-candidate-select-all", onClick: toggleAllCandidates, children: t(allCandidatesPicked ? "fetchDeselectAll" : "fetchSelectAll") })] }),
 \t\t\t\t\t\t\t(0, react_jsx_runtime.jsx)("span", { children: "模型 ID" }),
 \t\t\t\t\t\t\t(0, react_jsx_runtime.jsx)("span", { children: "状态" })
 \t\t\t\t\t\t]`;

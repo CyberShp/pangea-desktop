@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -14,7 +14,8 @@ afterEach(async () => {
 
 describe('portable patch generation', () => {
   it('rebuilds a target package from changed and deleted files', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'pangea-patch-generation-'))
+    // Canonicalize only the OS temp parent; package symlinks must still be rejected.
+    const root = await mkdtemp(path.join(await realpath(tmpdir()), 'pangea-patch-generation-'))
     roots.push(root)
     const base = path.join(root, 'base')
     const target = path.join(root, 'target')

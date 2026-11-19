@@ -310,6 +310,6 @@ describe('desktop plugin market installer', () => {
     expect(desktopPatch).toContain('name: dsh-desktop-market-installer')
     expect(desktopPatch).toContain('inject: [desktopProfiles]')
     expect(desktopPatch).toContain('allowRestart: false')
-    expect(preload).toContain("restartHarness: (): Promise<{ ok: boolean }>")
+    expect(preload).toContain("createDesktopBridge(ipcRenderer,")
   })
 })

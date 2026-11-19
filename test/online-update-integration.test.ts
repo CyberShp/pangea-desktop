@@ -2,7 +2,7 @@ import { ZipArchive } from 'archiver'
 import unzipper from 'unzipper'
 import { createHash, generateKeyPairSync } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, realpath, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -35,7 +35,8 @@ const prefix = 'fixture:'
 
 beforeAll(async () => {
   mocks.currentVersion = baseVersion
-  root = await mkdtemp(join(tmpdir(), 'online-integration-'))
+  // Canonicalize only the OS temp parent; package symlinks must still be rejected.
+  root = await mkdtemp(join(await realpath(tmpdir()), 'online-integration-'))
   const app = join(root, 'app')
   const resources = join(app, 'resources')
   await mkdir(join(resources, 'update'), { recursive: true })
