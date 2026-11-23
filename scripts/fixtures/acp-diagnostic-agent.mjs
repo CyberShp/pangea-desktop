@@ -9,13 +9,14 @@ const update = value => send({ method: 'session/update', params: { sessionId, up
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line)
   const reply = result => send({ id: request.id, result })
-  if (request.method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: { loadSession: mode.startsWith('resume') || mode === 'lifecycle-companion' }, agentInfo: { name: 'fixture', version: '1.0' } })
+  if (request.method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: { loadSession: mode.startsWith('resume') || mode === 'lifecycle-companion' || mode === 'mid-turn-stall-resume' }, agentInfo: { name: 'fixture', version: '1.0' } })
   if (request.method === 'session/new' && mode.startsWith('resume')) { process.stderr.write('UNEXPECTED_NEW_SESSION'); process.exit(4) }
   if (request.method === 'session/load') {
     if (mode === 'resume-missing') send({ id: request.id, error: { code: -32001, message: 'session not found' } })
-    else if (request.params.sessionId !== (mode === 'lifecycle-companion' ? 'remote-fixture' : 'original-remote')) send({ id: request.id, error: { code: -32001, message: 'wrong session' } })
+    else if (request.params.sessionId !== (mode === 'lifecycle-companion' || mode === 'mid-turn-stall-resume' ? 'remote-fixture' : 'original-remote')) send({ id: request.id, error: { code: -32001, message: 'wrong session' } })
     else {
       sessionId = request.params.sessionId
+      if (mode === 'mid-turn-stall-resume') promptCount = 1
       if (mode === 'lifecycle-companion') {
         promptCount = 1
         if (process.env.PANGEA_FIXTURE_CONTEXT === 'compacted') update({sessionUpdate:'usage_update',used:10000,size:196608})
@@ -41,6 +42,23 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (request.method !== 'session/prompt') return
   if (mode === 'hang') return
+  if (mode === 'mid-turn-crash-open-pipe') {
+    update({ sessionUpdate: 'tool_call', toolCallId: 'crash-tool', title: 'bash', kind: 'execute', status: 'in_progress', rawInput: {} })
+    // Grandchild inherits stdout pipe while root ACP agent crashes before replying to session/prompt
+    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3000)'], { stdio: ['ignore', 'inherit', 'ignore'], detached: true }).unref()
+    process.stderr.write('tool stream broken unexpectedly\n')
+    setTimeout(() => process.exit(2), 20)
+    return
+  }
+  if (mode === 'mid-turn-stall-resume') {
+    if (promptCount === 0) {
+      update({ sessionUpdate: 'tool_call', toolCallId: 'stall-tool', title: 'read', kind: 'read', status: 'in_progress', rawInput: {} })
+      return
+    }
+    writeFileSync(process.env.PANGEA_FIXTURE_OUTPUT, JSON.stringify({ summary: 'resumed delivery', edits: [{ repo_id: 'r', path: 'a.c', before: '0', after: '1' }] }))
+    reply({ stopReason: 'end_turn' })
+    return
+  }
   if (mode === 'connection-error') {
     send({ id: request.id, error: { code: -32000, message: 'Unable to connect: ConnectionRefused' } })
     return

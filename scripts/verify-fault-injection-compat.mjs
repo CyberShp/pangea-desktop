@@ -173,10 +173,17 @@ try {
     assert.ok(path.join(checkout, relative).length > 280)
     assert.equal(await injectionGit(checkout, ['branch', '--show-current']), '')
     report.paths = { checkoutLength: checkout.length, fileLength: path.join(checkout, relative).length }
-    return { points: [{ id: 'p', repo_id: 'target', path: relative, trigger_scope: { current_input: 'compatibility fixture current operation', excluded_inputs: ['historical input'] } }],
+    return {
+      delivery: {
+        mode: 'product_package',
+        build_requirement: '标准产品配置即可编入（正常 debug 与 hitest 精准通用）',
+        replace_files: [{ artifact: 'libtarget.a', kind: 'static_lib', source_files: [relative], build_evidence: 'CMakeLists.txt:1', post_replace_action: '替换组件静态库并使用 PANGEA 安全重链代理重链' }],
+        marker_strings: ['/* PANGEA_COMPAT_STUB */'],
+      },
+      points: [{ id: 'p', repo_id: 'target', path: relative, trigger_scope: { current_input: 'compatibility fixture current operation', excluded_inputs: ['historical input'] } }],
       profiles: [{ case_key: 'case/A', point_ids: ['p'], steps: [': deterministic compatibility fixture'],
         safety: { setup: [': isolated fixture'], negative_steps: [': fixture contract only; no business execution claimed'], negative_point_ids: ['p'], cleanup: [': owned by fixture finally'], cleanup_verify: [': verified by fixture after generation'] } }],
-      edits: [{ repo_id: 'target', path: relative, before: 'return 0;', after: 'return -1;' }] }
+      edits: [{ repo_id: 'target', path: relative, before: 'return 0;', after: '/* PANGEA_COMPAT_STUB */ return -1;' }] }
   } })
   server = createServer((req, res) => {
     const handler = req.url.startsWith('/api/pangea-companion/repositories')
@@ -216,9 +223,12 @@ try {
   const ready = await terminal(started.task.id)
   assert.equal(ready.status, 'ready', ready.error)
   assert.match(ready.repositories[0].diff, /return -1;/)
+  assert.equal(ready.result?.delivery?.replace_files?.[0]?.artifact, 'libtarget.a')
+  const switched = await request('fault-injection', { action: 'set-variant', task_id: ready.id, build_variant: 'hitest' })
+  assert.equal(switched.task.build_variant, 'hitest')
   assert.equal(await sourceGit(source, ['rev-parse', 'HEAD']), base)
   assert.equal(await readFile(path.join(source, relative), 'utf8'), original)
-  report.checks.push('HTTP import/configure/defaults/generate: preparing reaches ready with a deep-file diff and detached HEAD')
+  report.checks.push('HTTP import/configure/defaults/generate/set-variant: preparing reaches ready with v3 delivery replace_files, deep-file diff and detached HEAD')
   const failed = await terminal((await generate('fail')).task.id)
   assert.equal(failed.status, 'failed')
   assert.match(failed.error, /compatibility generator failure/)

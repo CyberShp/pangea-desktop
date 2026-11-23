@@ -18,6 +18,8 @@ for (const [mode, error] of [
   ['injection-invalid-json', /打桩生成结果不可读取.*JSON/],
   ['max_tokens', /打桩生成结束：max-tokens/],
   ['cancelled', /打桩生成结束：aborted/],
+  ['mid-turn-crash-open-pipe', /exitCode=2/],
+  ['mid-turn-stall-resume', null],
 ]) test(`ACP → injection delivery: ${mode}`, {
   skip: !companionRoot && 'Set PANGEA_TEST_COMPANION_ROOT to the pinned Companion plugin directory', timeout: 10000,
 }, async t => {
@@ -26,7 +28,7 @@ for (const [mode, error] of [
   const outputPath = path.join(cwd, 'result.json')
   await mkdir(path.join(cwd, '.agents/pangea'), { recursive: true })
   await writeFile(path.join(cwd, '.agents/pangea/dsh.md'), '# fixture')
-  const context = new Context(), events = []
+  const context = new Context(), events = [], workers = []
   let provider, worker, disposed = 0
   apply({ logger: { warn() {} }, subprocess: new LocalSubprocessRuntime(context),
     subagents: { registerProvider(value) { provider = value } } }, Config({
@@ -36,27 +38,34 @@ for (const [mode, error] of [
   }))
   const runtime = { agents: { get: () => ({ session: { header: { cwd } } }) }, subagents: {
     start: async (_, request) => {
-      worker = await provider.start({ ...request, onSessionEvent: value => events.push(value) })
+      worker = await provider.start({ ...request, onSessionEvent: value => { events.push(value); request.onSessionEvent?.(value) } })
+      workers.push(worker)
       const dispose = worker.dispose.bind(worker)
       worker.dispose = async () => { disposed++; await dispose() }
       return worker
     },
   } }
   try {
-    const generate = createInjectionGenerator(runtime, { resolveModel: async () => 'fixture/model', createSession: async () => 'parent' })
+    const budget = mode === 'mid-turn-stall-resume'
+      ? { stallDurationMs: 120, cancelGraceMs: 40, pollMs: 25, hardDurationMs: 5000 }
+      : {}
+    const generate = createInjectionGenerator(runtime, { resolveModel: async () => 'fixture/model', createSession: async () => 'parent', budget })
     const result = generate({ record: { id: 'task-fixture', provider_id: 'pangea-nga', agent_model: 'fixture/model' },
       cwd, scratchDirectory: cwd, outputPath, prompt: 'generate fixture result', signal: AbortSignal.any([t.signal, AbortSignal.timeout(7000)]), onStarted: async () => {} })
     if (error) await assert.rejects(result, error)
-    else assert.deepEqual(await result, { summary: 'fixture delivery', edits: [] })
-    assert.equal(disposed, 1)
-    assert.equal(worker.readDiagnostics().processExited, true)
+    else if (mode === 'mid-turn-stall-resume') {
+      assert.deepEqual(await result, { summary: 'resumed delivery', edits: [{ repo_id: 'r', path: 'a.c', before: '0', after: '1' }] })
+      assert.equal(workers.length, 2, 'must spawn resumed worker via session/load')
+    } else assert.deepEqual(await result, { summary: 'fixture delivery', edits: [] })
+    assert.equal(disposed, workers.length)
+    for (const w of workers) assert.equal(w.readDiagnostics().processExited, true)
     if (mode === 'connection-error') {
       assert.equal(events.find(event => event.type === 'turn_end').stop_reason, 'error')
       assert.match(worker.readDiagnostics().errorSummary, /ConnectionRefused/)
     }
     if (mode === 'silent-session-error') assert.equal(events.find(event => event.type === 'turn_end').protocol_stop_reason, 'end_turn')
   } finally {
-    await worker?.dispose()
+    for (const w of workers) await w?.dispose()
     await context.fiber.dispose()
     await rm(cwd, { recursive: true, force: true })
   }
