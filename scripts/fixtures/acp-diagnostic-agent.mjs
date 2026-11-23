@@ -45,7 +45,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (mode === 'mid-turn-crash-open-pipe') {
     update({ sessionUpdate: 'tool_call', toolCallId: 'crash-tool', title: 'bash', kind: 'execute', status: 'in_progress', rawInput: {} })
     // Grandchild inherits stdout pipe while root ACP agent crashes before replying to session/prompt
-    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3000)'], { stdio: ['ignore', 'inherit', 'ignore'], detached: true }).unref()
+    spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3000)'], { stdio: ['ignore', 'inherit', 'ignore'] }).unref()
     process.stderr.write('tool stream broken unexpectedly\n')
     setTimeout(() => process.exit(2), 20)
     return
