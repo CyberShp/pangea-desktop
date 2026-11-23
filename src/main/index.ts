@@ -14,7 +14,7 @@ import {
   type IpcMainInvokeEvent,
   type MessageBoxOptions
 } from 'electron'
-import { extractFailureCause, HarnessRuntime, resolveShellEnvironment } from './runtime/harness-runtime'
+import { extractFailureCause, HarnessRuntime, resolveShellEnvironmentAsync } from './runtime/harness-runtime'
 import { launchDisclaimedUtilityProcess } from './runtime/disclaimed-utility-process'
 import {
   installProfileDependenciesWithDsh,
@@ -949,7 +949,7 @@ async function showPluginRecovery(options?: {
           const removed = await removeProfilePluginCompletely(
             dshHome,
             plugin,
-            resolveShellEnvironment(),
+            await resolveShellEnvironmentAsync(),
             'plugin-recovery'
           )
           if (removed) {

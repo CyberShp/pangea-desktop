@@ -13,7 +13,9 @@ import {
   extractPluginFailureReferences,
   extractSlotConflictName,
   formatExitCode,
+  parseCapturedShellOutput,
   resolveShellEnvironment,
+  resolveShellEnvironmentAsync,
   updateReadyStability
 } from '../src/main/runtime/harness-runtime'
 import { canGrantWindowPermission, isTrustedAppUrl } from '../src/main/security-policy'
@@ -246,6 +248,21 @@ describe('shell environment resolution', () => {
     } else {
       expect(path).toContain('/usr/bin')
     }
+  })
+
+  it('strips profile banner stdout before __PANGEA_ENV_START__ and preserves multiline values', () => {
+    const raw = 'Welcome to zsh\nMOTD=ignored\n__PANGEA_ENV_START__\0FIRST_VAR=ok\0MULTI=line1\nline2\0BAD\nKEY=skip\0'
+    const parsed = parseCapturedShellOutput(raw, /\n/)
+    expect(parsed.FIRST_VAR).toBe('ok')
+    expect(parsed.MULTI).toBe('line1\nline2')
+    expect(parsed.MOTD).toBeUndefined()
+    expect(parsed['BAD\nKEY']).toBeUndefined()
+  })
+
+  it('resolves shell environment asynchronously without blocking', async () => {
+    const env = await resolveShellEnvironmentAsync()
+    expect(env).toBeDefined()
+    expect(env.PATH ?? env.Path).toBeTruthy()
   })
 })
 

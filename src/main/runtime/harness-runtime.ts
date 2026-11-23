@@ -1,4 +1,4 @@
-import { execFileSync, type SpawnOptionsWithoutStdio } from 'node:child_process'
+import { execFile, execFileSync, type SpawnOptionsWithoutStdio } from 'node:child_process'
 import type { EventEmitter } from 'node:events'
 import { createWriteStream, existsSync, mkdirSync, type WriteStream } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
@@ -52,6 +52,67 @@ export interface HarnessChildProcess extends EventEmitter {
  * The result is memoised for the process lifetime.
  */
 let resolvedShellEnvironment: NodeJS.ProcessEnv | undefined
+let pendingShellEnvironment: Promise<NodeJS.ProcessEnv> | undefined
+const ENV_START_MARKER = '__PANGEA_ENV_START__\0'
+
+function execFileText(file: string, args: string[], timeout: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { encoding: 'utf8', timeout, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+      if (error) reject(error)
+      else resolve(stdout ?? '')
+    })
+  })
+}
+
+export function parseCapturedShellOutput(output: string, fallbackSeparator: RegExp): NodeJS.ProcessEnv {
+  const markerIndex = output.lastIndexOf(ENV_START_MARKER)
+  if (markerIndex >= 0) {
+    return parseEnvOutput(output.slice(markerIndex + ENV_START_MARKER.length), /\0/)
+  }
+  return parseEnvOutput(output, output.includes('\0') ? /\0/ : fallbackSeparator)
+}
+
+export async function resolveShellEnvironmentAsync(): Promise<NodeJS.ProcessEnv> {
+  if (resolvedShellEnvironment !== undefined) return resolvedShellEnvironment
+  if (pendingShellEnvironment !== undefined) return pendingShellEnvironment
+  pendingShellEnvironment = (async () => {
+    try {
+      if (process.platform === 'win32') {
+        const output = await execFileText(
+          'powershell',
+          [
+            '-NoLogo',
+            '-NonInteractive',
+            '-OutputFormat', 'Text',
+            '-Command',
+            '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ' +
+            '. $PROFILE *>$null; [Console]::Out.Write("__PANGEA_ENV_START__`0"); ' +
+            'Get-ChildItem Env: | ForEach-Object { [Console]::Out.Write("$($_.Name)=$($_.Value)`0") }'
+          ],
+          15_000
+        )
+        resolvedShellEnvironment = withoutUndecodableValues(
+          parseCapturedShellOutput(output, /\r?\n/),
+          process.env
+        )
+      } else {
+        const shell = process.env.SHELL ?? '/bin/sh'
+        const output = await execFileText(
+          shell,
+          ['-l', '-i', '-c', 'printf "__PANGEA_ENV_START__\\0"; env -0 2>/dev/null || env'],
+          10_000
+        )
+        resolvedShellEnvironment = parseCapturedShellOutput(output, /\n/)
+      }
+    } catch {
+      resolvedShellEnvironment = process.env
+    } finally {
+      pendingShellEnvironment = undefined
+    }
+    return resolvedShellEnvironment
+  })()
+  return pendingShellEnvironment
+}
 
 export function resolveShellEnvironment(): NodeJS.ProcessEnv {
   if (resolvedShellEnvironment !== undefined) return resolvedShellEnvironment
@@ -151,7 +212,9 @@ function parseEnvOutput(output: string, lineSeparator: RegExp): NodeJS.ProcessEn
   for (const line of output.split(lineSeparator)) {
     const eq = line.indexOf('=')
     if (eq <= 0) continue
-    env[line.slice(0, eq)] = line.slice(eq + 1)
+    const key = line.slice(0, eq)
+    if (/[\r\n\0]/.test(key)) continue
+    env[key] = line.slice(eq + 1)
   }
   return env
 }
@@ -249,6 +312,8 @@ export class HarnessRuntime {
     stderr: ''
   }
 
+  private startGeneration = 0
+
   constructor(private readonly options: HarnessRuntimeOptions) {}
 
   snapshot(): RuntimeSnapshot {
@@ -263,6 +328,7 @@ export class HarnessRuntime {
 
   async start(launchDirectory: string, profile = 'web'): Promise<void> {
     await this.stop()
+    const generation = ++this.startGeneration
     this.logRemainders.stdout = ''
     this.logRemainders.stderr = ''
     this.launchDirectory = launchDirectory
@@ -287,9 +353,15 @@ export class HarnessRuntime {
 
     await mkdir(this.options.dshHome, { recursive: true })
     await mkdir(dirname(this.options.logPath), { recursive: true })
+    if (this.startGeneration !== generation) return
     this.logStream ??= createWriteStream(this.options.logPath, { flags: 'a' })
 
+    this.setState('starting', 'Starting DeepSeek Harness…')
+    const shellEnvironment = await resolveShellEnvironmentAsync()
+    if (this.startGeneration !== generation) return
+
     const port = await reservePort()
+    if (this.startGeneration !== generation) return
     const url = `http://127.0.0.1:${port}`
     const args = buildNodeArguments(
       this.options.nodeEntryPath,
@@ -305,13 +377,12 @@ export class HarnessRuntime {
     this.writeLog(`[desktop] launch directory ${launchDirectory}`)
     this.writeLog(`[desktop] profile ${profile}`)
     this.writeLog(`[desktop] endpoint ${url}`)
-    this.setState('starting', 'Starting DeepSeek Harness…')
 
     let child: HarnessChildProcess
     try {
       const environment = withAcpRuntimeEnvironment(
         this.options.dshHome,
-        resolveShellEnvironment(),
+        shellEnvironment,
         process.platform
       )
       child = this.options.launchProcess(
@@ -402,6 +473,7 @@ ${cause}`
   }
 
   async stop(): Promise<void> {
+    this.startGeneration++
     const child = this.child
     if (!child) {
       this.closeLog()
