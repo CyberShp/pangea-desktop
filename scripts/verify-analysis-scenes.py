@@ -163,7 +163,7 @@ class SceneAcceptance(unittest.TestCase):
                     self.assertEqual(task['scenario'], scenario)
                     if scenario == 'risk-analysis':
                         self.assertEqual(task['record_contracts'], scene_spec(scenario)['record_contracts'])
-                        self.assertIn('c_cpp_risk_methods.md', ' '.join(task['rubric_paths']))
+                        self.assertIn('c_cpp_risk_v2.md', ' '.join(task['rubric_paths']))
                     self.assertIn('scene_common_generation.md', ' '.join(task['rubric_paths']))
                     self.assertNotIn('behavior_test_generation.md', ' '.join(task['rubric_paths']))
                     unit_id = task['unit_id']
@@ -219,7 +219,7 @@ class SceneAcceptance(unittest.TestCase):
                             self.assertIn('scene_common_review.md', ' '.join(task['rubric_paths']))
                             if scenario == 'risk-analysis':
                                 self.assertIn('scene_risk_review.md', ' '.join(task['rubric_paths']))
-                                self.assertIn('c_cpp_risk_methods.md', ' '.join(task['rubric_paths']))
+                                self.assertIn('c_cpp_risk_v2.md', ' '.join(task['rubric_paths']))
                             binding = (str(data), 'scene-run', review['action_id'], 'reviewer-session')
                             if review.get('task_id'): self.assertEqual(review['task_id'], binding[-1])
                             bind_action(*binding)
@@ -371,9 +371,14 @@ class SceneAcceptance(unittest.TestCase):
                 action = next(a for a in read_json(run / 'progress.json')['actions'].values() if a['role'] == 'analysis')
                 binding = (str(data), 'scene-run', action['action_id'], 'worker')
                 bind_action(*binding)
-                text = json.dumps(task_open(*binding), ensure_ascii=False)
+                opened = task_open(*binding)
+                text = json.dumps(opened, ensure_ascii=False)
                 self.assertNotIn('unrelated-', text)
-                self.assertLess(len(text), 12000)
+                metadata = {key: value for key, value in opened.items() if key != 'analysis_startup'}
+                self.assertLess(len(json.dumps(metadata, ensure_ascii=False)), 12000)
+                startup = opened['analysis_startup']
+                self.assertEqual(startup['max_chars'], 24000)
+                self.assertLessEqual(len(json.dumps(startup, ensure_ascii=False, indent=2)), 24000)
                 lengths.append(len(text))
                 measurements.append({"files": count, "task_open_chars": len(text), "freeze_ms": freeze_ms})
         self.assertLess(abs(lengths[1] - lengths[0]), 100)
@@ -406,9 +411,14 @@ class SceneAcceptance(unittest.TestCase):
                 action = next(a for a in read_json(run / 'progress.json')['actions'].values() if a['role'] == 'analysis')
                 binding = (str(data), 'scene-run', action['action_id'], 'worker')
                 bind_action(*binding)
-                view = json.dumps(task_open(*binding), ensure_ascii=False)
+                opened_analysis = task_open(*binding)
+                view = json.dumps(opened_analysis, ensure_ascii=False)
                 self.assertNotIn('unrelated-', view)
-                self.assertLess(len(view), 12000)
+                analysis_metadata = {key: value for key, value in opened_analysis.items() if key != 'analysis_startup'}
+                self.assertLess(len(json.dumps(analysis_metadata, ensure_ascii=False)), 12000)
+                analysis_startup = opened_analysis['analysis_startup']
+                self.assertEqual(analysis_startup['max_chars'], 24000)
+                self.assertLessEqual(len(json.dumps(analysis_startup, ensure_ascii=False, indent=2)), 24000)
                 measurements.append(len(view))
         self.assertLess(abs(measurements[1] - measurements[0]), 100)
         print('Risk compact task measurements:', measurements)
