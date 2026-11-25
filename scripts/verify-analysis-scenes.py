@@ -177,13 +177,16 @@ class SceneAcceptance(unittest.TestCase):
                     self.assertEqual(opened['task']['scenario'], scenario)
                     self.assertNotIn('all_scope_paths', opened['task'])
                     if scenario == 'risk-analysis':
-                        self.assertEqual(json.loads(input_read(*binding, input_id='unit_risk_signals')['text'])['unit_id'], unit_id)
-                    risk_check = {'format_version': 'behavior-check-v1', 'check_id': 'C1', 'lens': 'error_path',
+                        self.assertTrue((run / 'inputs/risk-topology-summary.json').is_file())
+                        self.assertTrue((run / 'inputs/dts-context.json').is_file())
+                    risk_check = {'format_version': 'behavior-check-v2', 'check_id': 'C1', 'track': 'error_rollback',
                         'object': 'connection readiness', 'sites': ['sample:src/tls.c:1'], 'hypothesis': 'not ready is rejected',
                         'conclusion': 'confirmed', 'reasoning': 'synthetic protocol fixture; no semantic claim',
                         'evidence_quotes': [{'ref': 'sample:src/tls.c:1', 'snippet': 'if (!ready) return -1;'}], 'risk_ids': ['R1']}
-                    risk = {'format_version': 'behavior-risk-v2', 'risk_id': 'R1', 'title': '合成协议记录',
-                        'trigger': 'fixture', 'system_result': 'fixture', 'external_observation': 'fixture',
+                    risk = {'format_version': 'behavior-risk-v3', 'risk_id': 'R1', 'track': 'error_rollback',
+                        'verification_status': 'static_proven', 'severity': 'Medium', 'title': '合成协议记录',
+                        'trigger': 'fixture', 'interleaving_or_path': ['L1: if (!ready) return -1;'],
+                        'system_result': 'fixture', 'external_observation': 'fixture',
                         'exclusion_condition': 'fixture', 'source_evidence': ['sample:src/tls.c:1'],
                         'evidence_quotes': [{'ref': 'sample:src/tls.c:1', 'snippet': 'if (!ready) return -1;'}]}
                     saved = result_write(*binding, expected_revision=0, records=[
@@ -310,7 +313,7 @@ class SceneAcceptance(unittest.TestCase):
                         self.assertIn('风险检查账本', report)
                         self.assertIn('```c', report)
                         self.assertNotIn('目标 ≥70%', report)
-                        signals_before = {p: p.read_bytes() for p in (run / 'inputs/risk-signals').glob('*.json')}
+                        signals_before = {p: p.read_bytes() for p in (run / 'inputs/risk-topology-summary.json', run / 'inputs/dts-context.json') if p.is_file()}
                     if scenario in {'branch-analysis', 'coverage-analysis'}:
                         self.assertNotIn('## 风险依据', report)
                         self.assertIn('本次未开展风险分析', report)
@@ -322,6 +325,7 @@ class SceneAcceptance(unittest.TestCase):
                     self.assertEqual((run / 'report.md').read_text(encoding='utf-8'), report)
                     self.assertEqual((run / 'inputs/analysis-scene.json').read_bytes(), frozen)
                     if scenario == 'risk-analysis':
+                        self.assertTrue(signals_before)
                         self.assertEqual({p: p.read_bytes() for p in signals_before}, signals_before)
 
     def test_coverage_missing_and_valid_empty_are_distinct(self):
