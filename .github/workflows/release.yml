@@ -1,5 +1,5 @@
 name: Build Windows package
-run-name: PANGEA Desktop ${{ inputs.mode || 'build' }} ${{ inputs.channel || 'test' }} ${{ inputs.version || '3.0.8' }}
+run-name: PANGEA Desktop ${{ inputs.mode || 'build' }} ${{ inputs.channel || 'test' }} ${{ inputs.version || '3.0.10' }}
 
 on:
   push:
@@ -30,7 +30,7 @@ on:
       version:
         description: Build mode uses a base SemVer; backfill requires the exact existing target version
         required: true
-        default: 3.0.8
+        default: 3.0.10
         type: string
       from_version:
         description: Optional exact base version for single-baseline patch generation (empty builds all supported bases)
@@ -71,7 +71,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_VERSION: ${{ inputs.version || '3.0.8' }}
+          REQUESTED_VERSION: ${{ inputs.version || '3.0.10' }}
         run: |
           node scripts/assert-release-version-available.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Release preflight failed before building. See the version or API error above.' }
@@ -82,7 +82,7 @@ jobs:
         env:
           RELEASE_MODE: ${{ inputs.mode || 'build' }}
           BUILD_CHANNEL: ${{ inputs.channel || 'test' }}
-          REQUESTED_VERSION: ${{ inputs.version || '3.0.8' }}
+          REQUESTED_VERSION: ${{ inputs.version || '3.0.10' }}
           REQUESTED_FROM_VERSION: ${{ inputs.from_version || '' }}
         run: |
           $StableVersionPattern = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
