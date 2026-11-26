@@ -1,7 +1,8 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
   [string]$DshPangeaSource,
   [string]$PangeaAgentSource,
+  [string]$PangeaVerifySource,
   [string]$UpdatePrivateKeyPath,
   [ValidateSet('stable', 'test')]
   [string]$PackageChannel,
@@ -185,13 +186,20 @@ if ($ResolveComponentBranches) {
   $Components.desktopBase.commit = $DesktopBaseCommit
   $Components.dshPangea.commit = Resolve-BranchCommit 'dsh-pangea' $Components.dshPangea.repository $Components.dshPangea.branch
   $Components.pangeaAgent.commit = Resolve-BranchCommit 'pangea-agent' $Components.pangeaAgent.repository $Components.pangeaAgent.branch
+  if ($Components.PSObject.Properties['pangeaVerify']) {
+    $Components.pangeaVerify.commit = Resolve-BranchCommit 'pangea-verify' $Components.pangeaVerify.repository $Components.pangeaVerify.branch
+  }
 }
 
 if ($RequireCurrentComponentHeads) {
-  foreach ($Component in @(
+  $HeadChecks = @(
     [ordered]@{ name = 'dsh-pangea'; value = $Components.dshPangea },
     [ordered]@{ name = 'pangea-agent'; value = $Components.pangeaAgent }
-  )) {
+  )
+  if ($Components.PSObject.Properties['pangeaVerify']) {
+    $HeadChecks += [ordered]@{ name = 'pangea-verify'; value = $Components.pangeaVerify }
+  }
+  foreach ($Component in $HeadChecks) {
     $BranchCommit = Resolve-BranchCommit $Component.name $Component.value.repository $Component.value.branch
     if ($BranchCommit -ne $Component.value.commit) {
       throw "$($Component.name) lock is stale: $($Component.value.branch) is $BranchCommit, but pangea.components.json pins $($Component.value.commit)."
@@ -213,6 +221,10 @@ if (-not $BundledNodeFile -or $BundledNodeFile.Length -lt 1MB) {
 Write-Host 'Materializing locked PANGEA components...'
 $DshPangea = Get-ExactSource 'dsh-pangea' $Components.dshPangea.repository $Components.dshPangea.commit $DshPangeaSource
 $PangeaAgent = Get-ExactSource 'pangea-agent' $Components.pangeaAgent.repository $Components.pangeaAgent.commit $PangeaAgentSource
+$PangeaVerify = $null
+if ($Components.PSObject.Properties['pangeaVerify']) {
+  $PangeaVerify = Get-ExactSource 'pangea-verify' $Components.pangeaVerify.repository $Components.pangeaVerify.commit $PangeaVerifySource
+}
 $LockedComposition = Join-Path $DshPangea 'plugins/dsh-pangea/cordis.patch.yml'
 $ProductComposition = Join-Path $ProjectRoot 'packages/dsh-pangea-product/cordis.patch.yml'
 Invoke-Checked 'node' @(
@@ -227,6 +239,14 @@ foreach ($Plugin in @('dsh-pangea', 'dsh-pangea-companion', 'dsh-pangea-asset-ca
   $Destination = Join-Path $PluginRoot $Plugin
   Copy-Item $Source $Destination -Recurse -Force
   Invoke-Checked 'node' @((Join-Path $Destination 'scripts/build-client.mjs'))
+}
+if ($PangeaVerify) {
+  $VerifyVendor = Join-Path $PluginRoot 'dsh-pangea-companion/vendor/pangea-verify'
+  New-Item $VerifyVendor -ItemType Directory -Force | Out-Null
+  foreach ($VerifyDir in @('bin', 'src', 'skills', 'tools')) {
+    Copy-Item (Join-Path $PangeaVerify $VerifyDir) (Join-Path $VerifyVendor $VerifyDir) -Recurse -Force
+  }
+  Copy-Item (Join-Path $PangeaVerify 'package.json') (Join-Path $VerifyVendor 'package.json') -Force
 }
 
 Write-Host 'Building the embedded PANGEA Python runtime...'
@@ -350,6 +370,7 @@ $Manifest = [ordered]@{
     }
     dsh_pangea = [ordered]@{ branch = $Components.dshPangea.branch; commit = $Components.dshPangea.commit }
     pangea_agent = [ordered]@{ branch = $Components.pangeaAgent.branch; commit = $Components.pangeaAgent.commit }
+    pangea_verify = if ($Components.PSObject.Properties['pangeaVerify']) { [ordered]@{ branch = $Components.pangeaVerify.branch; commit = $Components.pangeaVerify.commit } } else { $null }
     python = [ordered]@{ version = $Components.python.version; sha256 = $Components.python.sha256; requirements_sha256 = $Components.pythonRequirements.sha256 }
   }
 }

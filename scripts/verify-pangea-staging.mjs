@@ -70,6 +70,20 @@ if (manifest.components?.dsh_pangea?.commit !== components.dshPangea.commit) {
 if (manifest.components?.pangea_agent?.commit !== components.pangeaAgent.commit) {
   throw new Error('PANGEA staging manifest does not match the locked pangea-agent commit.')
 }
+if (components.pangeaVerify) {
+  if (manifest.components?.pangea_verify?.commit !== components.pangeaVerify.commit) {
+    throw new Error('PANGEA staging manifest does not match the locked pangea-verify commit.')
+  }
+  for (const verifyFile of [
+    '.pangea-build/plugins/dsh-pangea-companion/vendor/pangea-verify/src/index.js',
+    '.pangea-build/plugins/dsh-pangea-companion/vendor/pangea-verify/bin/cli.mjs',
+    '.pangea-build/plugins/dsh-pangea-companion/vendor/pangea-verify/skills/live-test-expert/SKILL.md',
+  ]) {
+    if (!existsSync(path.join(root, verifyFile))) {
+      throw new Error(`Staged vendor pangea-verify file missing: ${verifyFile}`)
+    }
+  }
+}
 if (!companion.exports?.['./report-policy']) {
   throw new Error('The staged companion does not export the source-first report policy.')
 }
