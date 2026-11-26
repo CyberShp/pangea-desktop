@@ -19,19 +19,19 @@ describe('portable patch generation', () => {
     roots.push(root)
     const base = path.join(root, 'base')
     const target = path.join(root, 'target')
-    const output = path.join(root, 'pangea-desktop-3.0.10-from-3.0.9-windows-x64.patch.zip')
+    const output = path.join(root, 'pangea-desktop-3.0.11-from-3.0.10-windows-x64.patch.zip')
     const keyPair = generateKeyPairSync('ed25519')
     const privateKey = keyPair.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
     const publicKey = keyPair.publicKey.export({ format: 'pem', type: 'spki' }).toString()
     const privateKeyPath = path.join(root, 'update-private.pem')
     await writeFile(privateKeyPath, privateKey)
 
-    await writePackage(base, '3.0.9', publicKey, {
+    await writePackage(base, '3.0.10', publicKey, {
       'PANGEA Desktop.exe': 'old executable',
       'resources/app/old.js': 'old file',
       'resources/app/unchanged.js': 'keep me'
     }, keyPair.privateKey)
-    await writePackage(target, '3.0.10', publicKey, {
+    await writePackage(target, '3.0.11', publicKey, {
       'PANGEA Desktop.exe': 'new executable',
       'resources/app/new.js': 'new file',
       'resources/app/unchanged.js': 'keep me'
@@ -42,8 +42,8 @@ describe('portable patch generation', () => {
       '--base-dir', base,
       '--target-dir', target,
       '--private-key', privateKeyPath,
-      '--from-version', '3.0.9',
-      '--to-version', '3.0.10',
+      '--from-version', '3.0.10',
+      '--to-version', '3.0.11',
       '--channel', 'stable',
       '--output', output
     ], { encoding: 'utf8' })
@@ -53,30 +53,30 @@ describe('portable patch generation', () => {
       sourcePath: output,
       destinationPath: path.join(root, 'import', 'patch.zip'),
       publicKeyPem: publicKey,
-      currentVersion: '3.0.9'
+      currentVersion: '3.0.10'
     })
-    expect(staged.manifest.from_version).toBe('3.0.9')
-    expect(staged.manifest.to_version).toBe('3.0.10')
+    expect(staged.manifest.from_version).toBe('3.0.10')
+    expect(staged.manifest.to_version).toBe('3.0.11')
     expect(staged.manifest.files.map((file) => file.path)).toEqual([
       'PANGEA Desktop.exe',
       'resources/app/new.js',
       'resources/pangea-manifest.json'
     ])
     expect(staged.manifest.deletes).toEqual(['resources/app/old.js'])
-    expect(staged.targetManifest.version).toBe('3.0.10')
+    expect(staged.targetManifest.version).toBe('3.0.11')
 
     await expect(stagePortablePatch({
       sourcePath: output,
       destinationPath: path.join(root, 'import', 'mismatched-patch.zip'),
       publicKeyPem: publicKey,
-      currentVersion: '3.0.11'
+      currentVersion: '3.0.12'
     })).rejects.toBeInstanceOf(PortablePatchBaseVersionMismatch)
     await expect(stagePortablePatch({
       sourcePath: output,
       destinationPath: path.join(root, 'import', 'mismatched-patch-details.zip'),
       publicKeyPem: publicKey,
-      currentVersion: '3.0.11'
-    })).rejects.toMatchObject({ baseVersion: '3.0.9', currentVersion: '3.0.11', availableVersion: '3.0.10' })
+      currentVersion: '3.0.12'
+    })).rejects.toMatchObject({ baseVersion: '3.0.10', currentVersion: '3.0.12', availableVersion: '3.0.11' })
   })
 })
 

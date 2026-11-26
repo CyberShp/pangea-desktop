@@ -226,7 +226,7 @@ jobs:
         if: inputs.build_unsigned == true
         shell: powershell
         run: |
-          $Version = "3.0.10-test.$env:GITHUB_RUN_NUMBER.$($env:GITHUB_SHA.Substring(0, 7))"
+          $Version = "3.0.11-test.$env:GITHUB_RUN_NUMBER.$($env:GITHUB_SHA.Substring(0, 7))"
           npm version $Version --no-git-tag-version --ignore-scripts
           if ($LASTEXITCODE -ne 0) { throw 'Could not set unsigned acceptance version.' }
           ./scripts/build-pangea-desktop.ps1 -SkipPackage -DshPangeaSource '.pangea-build/plugin-source' -PangeaAgentSource '.pangea-build/agent-source'

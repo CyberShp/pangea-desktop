@@ -12,8 +12,8 @@ function fixture() {
   const full = Buffer.from('full package fixture')
   const patch = Buffer.from('patch')
   const info = (name: string, bytes: Buffer) => ({ name, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') })
-  const manifest = { schema_version: 1, product: 'PANGEA Desktop', channel: 'stable', platform: 'win32', arch: 'x64', version: '3.0.10', minimum_source_version: '3.0.9', package: info('pangea-desktop-3.0.10-windows-x64-portable.zip', full) }
-  const index = { ...manifest, manifest_url: url('3.0.10/manifest'), signature_url: url('3.0.10/signature'), full_url: url('3.0.10/full.zip'), patches: [{ ...info('patch.zip', patch), from_version: '3.0.9', to_version: '3.0.10', url: url('3.0.10/patch.zip') }] }
+  const manifest = { schema_version: 1, product: 'PANGEA Desktop', channel: 'stable', platform: 'win32', arch: 'x64', version: '3.0.11', minimum_source_version: '3.0.10', package: info('pangea-desktop-3.0.11-windows-x64-portable.zip', full) }
+  const index = { ...manifest, manifest_url: url('3.0.11/manifest'), signature_url: url('3.0.11/signature'), full_url: url('3.0.11/full.zip'), patches: [{ ...info('patch.zip', patch), from_version: '3.0.10', to_version: '3.0.11', url: url('3.0.11/patch.zip') }] }
   const responses = new Map<string, () => Response>()
   const resign = () => {
     const bytes = Buffer.from(JSON.stringify(manifest))
@@ -30,8 +30,8 @@ function fixture() {
 }
 it('selects an exact smaller patch and streams query-addressed downloads', async () => {
   const f = fixture()
-  const update = (await f.client.check('3.0.9', pem))!
-  expect(update).toMatchObject({ packageType: 'patch', baseVersion: '3.0.9', version: '3.0.10' })
+  const update = (await f.client.check('3.0.10', pem))!
+  expect(update).toMatchObject({ packageType: 'patch', baseVersion: '3.0.10', version: '3.0.11' })
   expect(f.fetcher).toHaveBeenCalledTimes(3)
   const root = await mkdtemp(join(tmpdir(), 'intranet-'))
   try {
@@ -42,71 +42,71 @@ it('selects an exact smaller patch and streams query-addressed downloads', async
 it('selects full when no exact patch exists or patch is not smaller', async () => {
   const f = fixture()
   f.index.patches[0]!.from_version = '3.0.0'
-  expect(await f.client.check('3.0.9', pem)).toMatchObject({ packageType: 'full' })
-  f.index.patches[0]!.from_version = '3.0.9'; f.index.patches[0]!.size = 100
-  expect(await f.client.check('3.0.9', pem)).toMatchObject({ packageType: 'full' })
+  expect(await f.client.check('3.0.10', pem)).toMatchObject({ packageType: 'full' })
+  f.index.patches[0]!.from_version = '3.0.10'; f.index.patches[0]!.size = 100
+  expect(await f.client.check('3.0.10', pem)).toMatchObject({ packageType: 'full' })
 })
 it('enforces signed metadata, minimum source, channel and matching versions', async () => {
   const f = fixture()
-  expect(await f.client.check('3.0.10', pem)).toBeUndefined()
-  await expect(f.client.check('3.0.6', pem)).rejects.toThrow('最低支持')
-  f.index.version = '3.0.11'
-  await expect(f.client.check('3.0.9', pem)).rejects.toThrow('不一致')
-  f.index.version = '3.0.10'; f.index.channel = 'test'
-  await expect(f.client.check('3.0.9', pem)).rejects.toThrow('通道')
+  expect(await f.client.check('3.0.11', pem)).toBeUndefined()
+  await expect(f.client.check('3.0.9', pem)).rejects.toThrow('最低支持')
+  f.index.version = '3.0.12'
+  await expect(f.client.check('3.0.10', pem)).rejects.toThrow('不一致')
+  f.index.version = '3.0.11'; f.index.channel = 'test'
+  await expect(f.client.check('3.0.10', pem)).rejects.toThrow('通道')
   f.index.channel = 'stable'; f.responses.set(f.index.signature_url, () => new Response('invalid'))
-  await expect(f.client.check('3.0.9', pem)).rejects.toThrow('签名')
+  await expect(f.client.check('3.0.10', pem)).rejects.toThrow('签名')
 })
 it('rejects off-origin URLs and redirects without contacting GitHub', async () => {
   const f = fixture()
   f.responses.set(f.index.manifest_url, () => new Response(null, { status: 302, headers: { location: 'https://github.com/evil' } }))
-  await expect(f.client.check('3.0.9', pem)).rejects.toThrow('允许列表')
+  await expect(f.client.check('3.0.10', pem)).rejects.toThrow('允许列表')
   expect(f.fetcher.mock.calls.every(([url]) => url.startsWith('https://updates.example:8443/'))).toBe(true)
   f.index.manifest_url = 'https://other.example/manifest'
-  await expect(f.client.check('3.0.9', pem)).rejects.toThrow('同源')
+  await expect(f.client.check('3.0.10', pem)).rejects.toThrow('同源')
 })
 it('rejects duplicate baselines and invalid source settings', async () => {
   const f = fixture(); f.index.patches.push(f.index.patches[0]!)
-  await expect(f.client.check('3.0.9', pem)).rejects.toThrow('重复')
+  await expect(f.client.check('3.0.10', pem)).rejects.toThrow('重复')
   for (const indexUrl of ['', 'http://host/index', 'https://user:pass@host/index', 'https://host/index#x']) expect(() => new IntranetUpdateClient(vi.fn(), new AbortController().signal, indexUrl)).toThrow()
 })
 
 it('maps stable and test versions to separate built-in indexes', () => {
-  expect(new URL(intranetIndexUrl('3.0.10')).searchParams.get('path')).toBe('stable/latest.json')
+  expect(new URL(intranetIndexUrl('3.0.11')).searchParams.get('path')).toBe('stable/latest.json')
   expect(new URL(intranetIndexUrl('2.1.20-test.1.abcdef0')).searchParams.get('path')).toBe('beta/latest.json')
 })
 
 it('does not offer the installed or an older version', async () => {
   const f = fixture()
-  expect(await f.client.check('3.0.10', pem)).toBeUndefined()
   expect(await f.client.check('3.0.11', pem)).toBeUndefined()
+  expect(await f.client.check('3.0.12', pem)).toBeUndefined()
 })
 
 function testFixture() {
   const f = fixture()
-  const version = '3.0.10-test.10.abcdef0'
+  const version = '3.0.11-test.10.abcdef0'
   f.index.channel = f.manifest.channel = 'test'
   f.index.version = f.manifest.version = version
   f.manifest.package.name = `pangea-desktop-${version}-windows-x64-portable.zip`
-  f.index.patches[0]!.from_version = '3.0.10-test.9.abcdef0'
+  f.index.patches[0]!.from_version = '3.0.11-test.9.abcdef0'
   f.index.patches[0]!.to_version = version
   f.resign()
   return f
 }
 it('Desktop test upgrades compare numeric builds and require the exact patch source', async () => {
   const f = testFixture()
-  expect(await f.client.check('3.0.10-test.9.abcdef0', pem)).toMatchObject({ version: '3.0.10-test.10.abcdef0', packageType: 'patch' })
-  expect(await f.client.check('3.0.10-test.9.1234567', pem)).toMatchObject({ packageType: 'full' })
-  expect(await f.client.check('3.0.9-test.99.abcdef0', pem)).toMatchObject({ packageType: 'full' })
-  expect(await f.client.check('3.0.10-test.10.abcdef0', pem)).toBeUndefined()
-  expect(await f.client.check('3.0.10-test.11.abcdef0', pem)).toBeUndefined()
-  await expect(f.client.check('3.0.9', pem)).rejects.toThrow('通道')
-  await expect(f.client.check('3.0.6-test.999.abcdef0', pem)).rejects.toThrow('最低支持')
+  expect(await f.client.check('3.0.11-test.9.abcdef0', pem)).toMatchObject({ version: '3.0.11-test.10.abcdef0', packageType: 'patch' })
+  expect(await f.client.check('3.0.11-test.9.1234567', pem)).toMatchObject({ packageType: 'full' })
+  expect(await f.client.check('3.0.10-test.99.abcdef0', pem)).toMatchObject({ packageType: 'full' })
+  expect(await f.client.check('3.0.11-test.10.abcdef0', pem)).toBeUndefined()
+  expect(await f.client.check('3.0.11-test.11.abcdef0', pem)).toBeUndefined()
+  await expect(f.client.check('3.0.10', pem)).rejects.toThrow('通道')
+  await expect(f.client.check('3.0.9-test.999.abcdef0', pem)).rejects.toThrow('最低支持')
 })
 it('Desktop test full-package fallback downloads and verifies bytes', async () => {
   const f = testFixture()
   f.index.patches = []
-  const update = (await f.client.check('3.0.9-test.2.abcdef0', pem))!
+  const update = (await f.client.check('3.0.10-test.2.abcdef0', pem))!
   expect(update.packageType).toBe('full')
   const root = await mkdtemp(join(tmpdir(), 'test-upgrade-'))
   try {

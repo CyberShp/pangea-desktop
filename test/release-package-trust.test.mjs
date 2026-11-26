@@ -274,13 +274,13 @@ async function patchFixture(t) {
   const root = await temporary(t)
   const base = path.join(root, 'base')
   const target = path.join(root, 'target')
-  await writePackage(base, { version: '3.0.9', files: { 'resources/old.txt': 'delete me' } })
-  const result = await writePackage(target, { version: '3.0.10', compact: true, files: { 'PANGEA Desktop.exe': 'new executable', 'resources/new.txt': 'add me' } })
+  await writePackage(base, { version: '3.0.10', files: { 'resources/old.txt': 'delete me' } })
+  const result = await writePackage(target, { version: '3.0.11', compact: true, files: { 'PANGEA Desktop.exe': 'new executable', 'resources/new.txt': 'add me' } })
   const key = path.join(root, 'key.pem')
   await writeFile(key, keys.privateKey.export({ format: 'pem', type: 'pkcs8' }))
   const run = output => spawnSync(process.execPath, [
     patchScript, '--base-dir', base, '--target-dir', target, '--private-key', key,
-    '--from-version', '3.0.9', '--to-version', '3.0.10', '--channel', 'stable', '--output', output
+    '--from-version', '3.0.10', '--to-version', '3.0.11', '--channel', 'stable', '--output', output
   ], { encoding: 'utf8' })
   return { root, base, target, run, ...result }
 }
@@ -378,13 +378,13 @@ function crc32(bytes) {
 }
 
 test('direct patch generator rejects retired sources before reading package files', patchOptions, async () => {
-  for (const fromVersion of ['1.0.9', '2.0.0', '2.0.6', '2.0.6-test.99.abcdef0', '2.1.22', '2.1.22-test.99.abcdef0', '2.1.23', '2.1.23-test.1.abcdef0', '2.99.99', '2.99.99-test.99.abcdef0', '3.0.0', '3.0.0-test.1.abcdef0', '3.0.1', '3.0.2', '3.0.2-test.99.abcdef0', '3.0.3', '3.0.3-test.999.abcdef0', '3.0.4', '3.0.4-test.999.abcdef0', '3.0.5', '3.0.5-test.999.abcdef0', '3.0.6', '3.0.6-test.999.abcdef0', '3.0.7', '3.0.7-test.999.abcdef0', '3.0.8', '3.0.8-test.999.abcdef0']) {
+  for (const fromVersion of ['1.0.9', '2.0.0', '2.0.6', '2.0.6-test.99.abcdef0', '2.1.22', '2.1.22-test.99.abcdef0', '2.1.23', '2.1.23-test.1.abcdef0', '2.99.99', '2.99.99-test.99.abcdef0', '3.0.0', '3.0.0-test.1.abcdef0', '3.0.1', '3.0.2', '3.0.2-test.99.abcdef0', '3.0.3', '3.0.3-test.999.abcdef0', '3.0.4', '3.0.4-test.999.abcdef0', '3.0.5', '3.0.5-test.999.abcdef0', '3.0.6', '3.0.6-test.999.abcdef0', '3.0.7', '3.0.7-test.999.abcdef0', '3.0.8', '3.0.8-test.999.abcdef0', '3.0.9', '3.0.9-test.999.abcdef0']) {
     const result = spawnSync(process.execPath, [
       patchScript, '--base-dir', 'absent-base', '--target-dir', 'absent-target', '--private-key', 'absent-key',
-      '--from-version', fromVersion, '--to-version', '3.0.10', '--channel', 'stable', '--output', 'absent-output.zip'
+      '--from-version', fromVersion, '--to-version', '3.0.11', '--channel', 'stable', '--output', 'absent-output.zip'
     ], { encoding: 'utf8' })
     assert.notEqual(result.status, 0)
-    assert.match(result.stderr, /Patch base must be 3.0.9 or newer/)
+    assert.match(result.stderr, /Patch base must be 3.0.10 or newer/)
     assert.doesNotMatch(result.stderr, /ENOENT/)
   }
 })

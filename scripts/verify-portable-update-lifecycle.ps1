@@ -29,7 +29,7 @@ public class DesktopFixture {
     string root=AppDomain.CurrentDomain.BaseDirectory;
     string text=File.ReadAllText(Path.Combine(root,"resources/pangea-manifest.json"));
     string version=Regex.Match(text,"[0-9]+\\.[0-9]+\\.[0-9]+").Value;
-    if(version=="3.0.10") File.WriteAllText(Path.Combine(root,"launch-root/new-edit.txt"),"new version data");
+    if(version=="3.0.11") File.WriteAllText(Path.Combine(root,"launch-root/new-edit.txt"),"new version data");
     if(text.Contains("fail_start")) return 23;
     foreach(string arg in args) if(arg.StartsWith("--pangea-update-health=")) {
       string path=arg.Substring("--pangea-update-health=".Length);
@@ -55,7 +55,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $Install 'same.txt'),'same signed package bytes')
     [IO.File]::WriteAllText((Join-Path $Install 'launch-root/keep.txt'),'user data')
     [IO.File]::WriteAllText((Join-Path $Install 'local-skills/keep.txt'),'private skill')
-    Json (Join-Path $Install 'resources/pangea-manifest.json') @{product=@{version='3.0.9'}}
+    Json (Join-Path $Install 'resources/pangea-manifest.json') @{product=@{version='3.0.10'}}
     $Files=@((Entry $Install 'PANGEA Desktop.exe'),(Entry $Install 'same.txt'),(Entry $Install 'resources/pangea-manifest.json'))
     if($FileCount -gt 0) {
       $Inventory=[Collections.Generic.List[object]]::new();foreach($File in $Files){$Inventory.Add($File)}
@@ -72,18 +72,18 @@ try {
       try{$Block=New-Object byte[] 1048576;$Block[0]=19;$Left=$UserBytes;while($Left -gt 0){$Count=[int][Math]::Min($Left,$Block.Length);$Stream.Write($Block,0,$Count);$Left-=$Count};$Stream.Flush($true)}finally{$Stream.Dispose()}
       $DataHash=(Get-FileHash -LiteralPath (Join-Path $Install 'launch-root/repository.bin')).Hash
     }
-    Json (Join-Path $Install 'resources/update/pangea-package-manifest.json') @{version='3.0.9';channel='stable';files=$Files}
+    Json (Join-Path $Install 'resources/update/pangea-package-manifest.json') @{version='3.0.10';channel='stable';files=$Files}
     [IO.File]::WriteAllText((Join-Path $Install 'resources/update/pangea-package-manifest.json.sig'),'fixture-signature')
     [IO.Directory]::CreateDirectory((Join-Path $ArchiveRoot 'payload/resources'))|Out-Null
     [IO.Directory]::CreateDirectory((Join-Path $ArchiveRoot 'target/resources/update'))|Out-Null
-    $Product=@{product=@{version='3.0.10'}};if($Mode -eq 'failed-start'){$Product.fail_start=$true}
+    $Product=@{product=@{version='3.0.11'}};if($Mode -eq 'failed-start'){$Product.fail_start=$true}
     Json (Join-Path $ArchiveRoot 'payload/resources/pangea-manifest.json') $Product
     $Changed=Entry (Join-Path $ArchiveRoot 'payload') 'resources/pangea-manifest.json'
-    Json (Join-Path $ArchiveRoot 'target/resources/update/pangea-package-manifest.json') @{version='3.0.10';channel='stable';files=(@($Files|Where-Object {$_.path -ne 'resources/pangea-manifest.json'})+@($Changed))}
+    Json (Join-Path $ArchiveRoot 'target/resources/update/pangea-package-manifest.json') @{version='3.0.11';channel='stable';files=(@($Files|Where-Object {$_.path -ne 'resources/pangea-manifest.json'})+@($Changed))}
     [IO.File]::WriteAllText((Join-Path $ArchiveRoot 'target/resources/update/pangea-package-manifest.json.sig'),'fixture-signature')
-    Json (Join-Path $ArchiveRoot 'pangea-patch-manifest.json') @{schema_version=1;product='PANGEA Desktop';from_version='3.0.9';to_version='3.0.10';files=@($Changed)}
+    Json (Join-Path $ArchiveRoot 'pangea-patch-manifest.json') @{schema_version=1;product='PANGEA Desktop';from_version='3.0.10';to_version='3.0.11';files=@($Changed)}
     $Archive=Join-Path $Run 'patch.zip';[IO.Compression.ZipFile]::CreateFromDirectory($ArchiveRoot,$Archive)
-    $Plan=@{schema_version=2;install_root=$Install;package_path=$Archive;executable_name='PANGEA Desktop.exe';expected_version='3.0.10';expected_base_version='3.0.9';package_type='patch';package_channel='stable';expected_size=(Get-Item $Archive).Length;expected_sha256=(Get-FileHash $Archive).Hash.ToLowerInvariant();health_marker=(Join-Path $Run 'healthy.json');result_path=(Join-Path $Updates 'last-update-result.json');log_path=(Join-Path $Run 'update.log');parent_pid=0;startup_health_timeout_seconds=30;allow_owned_process_cleanup=$false}
+    $Plan=@{schema_version=2;install_root=$Install;package_path=$Archive;executable_name='PANGEA Desktop.exe';expected_version='3.0.11';expected_base_version='3.0.10';package_type='patch';package_channel='stable';expected_size=(Get-Item $Archive).Length;expected_sha256=(Get-FileHash $Archive).Hash.ToLowerInvariant();health_marker=(Join-Path $Run 'healthy.json');result_path=(Join-Path $Updates 'last-update-result.json');log_path=(Join-Path $Run 'update.log');parent_pid=0;startup_health_timeout_seconds=30;allow_owned_process_cleanup=$false}
     Json $PlanPath $Plan
     $Info=New-Object Diagnostics.ProcessStartInfo;$Info.FileName=Join-Path $PSHOME 'powershell.exe';$Info.Arguments='-NoProfile -ExecutionPolicy Bypass -File "'+$Helper+'" -PlanPath "'+$PlanPath+'"';$Info.UseShellExecute=$false;$Info.RedirectStandardError=$true
     $Timer=[Diagnostics.Stopwatch]::StartNew()
@@ -93,7 +93,7 @@ try {
       $Timer.Stop();$Report.supervisor_ms[$Mode]=$Timer.ElapsedMilliseconds;Write-Output ('SUPERVISOR '+$Mode+'='+$Timer.ElapsedMilliseconds+'ms')
       if(-not [IO.File]::Exists($Plan.result_path)){throw ('No supervisor result: '+$Errors.Result)}
       $Result=[IO.File]::ReadAllText($Plan.result_path)|ConvertFrom-Json
-      $ExpectedStatus=if($Mode -eq 'healthy'){'success'}else{'failed'};$ExpectedVersion=if($Mode -eq 'healthy'){'3.0.10'}else{'3.0.9'}
+      $ExpectedStatus=if($Mode -eq 'healthy'){'success'}else{'failed'};$ExpectedVersion=if($Mode -eq 'healthy'){'3.0.11'}else{'3.0.10'}
       if($Result.status -ne $ExpectedStatus -or ($Mode -eq 'failed-start' -and $Result.rollback -ne 'restored')){throw ($Result|ConvertTo-Json -Compress)}
       if((Get-PortableRootIdentity $Install).version -ne $ExpectedVersion){throw 'Supervisor selected wrong version'}
       foreach($Pair in @(@('launch-root/keep.txt','user data'),@('local-skills/keep.txt','private skill'),@('launch-root/new-edit.txt','new version data'))){if([IO.File]::ReadAllText((Join-Path $Install $Pair[0])) -ne $Pair[1]){throw 'Supervisor lost user bytes'}}

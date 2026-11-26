@@ -200,7 +200,7 @@ try {
 
   $Policy=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../build/portable-update-policy.json') -Raw | ConvertFrom-Json
   $Fixture=New-Fixture (Join-Path $TestRoot 'source-policy')
-  foreach ($Version in @('2.1.23','2.99.99','3.0.0','3.0.0-test.17.abcdef','3.0.2','3.0.2-test.17.abcdef','3.0.3','3.0.3-test.17.abcdef','3.0.4','3.0.4-test.17.abcdef','3.0.5','3.0.5-test.17.abcdef','3.0.6','3.0.6-test.17.abcdef','3.0.7','3.0.7-test.17.abcdef','3.0.8','3.0.8-test.17.abcdef','3.0.9','3.0.9-test.17.abcdef')) {
+  foreach ($Version in @('2.1.23','2.99.99','3.0.0','3.0.0-test.17.abcdef','3.0.2','3.0.2-test.17.abcdef','3.0.3','3.0.3-test.17.abcdef','3.0.4','3.0.4-test.17.abcdef','3.0.5','3.0.5-test.17.abcdef','3.0.6','3.0.6-test.17.abcdef','3.0.7','3.0.7-test.17.abcdef','3.0.8','3.0.8-test.17.abcdef','3.0.9','3.0.9-test.17.abcdef','3.0.10','3.0.10-test.17.abcdef')) {
     Write-FixtureVersion $Fixture.Install $Version 'original work'
     $Accepted=$true
     try { Assert-PortableUpgradeSourceVersion $Fixture.Install 'patch' $Version | Out-Null } catch { $Accepted=$false }

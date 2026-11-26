@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { readdir, readFile } from 'node:fs/promises'
 import { assertUpgradeableTarget } from '../scripts/historical-release-lib.mjs'
 test('Desktop stable and test build targets can themselves be upgraded', async () => {
-  for (const version of ['2.1.9', '2.99.99', '3.0.0', '3.0.0-test.999.abcdef0', '3.0.2', '3.0.2-test.999.abcdef0', '3.0.3', '3.0.3-test.999.abcdef0', '3.0.4', '3.0.4-test.999.abcdef0', '3.0.5', '3.0.5-test.999.abcdef0', '3.0.6', '3.0.6-test.999.abcdef0']) assert.throws(() => assertUpgradeableTarget(version), /baseline/)
-  for (const version of ['3.0.9', '3.0.9-test.1.abcdef0', '3.0.10', '3.0.10-test.1.abcdef0', '3.0.11', '3.0.11-test.1.abcdef0']) assert.equal(assertUpgradeableTarget(version), version)
+  for (const version of ['2.1.9', '2.99.99', '3.0.0', '3.0.0-test.999.abcdef0', '3.0.2', '3.0.2-test.999.abcdef0', '3.0.3', '3.0.3-test.999.abcdef0', '3.0.4', '3.0.4-test.999.abcdef0', '3.0.5', '3.0.5-test.999.abcdef0', '3.0.6', '3.0.6-test.999.abcdef0', '3.0.7', '3.0.7-test.999.abcdef0', '3.0.8', '3.0.8-test.999.abcdef0', '3.0.9', '3.0.9-test.999.abcdef0']) assert.throws(() => assertUpgradeableTarget(version), /baseline/)
+  for (const version of ['3.0.10', '3.0.10-test.1.abcdef0', '3.0.11', '3.0.11-test.1.abcdef0', '3.0.12', '3.0.12-test.1.abcdef0']) assert.equal(assertUpgradeableTarget(version), version)
   const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
   const version = /default: (\d+\.\d+\.\d+)/.exec(workflow)[1]
   assertUpgradeableTarget(version)
