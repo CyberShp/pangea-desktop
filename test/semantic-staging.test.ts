@@ -19,6 +19,7 @@ it('accepts matching staging metadata and rejects a stale Agent lock or missing 
     const manifest = { components: {
       dsh_pangea: { commit: components.dshPangea.commit },
       pangea_agent: { commit: components.pangeaAgent.commit },
+      pangea_verify: { commit: components.pangeaVerify.commit },
     } }
     await write('.pangea-build/manifest.json', JSON.stringify(manifest))
     await write('.pangea-build/plugins/dsh-pangea/package.json', '{"version":"fixture"}')
@@ -30,6 +31,9 @@ it('accepts matching staging metadata and rejects a stale Agent lock or missing 
     await write(runtime + 'src/pangea_agent/cli/adapter_api.py', '# source-first-v1 next_actions fixture\n')
     await write(runtime + '.agents/pangea/dsh.md', '# source-first-v1 fixture\n')
     for (const file of [
+      '.pangea-build/plugins/dsh-pangea-companion/vendor/pangea-verify/src/index.js',
+      '.pangea-build/plugins/dsh-pangea-companion/vendor/pangea-verify/bin/cli.mjs',
+      '.pangea-build/plugins/dsh-pangea-companion/vendor/pangea-verify/skills/live-test-expert/SKILL.md',
       runtime + 'docs/source-first-cli-worker.md',
       ...['planning', 'analysis', 'review'].flatMap(role =>
         ['.agents/pangea', '.opencode/agents'].map(directory => `${runtime}${directory}/${role}-worker.md`)),
