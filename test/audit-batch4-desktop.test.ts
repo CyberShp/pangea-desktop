@@ -48,6 +48,21 @@ describe('Audit Batch 4 regressions (#42, #43, #45)', () => {
           if (process.platform !== 'win32') {
             expect(afterPkgStat.mode & 0o777).toBe(0o444)
           }
+          // Omitting optional empty dependencies field on 0444 package.json must also preserve bytes, inode, and mode
+          await chmod(roPkg, 0o644)
+          const parsedNoDeps = JSON.parse(compactManifest)
+          delete parsedNoDeps.dependencies
+          const noDepsManifest = JSON.stringify(parsedNoDeps)
+          await writeFile(roPkg, noDepsManifest, 'utf8')
+          await chmod(roPkg, 0o444)
+          const beforeNoDepsStat = await stat(roPkg)
+          await ensurePangeaWebProfile(cleanRoot)
+          const afterNoDepsStat = await stat(roPkg)
+          expect(afterNoDepsStat.ino).toBe(beforeNoDepsStat.ino)
+          expect(await readFile(roPkg, 'utf8')).toBe(noDepsManifest)
+          if (process.platform !== 'win32') {
+            expect(afterNoDepsStat.mode & 0o777).toBe(0o444)
+          }
         } finally {
           await chmod(roPatch, 0o644)
           await chmod(roPkg, 0o644)
@@ -62,7 +77,7 @@ describe('Audit Batch 4 regressions (#42, #43, #45)', () => {
     }
   })
 
-  it('#43 forceStop timeout releases admission lock while blocking freeze and retry forceStop until unfinished cleanup settles', async () => {
+  it('#43 forceStop timeout and cleanup failures release admission for normal work while blocking normal freeze until retry succeeds', async () => {
     const admission = new UpdateAdmission(() => [], ['companion'])
     const gate: { resolve: (() => void) | null } = { resolve: null }
     let stopCalls = 0
@@ -117,6 +132,30 @@ describe('Audit Batch 4 regressions (#42, #43, #45)', () => {
     const ok = await admission.forceStop('audit-token-000004', { timeoutMs: 200 })
     expect(ok).toEqual({ ok: true, frozen: true, token: 'audit-token-000004' })
     expect(admission.release('audit-token-000004')).toEqual({ ok: true, frozen: false })
+
+    // Direct cleanupProcesses failure (and timeout-then-async-failure) must block freeze until retry succeeds
+    let cleanupAttempts = 0
+    admission.cleanupProcesses = async () => {
+      cleanupAttempts += 1
+      if (cleanupAttempts === 1) throw new Error('process tree kill failed')
+      if (cleanupAttempts === 2) {
+        await new Promise(r => setTimeout(r, 120))
+        throw new Error('late async cleanup failure')
+      }
+    }
+    await expect(admission.forceStop('audit-token-000005', { timeoutMs: 200 })).rejects.toThrow(/process tree kill failed/)
+    expect(() => admission.assertOpen()).not.toThrow()
+    expect(() => admission.freeze('audit-token-000006')).toThrow(/仍有运行、排队或收尾中的任务/)
+
+    await expect(admission.forceStop('audit-token-000007', { timeoutMs: 50 })).rejects.toThrow(/强制停止超时/)
+    await new Promise(r => setTimeout(r, 110))
+    expect(() => admission.freeze('audit-token-000008')).toThrow(/仍有运行、排队或收尾中的任务/)
+
+    const okAfterRetry = await admission.forceStop('audit-token-000009', { timeoutMs: 200 })
+    expect(okAfterRetry).toEqual({ ok: true, frozen: true, token: 'audit-token-000009' })
+    expect(admission.release('audit-token-000009')).toEqual({ ok: true, frozen: false })
+    expect(admission.freeze('audit-token-000010')).toEqual({ ok: true, frozen: true, token: 'audit-token-000010' })
+    expect(admission.release('audit-token-000010')).toEqual({ ok: true, frozen: false })
   })
 
   it('#45 parseCapturedShellOutput handles both NUL-delimited and newline-fallback env after ENV_START_MARKER', () => {

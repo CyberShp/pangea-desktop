@@ -85,14 +85,17 @@ export async function ensurePangeaWebProfile(dshHome: string): Promise<string> {
   let nextManifestText: string | null = null
   if (manifest) {
     let manifestChanged = manifestMissing
-    if (!manifest.dependencies || typeof manifest.dependencies !== 'object' || Array.isArray(manifest.dependencies)) {
-      manifest.dependencies = {}
-      manifestChanged = true
-    }
-    for (const bundle of LEGACY_PANGEA_BUNDLES) {
-      if (Object.hasOwn(manifest.dependencies, bundle)) {
-        delete manifest.dependencies[bundle]
+    if (manifest.dependencies !== undefined) {
+      if (!manifest.dependencies || typeof manifest.dependencies !== 'object' || Array.isArray(manifest.dependencies)) {
+        manifest.dependencies = {}
         manifestChanged = true
+      } else {
+        for (const bundle of LEGACY_PANGEA_BUNDLES) {
+          if (Object.hasOwn(manifest.dependencies, bundle)) {
+            delete manifest.dependencies[bundle]
+            manifestChanged = true
+          }
+        }
       }
     }
     if (!manifest.dsh || typeof manifest.dsh !== 'object' || Array.isArray(manifest.dsh)) {

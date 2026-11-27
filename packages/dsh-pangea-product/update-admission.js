@@ -22,6 +22,7 @@ export class UpdateAdmission {
     this.participants = new Map()
     this.stoppers = new Map()
     this.pendingStoppers = new Map()
+    this.failedStoppers = new Map()
     this.inFlight = 0
     this.token = null
   }
@@ -33,12 +34,22 @@ export class UpdateAdmission {
     busy.push(...this.checkBusy())
     for (const [id, check] of this.participants) if (check()) busy.push(id)
     for (const id of this.pendingStoppers.keys()) busy.push(id)
+    for (const id of this.failedStoppers.keys()) busy.push(id)
     return [...new Set(busy)]
   }
   _trackStopper(id, operation) {
     const existing = this.pendingStoppers.get(id)
     if (existing) return existing
-    const run = Promise.resolve().then(operation).finally(() => {
+    const run = Promise.resolve().then(operation).then(
+      value => {
+        this.failedStoppers.delete(id)
+        return value
+      },
+      error => {
+        this.failedStoppers.set(id, error?.message ?? String(error))
+        throw error
+      },
+    ).finally(() => {
       if (this.pendingStoppers.get(id) === run) this.pendingStoppers.delete(id)
     })
     this.pendingStoppers.set(id, run)
@@ -119,12 +130,16 @@ export class UpdateAdmission {
       if (errors.length) throw failure('PANGEA_UPDATE_BUSY', errors.map(result => result.reason?.message ?? String(result.reason)).join('；'))
       // Requests admitted before the freeze may still be unwinding. Never
       // hand off the installation while their writers are alive.
-      while (this.inFlight || this.checkBusy().length || [...this.participants.values()].some(check => check()) || this.pendingStoppers.size > 0) {
+      while (this.inFlight || this.checkBusy().length || [...this.participants.values()].some(check => check()) || this.pendingStoppers.size > 0
+        || [...this.failedStoppers.keys()].some(id => id !== 'processes')) {
         if (Date.now() >= deadline) throw failure('PANGEA_UPDATE_BUSY', '停止尚未确认，已保留升级包并解除阻塞，请重试强制停止。')
         await new Promise(resolve => setTimeout(resolve, Math.min(50, Math.max(1, remainingMs()))))
       }
       if (this.cleanupProcesses) {
         await raceDeadline(this._trackStopper('processes', () => this.cleanupProcesses()))
+      }
+      if (this.failedStoppers.size > 0) {
+        throw failure('PANGEA_UPDATE_BUSY', `仍有未清理完成的升级资源（${[...this.failedStoppers.keys()].join('、')}），请重试强制停止。`)
       }
       return { ok: true, frozen: true, token }
     } catch (error) {
@@ -142,6 +157,7 @@ export class UpdateAdmission {
       forcing: Boolean(this.forcing),
       busy: this._busyReasons(),
       pendingStoppers: [...this.pendingStoppers.keys()],
+      failedStoppers: Object.fromEntries(this.failedStoppers.entries()),
     }
   }
   release(token) {
