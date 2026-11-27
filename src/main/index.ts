@@ -1441,13 +1441,19 @@ async function bootstrap(): Promise<void> {
       ? (options as { purpose?: unknown }).purpose
       : undefined
     const coveragePicker = purpose === 'coverage'
+    const dtsFilePicker = purpose === 'dts-file'
     const repositoryPicker = purpose === 'repository'
+    const filePicker = coveragePicker || dtsFilePicker
     const result = await dialog.showOpenDialog(mainWindow, {
       title: harnessLocale() === 'zh'
-        ? coveragePicker ? '选择覆盖率文件' : repositoryPicker ? '选择源码仓库目录' : '选择工作区目录'
-        : coveragePicker ? 'Select Coverage File' : repositoryPicker ? 'Select Source Repository' : 'Select Workspace Directory',
-      properties: coveragePicker ? ['openFile'] : ['openDirectory'],
-      ...(coveragePicker ? { filters: [{ name: 'Coverage', extensions: ['json', 'csv', 'xlsx'] }] } : {})
+        ? coveragePicker ? '选择覆盖率文件' : dtsFilePicker ? '选择 DTS 离线文件' : repositoryPicker ? '选择源码仓库目录' : '选择工作区目录'
+        : coveragePicker ? 'Select Coverage File' : dtsFilePicker ? 'Select Offline DTS File' : repositoryPicker ? 'Select Source Repository' : 'Select Workspace Directory',
+      properties: filePicker ? ['openFile'] : ['openDirectory'],
+      ...(coveragePicker
+        ? { filters: [{ name: 'Coverage', extensions: ['json', 'csv', 'xlsx'] }] }
+        : dtsFilePicker
+          ? { filters: [{ name: 'DTS Offline Files', extensions: ['xlsx', 'csv', 'json', 'md', 'txt', 'diff', 'patch'] }] }
+          : {})
     })
     return result.canceled ? null : result.filePaths[0] ?? null
   })

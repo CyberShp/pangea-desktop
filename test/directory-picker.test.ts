@@ -4,7 +4,7 @@ import ts from 'typescript'
 import { patchPath } from './patch-path'
 
 describe('desktop Electron directory picker', () => {
-  it('restricts the sender and selects files only for coverage requests', async () => {
+  it('restricts the sender and selects files only for coverage and dts-file requests', async () => {
     const main = await readFile('src/main/index.ts', 'utf8')
     const start = main.indexOf("ipcMain.handle('directory-picker:open'")
     const end = main.indexOf("ipcMain.handle('mobile:open-pairing'", start)
@@ -17,12 +17,17 @@ describe('desktop Electron directory picker', () => {
     const dialog = { showOpenDialog: vi.fn().mockResolvedValue({ canceled: false, filePaths: ['/fixture'] }) }
     new Function('ipcMain', 'mainWindow', 'dialog', 'harnessLocale', script)(
       { handle: (_: string, fn: any) => { handler = fn } }, mainWindow, dialog, () => 'zh')
-    for (const purpose of [undefined, 'workspace', 'repository', 'coverage', 'unknown']) {
+    for (const purpose of [undefined, 'workspace', 'repository', 'asset', 'coverage', 'dts-file', 'unknown']) {
       await expect(handler(event, { purpose })).resolves.toBe('/fixture')
       expect(dialog.showOpenDialog).toHaveBeenLastCalledWith(mainWindow, expect.objectContaining({
-        properties: [purpose === 'coverage' ? 'openFile' : 'openDirectory']
+        properties: [purpose === 'coverage' || purpose === 'dts-file' ? 'openFile' : 'openDirectory']
       }))
     }
+    await expect(handler(event, { purpose: 'dts-file' })).resolves.toBe('/fixture')
+    expect(dialog.showOpenDialog).toHaveBeenLastCalledWith(mainWindow, expect.objectContaining({
+      properties: ['openFile'],
+      filters: [expect.objectContaining({ extensions: expect.arrayContaining(['xlsx', 'patch', 'diff', 'json', 'csv']) })]
+    }))
     dialog.showOpenDialog.mockClear()
     await expect(handler({ ...event, senderFrame: {} })).rejects.toThrow('only allowed')
     await expect(handler({ ...event, sender: {} })).rejects.toThrow('only allowed')
@@ -40,7 +45,7 @@ describe('desktop Electron directory picker', () => {
     expect(main).toContain("ipcMain.handle('directory-picker:open'")
     expect(main).toContain('event.senderFrame !== mainWindow.webContents.mainFrame')
     expect(main).toContain('dialog.showOpenDialog(mainWindow')
-    expect(main).toContain("properties: coveragePicker ? ['openFile'] : ['openDirectory']")
+    expect(main).toContain("properties: filePicker ? ['openFile'] : ['openDirectory']")
     expect(main).toContain("app.commandLine.appendSwitch('lang', harnessLocale() === 'zh' ? 'zh-CN' : 'en-US')")
   })
 
