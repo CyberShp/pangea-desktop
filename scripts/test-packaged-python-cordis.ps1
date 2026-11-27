@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param([Parameter(Mandatory = $true)][string]$PackageDirectory)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -15,7 +15,8 @@ foreach ($Required in @($Node, $Python, (Join-Path $Agent 'src/pangea_agent/cli/
 $Values = @{
   PANGEA_PYTHON = $Python; PANGEA_TEST_PYTHON = $Python
   PANGEA_AGENT_ROOT = $Agent; PANGEA_INTEGRATION_RUNTIME = $Agent
-  PANGEA_RUNTIME_ROOT = $Agent; PYTHONPATH = (Join-Path $Agent 'src')
+  PANGEA_RUNTIME_ROOT = $Agent; PANGEA_TEST_RUNTIME = $Agent
+  PANGEA_REQUIRE_ACP_INIT_PROBE = '1'; PYTHONPATH = (Join-Path $Agent 'src')
   PANGEA_TEST_APP_ROOT = $App; PANGEA_TEST_COMPANION_ROOT = $Companion
   PANGEA_REQUIRE_DOM_TESTS = '1'; PYTHONUTF8 = '1'; GIT_LFS_SKIP_SMUDGE = '1'
 }
@@ -46,6 +47,12 @@ try {
       }
     } finally { Pop-Location }
   }
+  $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+  Push-Location -LiteralPath $RepoRoot
+  try {
+    & npx --no-install vitest run --reporter=verbose test/acp-probe.test.js
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged ACP initialization probe failed.' }
+  } finally { Pop-Location }
 } finally {
   foreach ($Key in $Previous.Keys) { [Environment]::SetEnvironmentVariable($Key, $Previous[$Key], 'Process') }
 }

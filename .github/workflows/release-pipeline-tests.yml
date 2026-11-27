@@ -74,7 +74,11 @@ on:
       - build/pangea-runtime-requirements.txt
       - build/pangea-runtime-windows.lock
       - test/acp-injection-delivery.test.mjs
+      - test/acp-probe.test.js
+      - scripts/diagnose-acp-initialization.mjs
       - scripts/fixtures/acp-diagnostic-agent.mjs
+      - src/main/state/pangea-profile.ts
+      - test/audit-batch4-desktop.test.ts
       - scripts/build-pangea-desktop.ps1
       - scripts/verify-fault-injection-compat.mjs
       - scripts/test-packaged-fault-injection.ps1
@@ -171,7 +175,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $Component = (Get-Content -LiteralPath 'pangea.components.json' -Raw | ConvertFrom-Json).pangeaAgent
+          $Components = Get-Content -LiteralPath 'pangea.components.json' -Raw | ConvertFrom-Json
+          $Component = $Components.pangeaAgent
           if ($Component.commit -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid Agent commit lock.' }
           git clone --no-checkout $Component.repository .pangea-build/agent-source
           if ($LASTEXITCODE -ne 0) { throw 'Could not fetch locked Agent source.' }
@@ -179,6 +184,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Could not check out locked Agent commit.' }
           $Actual = git -C .pangea-build/agent-source rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or $Actual -cne $Component.commit) { throw 'Agent checkout differs from component lock.' }
+          $VerifyComponent = $Components.pangeaVerify
+          if ($VerifyComponent.commit -cnotmatch '^[0-9a-f]{40}$') { throw 'Invalid pangea-verify commit lock.' }
+          git clone --no-checkout $VerifyComponent.repository .pangea-build/pangea-verify
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch locked pangea-verify source.' }
+          git -C .pangea-build/pangea-verify checkout --detach $VerifyComponent.commit
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check out locked pangea-verify commit.' }
+          $ActualVerify = git -C .pangea-build/pangea-verify rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $ActualVerify -cne $VerifyComponent.commit) { throw 'pangea-verify checkout differs from component lock.' }
           python -m pip install --require-hashes -r build/pangea-runtime-windows.lock
           if ($LASTEXITCODE -ne 0) { throw 'Could not install locked Python dependencies.' }
           python -m pip install --no-deps ./.pangea-build/agent-source
@@ -187,11 +200,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Could not apply Cordis/ACP runtime patches.' }
           $Python = (Get-Command python).Source
           $Agent = (Resolve-Path -LiteralPath '.pangea-build/agent-source').Path
+          $Verify = (Resolve-Path -LiteralPath '.pangea-build/pangea-verify').Path
           $App = (Get-Location).Path
           @(
             "PANGEA_PYTHON=$Python", "PANGEA_TEST_PYTHON=$Python",
             "PANGEA_AGENT_ROOT=$Agent", "PANGEA_INTEGRATION_RUNTIME=$Agent",
-            "PANGEA_RUNTIME_ROOT=$Agent", "PYTHONPATH=$Agent/src",
+            "PANGEA_RUNTIME_ROOT=$Agent", "PANGEA_TEST_RUNTIME=$Agent",
+            "PANGEA_VERIFY_ROOT=$Verify", "PYTHONPATH=$Agent/src",
             "PANGEA_TEST_APP_ROOT=$App"
           ) | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Verify Windows fault injection compatibility through HTTP
@@ -222,6 +237,13 @@ jobs:
           $env:PANGEA_TEST_COMPANION_ROOT = (Resolve-Path '.pangea-build/plugin-source/plugins/dsh-pangea-companion').Path
           node --test test/acp-injection-delivery.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'ACP injection delivery regression failed.' }
+      - name: Verify ACP initialization probe against locked Python and Agent
+        shell: pwsh
+        env:
+          PANGEA_REQUIRE_ACP_INIT_PROBE: '1'
+        run: |
+          npx --no-install vitest run --reporter=verbose test/acp-probe.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'ACP initialization probe regression failed.' }
       - name: Assemble unsigned Windows test instance
         if: inputs.build_unsigned == true
         shell: powershell
@@ -229,7 +251,7 @@ jobs:
           $Version = "3.0.11-test.$env:GITHUB_RUN_NUMBER.$($env:GITHUB_SHA.Substring(0, 7))"
           npm version $Version --no-git-tag-version --ignore-scripts
           if ($LASTEXITCODE -ne 0) { throw 'Could not set unsigned acceptance version.' }
-          ./scripts/build-pangea-desktop.ps1 -SkipPackage -DshPangeaSource '.pangea-build/plugin-source' -PangeaAgentSource '.pangea-build/agent-source'
+          ./scripts/build-pangea-desktop.ps1 -SkipPackage -DshPangeaSource '.pangea-build/plugin-source' -PangeaAgentSource '.pangea-build/agent-source' -PangeaVerifySource '.pangea-build/pangea-verify'
           if ($LASTEXITCODE -ne 0) { throw 'Unsigned test staging failed.' }
           npm run package:dir
           if ($LASTEXITCODE -ne 0) { throw 'Unsigned win-unpacked assembly failed.' }
@@ -353,7 +375,7 @@ jobs:
           & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/verify-portable-update-progress.ps1 -FunctionsOnly
           if ($LASTEXITCODE -ne 0) { throw 'Updater progress ownership regression failed.' }
       - name: Verify import, health, recovery and task admission
-        run: npx --no-install vitest run test/portable-update-health.test.ts test/portable-package-io.test.ts test/portable-update-recovery.test.ts test/portable-update-admission.test.ts test/portable-upgrade-policy.test.ts
+        run: npx --no-install vitest run test/portable-update-health.test.ts test/portable-package-io.test.ts test/portable-update-recovery.test.ts test/portable-update-admission.test.ts test/portable-upgrade-policy.test.ts test/audit-batch4-desktop.test.ts
   windows-zero-copy:
     runs-on: windows-latest
     timeout-minutes: 40

@@ -72,8 +72,12 @@ it('writes phase evidence and a final report and refuses to overwrite an existin
     expect(await readFile(path.join(output, 'events.jsonl'), 'utf8')).toBe(original)
   } finally { await rm(root, { recursive: true, force: true }) }
 }, 20000)
-it.skipIf(!process.env.PANGEA_TEST_PYTHON || !process.env.PANGEA_TEST_RUNTIME)('initializes an isolated Run and verifies the real Python public API', async () => {
+const requireInitProbe = process.env.PANGEA_REQUIRE_ACP_INIT_PROBE === '1'
+it.skipIf(!requireInitProbe && (!process.env.PANGEA_TEST_PYTHON || !process.env.PANGEA_TEST_RUNTIME))('initializes an isolated Run and verifies the real Python public API', async () => {
+  expect(process.env.PANGEA_TEST_PYTHON, 'PANGEA_TEST_PYTHON is required').toBeTruthy()
+  expect(process.env.PANGEA_TEST_RUNTIME, 'PANGEA_TEST_RUNTIME is required').toBeTruthy()
   const report = await probe('ok', { timeoutMs: 10000, stages: ['ping', 'tool', 'init'], python: process.env.PANGEA_TEST_PYTHON, runtimeRoot: process.env.PANGEA_TEST_RUNTIME })
   expect(report.status, JSON.stringify(report)).toBe('passed')
   expect(report.state).toMatchObject({ exists: true, workflow_version: 'source-first-v1', phase: 'planning', completed: 0 })
+  console.log('[acp-probe-init]', JSON.stringify(report.state))
 }, 20000)

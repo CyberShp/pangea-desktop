@@ -30,11 +30,11 @@ interface ProfileManifest {
   dsh?: { profile?: { bundles?: string[] } }
 }
 
-async function writeIfMissing(path: string, content: string): Promise<void> {
+async function writeIfMissing(filePath: string, content: string): Promise<void> {
   try {
-    await readFile(path, 'utf8')
-  } catch {
-    await writeFile(path, content, 'utf8')
+    await writeFile(filePath, content, { encoding: 'utf8', flag: 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'EEXIST') throw error
   }
 }
 
@@ -63,10 +63,9 @@ export async function ensurePangeaWebProfile(dshHome: string): Promise<string> {
   await mkdir(directory, { recursive: true })
 
   let manifestMissing = false
-  let rawManifest = ''
   let manifest: ProfileManifest | null = null
   try {
-    rawManifest = await readFile(manifestPath, 'utf8')
+    const rawManifest = await readFile(manifestPath, 'utf8')
     const parsed = JSON.parse(rawManifest) as unknown
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       manifest = parsed as ProfileManifest
@@ -85,17 +84,39 @@ export async function ensurePangeaWebProfile(dshHome: string): Promise<string> {
 
   let nextManifestText: string | null = null
   if (manifest) {
-    manifest.dependencies ??= {}
-    for (const bundle of LEGACY_PANGEA_BUNDLES) delete manifest.dependencies[bundle]
-    manifest.dsh ??= {}
-    manifest.dsh.profile ??= {}
-    const bundles = (manifest.dsh.profile.bundles ?? []).filter(
+    let manifestChanged = manifestMissing
+    if (!manifest.dependencies || typeof manifest.dependencies !== 'object' || Array.isArray(manifest.dependencies)) {
+      manifest.dependencies = {}
+      manifestChanged = true
+    }
+    for (const bundle of LEGACY_PANGEA_BUNDLES) {
+      if (Object.hasOwn(manifest.dependencies, bundle)) {
+        delete manifest.dependencies[bundle]
+        manifestChanged = true
+      }
+    }
+    if (!manifest.dsh || typeof manifest.dsh !== 'object' || Array.isArray(manifest.dsh)) {
+      manifest.dsh = {}
+      manifestChanged = true
+    }
+    if (!manifest.dsh.profile || typeof manifest.dsh.profile !== 'object' || Array.isArray(manifest.dsh.profile)) {
+      manifest.dsh.profile = {}
+      manifestChanged = true
+    }
+    const existingBundles = Array.isArray(manifest.dsh.profile.bundles) ? manifest.dsh.profile.bundles : null
+    if (!existingBundles) manifestChanged = true
+    const bundles = (existingBundles ?? []).filter(
       (bundle) => !LEGACY_PANGEA_BUNDLES.includes(bundle as typeof LEGACY_PANGEA_BUNDLES[number])
     )
-    if (!bundles.includes(PANGEA_CORE_BUNDLE)) bundles.push(PANGEA_CORE_BUNDLE)
-    manifest.dsh.profile.bundles = bundles
-    const serialized = `${JSON.stringify(manifest, undefined, 2)}\n`
-    if (manifestMissing || serialized !== rawManifest) nextManifestText = serialized
+    if (existingBundles && bundles.length !== existingBundles.length) manifestChanged = true
+    if (!bundles.includes(PANGEA_CORE_BUNDLE)) {
+      bundles.push(PANGEA_CORE_BUNDLE)
+      manifestChanged = true
+    }
+    if (manifestChanged) {
+      manifest.dsh.profile.bundles = bundles
+      nextManifestText = `${JSON.stringify(manifest, undefined, 2)}\n`
+    }
   }
 
   const patchPath = join(directory, 'cordis.patch.yml')

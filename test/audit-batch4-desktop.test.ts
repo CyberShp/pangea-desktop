@@ -26,18 +26,34 @@ describe('Audit Batch 4 regressions (#42, #43, #45)', () => {
         await ensurePangeaWebProfile(cleanRoot)
         const roPatch = path.join(cleanRoot, 'profiles', 'web', 'cordis.patch.yml')
         const roPkg = path.join(cleanRoot, 'profiles', 'web', 'package.json')
+        const roWs = path.join(cleanRoot, 'profiles', 'web', 'pnpm-workspace.yaml')
+
+        // Compact JSON with identical logical manifest + 0444 must not be rewritten (bytes, inode, mode intact)
+        const compactManifest = JSON.stringify(JSON.parse(await readFile(roPkg, 'utf8')))
+        await writeFile(roPkg, compactManifest, 'utf8')
+        const customWorkspace = 'packages:\n  - custom-workspace\n'
+        await writeFile(roWs, customWorkspace, 'utf8')
+
         const beforePatchStat = await stat(roPatch)
         const beforePkgStat = await stat(roPkg)
         await chmod(roPatch, 0o444)
         await chmod(roPkg, 0o444)
+        if (process.platform !== 'win32') await chmod(roWs, 0o200)
         try {
           await ensurePangeaWebProfile(cleanRoot)
+          const afterPkgStat = await stat(roPkg)
           expect((await stat(roPatch)).mtimeMs).toBe(beforePatchStat.mtimeMs)
-          expect((await stat(roPkg)).mtimeMs).toBe(beforePkgStat.mtimeMs)
+          expect(afterPkgStat.ino).toBe(beforePkgStat.ino)
+          expect(await readFile(roPkg, 'utf8')).toBe(compactManifest)
+          if (process.platform !== 'win32') {
+            expect(afterPkgStat.mode & 0o777).toBe(0o444)
+          }
         } finally {
           await chmod(roPatch, 0o644)
           await chmod(roPkg, 0o644)
+          if (process.platform !== 'win32') await chmod(roWs, 0o644)
         }
+        expect(await readFile(roWs, 'utf8')).toBe(customWorkspace)
       } finally {
         await rm(cleanRoot, { recursive: true, force: true })
       }
@@ -46,11 +62,12 @@ describe('Audit Batch 4 regressions (#42, #43, #45)', () => {
     }
   })
 
-  it('#43 forceStop timeout releases admission lock so new tasks and retries are not blocked indefinitely', async () => {
+  it('#43 forceStop timeout releases admission lock while blocking freeze and retry forceStop until unfinished cleanup settles', async () => {
     const admission = new UpdateAdmission(() => [], ['companion'])
     const gate: { resolve: (() => void) | null } = { resolve: null }
     let stopCalls = 0
-    admission.registerParticipant('companion', () => gate.resolve !== null, () => {
+    // Foreground work is already idle (checkBusy returns false) while async cleanup hangs
+    admission.registerParticipant('companion', () => false, () => {
       stopCalls += 1
       if (stopCalls === 1) {
         return new Promise<void>(resolve => { gate.resolve = resolve })
@@ -59,7 +76,7 @@ describe('Audit Batch 4 regressions (#42, #43, #45)', () => {
     })
 
     await expect(admission.forceStop('audit-token-000001', { timeoutMs: 80 })).rejects.toThrow(/强制停止超时/)
-    // After timeout, workbench must not be stuck frozen
+    // After timeout, workbench must not be stuck frozen (normal work can proceed)
     expect(() => admission.assertOpen()).not.toThrow()
     expect(admission.status()).toMatchObject({
       ok: true,
@@ -69,13 +86,37 @@ describe('Audit Batch 4 regressions (#42, #43, #45)', () => {
     })
     expect(admission.release('audit-token-000001')).toEqual({ ok: true, frozen: false })
 
-    // Once the hung stopper settles, a subsequent forceStop succeeds cleanly
+    // While cleanup #1 is STILL unfinished, normal freeze with a new token MUST be rejected as busy
+    expect(() => admission.freeze('audit-token-000002')).toThrow(/仍有运行、排队或收尾中的任务/)
+    expect(admission.status()).toMatchObject({
+      ok: true,
+      frozen: false,
+      pendingStoppers: ['companion'],
+    })
+
+    // Retrying forceStop while cleanup #1 is STILL unfinished MUST NOT bypass or clear pendingStoppers
+    await expect(admission.forceStop('audit-token-000003', { timeoutMs: 80 })).rejects.toThrow(/强制停止超时/)
+    expect(stopCalls).toBe(1)
+    expect(() => admission.assertOpen()).not.toThrow()
+    expect(admission.status()).toMatchObject({
+      ok: true,
+      frozen: false,
+      forcing: false,
+      pendingStoppers: ['companion'],
+    })
+
+    // Once the hung stopper finally settles, pendingStoppers clears and freeze/forceStop succeed cleanly
     gate.resolve?.()
     gate.resolve = null
     await new Promise(r => setTimeout(r, 20))
-    const ok = await admission.forceStop('audit-token-000002', { timeoutMs: 200 })
-    expect(ok).toEqual({ ok: true, frozen: true, token: 'audit-token-000002' })
-    expect(admission.release('audit-token-000002')).toEqual({ ok: true, frozen: false })
+    expect(admission.status()).toMatchObject({
+      ok: true,
+      frozen: false,
+      pendingStoppers: [],
+    })
+    const ok = await admission.forceStop('audit-token-000004', { timeoutMs: 200 })
+    expect(ok).toEqual({ ok: true, frozen: true, token: 'audit-token-000004' })
+    expect(admission.release('audit-token-000004')).toEqual({ ok: true, frozen: false })
   })
 
   it('#45 parseCapturedShellOutput handles both NUL-delimited and newline-fallback env after ENV_START_MARKER', () => {

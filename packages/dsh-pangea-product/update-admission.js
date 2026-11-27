@@ -21,11 +21,28 @@ export class UpdateAdmission {
     this.requiredParticipants = requiredParticipants
     this.participants = new Map()
     this.stoppers = new Map()
+    this.pendingStoppers = new Map()
     this.inFlight = 0
     this.token = null
   }
   assertOpen() {
     if (this.token) throw failure('PANGEA_UPDATE_FROZEN', FROZEN_MESSAGE)
+  }
+  _busyReasons() {
+    const busy = this.inFlight ? ['在途请求或工具操作'] : []
+    busy.push(...this.checkBusy())
+    for (const [id, check] of this.participants) if (check()) busy.push(id)
+    for (const id of this.pendingStoppers.keys()) busy.push(id)
+    return [...new Set(busy)]
+  }
+  _trackStopper(id, operation) {
+    const existing = this.pendingStoppers.get(id)
+    if (existing) return existing
+    const run = Promise.resolve().then(operation).finally(() => {
+      if (this.pendingStoppers.get(id) === run) this.pendingStoppers.delete(id)
+    })
+    this.pendingStoppers.set(id, run)
+    return run
   }
   // Keep synchronous APIs synchronous, and keep admission until async work
   // settles. Nested calls are deliberately counted too: zero is authoritative.
@@ -58,10 +75,8 @@ export class UpdateAdmission {
     try {
       const missing = this.requiredParticipants.filter(id => !this.participants.has(id))
       if (missing.length) throw failure('PANGEA_UPDATE_UNAVAILABLE', `升级任务检查尚未就绪：${missing.join(', ')}。请重启工作台后重试。`)
-      const busy = this.inFlight ? ['在途请求或工具操作'] : []
-      busy.push(...this.checkBusy())
-      for (const [id, check] of this.participants) if (check()) busy.push(id)
-      if (busy.length && !allowBusy) throw failure('PANGEA_UPDATE_BUSY', `当前仍有运行、排队或收尾中的任务，请结束后再升级（${[...new Set(busy)].join('、')}）。`)
+      const busy = this._busyReasons()
+      if (busy.length && !allowBusy) throw failure('PANGEA_UPDATE_BUSY', `当前仍有运行、排队或收尾中的任务，请结束后再升级（${busy.join('、')}）。`)
       return { ok: true, frozen: true, token }
     } catch (error) {
       this.token = null
@@ -72,7 +87,6 @@ export class UpdateAdmission {
     if (this.forcing) throw failure('PANGEA_UPDATE_BUSY', '正在强制停止任务，请等待清理完成。')
     this.freeze(token, true)
     this.forcing = true
-    this.pendingStoppers = new Set()
     const deadline = Date.now() + Math.max(50, Number(timeoutMs) || 15000)
     const remainingMs = () => Math.max(0, deadline - Date.now())
     const raceDeadline = promise => new Promise((resolve, reject) => {
@@ -87,11 +101,18 @@ export class UpdateAdmission {
     try {
       const missing = this.requiredParticipants.filter(id => !this.stoppers.has(id))
       if (missing.length) throw failure('PANGEA_UPDATE_UNAVAILABLE', `当前组件不支持强制停止：${missing.join('、')}。`)
-      const stopperRuns = [...this.stoppers.entries()].map(([id, stop]) => {
-        this.pendingStoppers.add(id)
-        return Promise.resolve().then(stop).finally(() => {
-          this.pendingStoppers.delete(id)
-        })
+      const stopperIds = new Set([...this.pendingStoppers.keys(), ...this.stoppers.keys()])
+      const stopperRuns = [...stopperIds].map(async id => {
+        const existing = this.pendingStoppers.get(id)
+        if (existing) {
+          await existing
+          const check = this.participants.get(id)
+          const stop = this.stoppers.get(id)
+          if (check?.() && stop) await this._trackStopper(id, stop)
+          return
+        }
+        const stop = this.stoppers.get(id)
+        if (stop) await this._trackStopper(id, stop)
       })
       const results = await raceDeadline(Promise.allSettled(stopperRuns))
       const errors = results.filter(result => result.status === 'rejected')
@@ -103,7 +124,7 @@ export class UpdateAdmission {
         await new Promise(resolve => setTimeout(resolve, Math.min(50, Math.max(1, remainingMs()))))
       }
       if (this.cleanupProcesses) {
-        await raceDeadline(Promise.resolve().then(() => this.cleanupProcesses()))
+        await raceDeadline(this._trackStopper('processes', () => this.cleanupProcesses()))
       }
       return { ok: true, frozen: true, token }
     } catch (error) {
@@ -115,15 +136,12 @@ export class UpdateAdmission {
     }
   }
   status() {
-    const busy = this.inFlight ? ['在途请求或工具操作'] : []
-    busy.push(...this.checkBusy())
-    for (const [id, check] of this.participants) if (check()) busy.push(id)
     return {
       ok: true,
       frozen: Boolean(this.token),
       forcing: Boolean(this.forcing),
-      busy: [...new Set(busy)],
-      pendingStoppers: [...(this.pendingStoppers ?? [])],
+      busy: this._busyReasons(),
+      pendingStoppers: [...this.pendingStoppers.keys()],
     }
   }
   release(token) {
