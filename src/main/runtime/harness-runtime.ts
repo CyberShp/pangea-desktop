@@ -67,7 +67,8 @@ function execFileText(file: string, args: string[], timeout: number): Promise<st
 export function parseCapturedShellOutput(output: string, fallbackSeparator: RegExp): NodeJS.ProcessEnv {
   const markerIndex = output.lastIndexOf(ENV_START_MARKER)
   if (markerIndex >= 0) {
-    return parseEnvOutput(output.slice(markerIndex + ENV_START_MARKER.length), /\0/)
+    const body = output.slice(markerIndex + ENV_START_MARKER.length)
+    return parseEnvOutput(body, body.includes('\0') ? /\0/ : fallbackSeparator)
   }
   return parseEnvOutput(output, output.includes('\0') ? /\0/ : fallbackSeparator)
 }

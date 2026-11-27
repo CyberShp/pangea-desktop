@@ -98,8 +98,8 @@ export async function diagnose({ providerName, cwd, env = process.env, python, r
       if (phase === 'init') {
         report.scratch = await mkdtemp(path.join(tmpdir(), 'pangea-acp-probe-'))
         prepared = JSON.parse(await timed(() => command([python, '-X', 'utf8', path.join(import.meta.dirname, 'prepare-acp-probe.py'), 'prepare', runtimeRoot, report.scratch], 65536)))
-        const initArgs = [python, '-X', 'utf8', path.join(prepared.skill.root_path, 'scripts', 'run_guard.py'), 'init', '--skill-root', prepared.skill.root_path, '--workspace', prepared.run_root, '--source-raw', path.join(report.scratch, 'data', 'repositories', 'acp-probe'), '--source-verified', path.join(prepared.run_root, 'inputs', 'source', 'repository'), '--scenario', 'module-analysis', '--mode', 'speed']
-        current = run.continuePrompt(blocks(`This is an isolated initialization check. Read request_path=${prepared.request_path} and its frozen SKILL.md. Use Python executable ${python} to execute only run_guard.py init for run_root=${prepared.run_root}. In PowerShell use & with quoted paths. Stop after init; do not execute any workflow stage. On host blockage report the command, exit code and brief error, then stop. Do not search host configuration, credentials or historical logs.\nInitialization arguments (JSON): ${JSON.stringify(initArgs)}`))
+        const initArgs = [python, '-X', 'utf8', path.join(import.meta.dirname, 'prepare-acp-probe.py'), 'init', runtimeRoot, report.scratch]
+        current = run.continuePrompt(blocks(`This is an isolated initialization check. Read contract_path=${prepared.contract_path}. Use Python executable ${python} to initialize the source-first-v1 Run for run_root=${prepared.run_root}. In PowerShell use & with quoted paths. Stop after init; do not execute any workflow stage. On host blockage report the command, exit code and brief error, then stop. Do not search host configuration, credentials or historical logs.\nInitialization arguments (JSON): ${JSON.stringify(initArgs)}`))
       }
       const before = phase === 'ping' ? { toolCalls: 0, toolFailures: 0 } : run.readDiagnostics()
       const result = await timed(() => current)
@@ -115,11 +115,11 @@ export async function diagnose({ providerName, cwd, env = process.env, python, r
       let observed = phase === 'ping' ? output.includes('PANGEA_PING_OK') : phase === 'tool' ? details.toolCalls > before.toolCalls && details.toolOutput.includes('PANGEA_TOOL_OK') : false
       let state
       if (phase === 'init') {
-        const statePath = path.join(prepared.run_root, '内部索引', '运行状态.json')
+        const statePath = path.join(prepared.run_root, 'progress.json')
         const exists = await access(statePath).then(() => true, () => false)
         state = JSON.parse(await timed(() => command([python, '-X', 'utf8', path.join(import.meta.dirname, 'prepare-acp-probe.py'), 'read', runtimeRoot, report.scratch], 65536)))
-        observed = exists && state.phase === 'STEP_BOOTSTRAP'
-        report.state = { path: statePath, exists, phase: state.phase, completed: state.completed_steps.length }
+        observed = exists && state.workflow_version === 'source-first-v1' && state.phase === 'planning'
+        report.state = { path: statePath, exists, workflow_version: state.workflow_version, phase: state.phase, completed: Array.isArray(state.completed_steps) ? state.completed_steps.length : 0 }
       }
       const passed = observed && result.stopReason === 'completed' && details.toolFailures === before.toolFailures
       const item = { phase, status: passed ? 'passed' : 'failed', durationMs: Date.now() - phaseStarted, marker: observed ? 'observed' : 'not_observed', timedOut, stopReason: result.stopReason, protocolStopReason: result.protocolStopReason, messageChunks: details.messageChunks, toolCalls: details.toolCalls, toolFailures: details.toolFailures, errorCode: details.errorCode, errorSummary: diagnosticText(details.errorSummary), stderrSummary: diagnosticText(details.stderrSummary),

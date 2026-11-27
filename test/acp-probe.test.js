@@ -75,5 +75,5 @@ it('writes phase evidence and a final report and refuses to overwrite an existin
 it.skipIf(!process.env.PANGEA_TEST_PYTHON || !process.env.PANGEA_TEST_RUNTIME)('initializes an isolated Run and verifies the real Python public API', async () => {
   const report = await probe('ok', { timeoutMs: 10000, stages: ['ping', 'tool', 'init'], python: process.env.PANGEA_TEST_PYTHON, runtimeRoot: process.env.PANGEA_TEST_RUNTIME })
   expect(report.status, JSON.stringify(report)).toBe('passed')
-  expect(report.state).toMatchObject({ exists: true, phase: 'STEP_BOOTSTRAP', completed: 0 })
+  expect(report.state).toMatchObject({ exists: true, workflow_version: 'source-first-v1', phase: 'planning', completed: 0 })
 }, 20000)

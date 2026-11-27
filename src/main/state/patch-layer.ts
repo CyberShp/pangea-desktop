@@ -65,6 +65,7 @@ export function prunePatchLayer(text: string, plugin: string, entryIds: readonly
   } catch {
     return { text, removed: [] }
   }
+  if (document.errors.length > 0) return { text, removed: [] }
   const contents = document.contents
   if (!isSeq(contents)) return { text, removed: [] }
 

@@ -68,24 +68,43 @@ export class UpdateAdmission {
       throw error
     }
   }
-  async forceStop(token) {
+  async forceStop(token, { timeoutMs = 15000 } = {}) {
     if (this.forcing) throw failure('PANGEA_UPDATE_BUSY', '正在强制停止任务，请等待清理完成。')
     this.freeze(token, true)
     this.forcing = true
+    this.pendingStoppers = new Set()
+    const deadline = Date.now() + Math.max(50, Number(timeoutMs) || 15000)
+    const remainingMs = () => Math.max(0, deadline - Date.now())
+    const raceDeadline = promise => new Promise((resolve, reject) => {
+      const ms = remainingMs()
+      if (ms <= 0) return reject(failure('PANGEA_UPDATE_BUSY', '强制停止超时，已解除阻塞；仍有任务正在收尾，请稍后查询或重试强制停止。'))
+      const timer = setTimeout(() => reject(failure('PANGEA_UPDATE_BUSY', '强制停止超时，已解除阻塞；仍有任务正在收尾，请稍后查询或重试强制停止。')), ms)
+      promise.then(
+        value => { clearTimeout(timer); resolve(value) },
+        error => { clearTimeout(timer); reject(error) },
+      )
+    })
     try {
       const missing = this.requiredParticipants.filter(id => !this.stoppers.has(id))
       if (missing.length) throw failure('PANGEA_UPDATE_UNAVAILABLE', `当前组件不支持强制停止：${missing.join('、')}。`)
-      const results = await Promise.allSettled([...this.stoppers.values()].map(stop => Promise.resolve().then(stop)))
+      const stopperRuns = [...this.stoppers.entries()].map(([id, stop]) => {
+        this.pendingStoppers.add(id)
+        return Promise.resolve().then(stop).finally(() => {
+          this.pendingStoppers.delete(id)
+        })
+      })
+      const results = await raceDeadline(Promise.allSettled(stopperRuns))
       const errors = results.filter(result => result.status === 'rejected')
       if (errors.length) throw failure('PANGEA_UPDATE_BUSY', errors.map(result => result.reason?.message ?? String(result.reason)).join('；'))
       // Requests admitted before the freeze may still be unwinding. Never
       // hand off the installation while their writers are alive.
-      const deadline = Date.now() + 15000
-      while (this.inFlight || this.checkBusy().length || [...this.participants.values()].some(check => check())) {
-        if (Date.now() >= deadline) throw failure('PANGEA_UPDATE_BUSY', '停止尚未确认，已保留升级包，请重试强制停止。')
-        await new Promise(resolve => setTimeout(resolve, 50))
+      while (this.inFlight || this.checkBusy().length || [...this.participants.values()].some(check => check()) || this.pendingStoppers.size > 0) {
+        if (Date.now() >= deadline) throw failure('PANGEA_UPDATE_BUSY', '停止尚未确认，已保留升级包并解除阻塞，请重试强制停止。')
+        await new Promise(resolve => setTimeout(resolve, Math.min(50, Math.max(1, remainingMs()))))
       }
-      await this.cleanupProcesses?.()
+      if (this.cleanupProcesses) {
+        await raceDeadline(Promise.resolve().then(() => this.cleanupProcesses()))
+      }
       return { ok: true, frozen: true, token }
     } catch (error) {
       this.token = null
@@ -93,6 +112,18 @@ export class UpdateAdmission {
     } finally {
       this.forcing = false
       if (this.releaseRequested === token) { this.token = null; this.releaseRequested = null }
+    }
+  }
+  status() {
+    const busy = this.inFlight ? ['在途请求或工具操作'] : []
+    busy.push(...this.checkBusy())
+    for (const [id, check] of this.participants) if (check()) busy.push(id)
+    return {
+      ok: true,
+      frozen: Boolean(this.token),
+      forcing: Boolean(this.forcing),
+      busy: [...new Set(busy)],
+      pendingStoppers: [...(this.pendingStoppers ?? [])],
     }
   }
   release(token) {
@@ -128,8 +159,13 @@ export function createControlHandler(admission) {
         if (body.length > 2048) throw failure('PANGEA_UPDATE_BAD_REQUEST', '升级请求过大。')
       }
       const input = JSON.parse(body)
-      if (!['freeze', 'force-stop', 'release'].includes(input.action)) throw failure('PANGEA_UPDATE_BAD_REQUEST', '未知升级操作。')
-      json(res, 200, await (input.action === 'force-stop' ? admission.forceStop(input.token) : admission[input.action](input.token)))
+      if (!['freeze', 'force-stop', 'release', 'status'].includes(input.action)) throw failure('PANGEA_UPDATE_BAD_REQUEST', '未知升级操作。')
+      const result = input.action === 'force-stop'
+        ? await admission.forceStop(input.token)
+        : input.action === 'status'
+          ? admission.status()
+          : await admission[input.action](input.token)
+      json(res, 200, result)
     } catch (error) {
       json(res, error.code === 'PANGEA_UPDATE_BUSY' ? 409 : 400, {
         ok: false, code: error.code ?? 'PANGEA_UPDATE_UNAVAILABLE', message: error.message,
