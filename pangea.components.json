@@ -13,7 +13,7 @@
   "pangeaAgent": {
     "repository": "https://github.com/CyberShp/pangea-agent.git",
     "branch": "langgraph",
-    "commit": "514fc816c3f04f91f69129bd533ab301977f6b3c"
+    "commit": "015e8cf51b719375f825e9d072edca1d128c9106"
   },
   "pangeaVerify": {
     "repository": "https://github.com/CyberShp/pangea-verify.git",
